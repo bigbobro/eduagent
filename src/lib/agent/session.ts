@@ -142,24 +142,3 @@ export async function* streamUserInput(
 
   yield { type: 'done' };
 }
-
-// 临时兼容层:Task 7 把 chat route 切到 streamUserInput 后,这个 export 会被删除
-export async function processUserInput(
-  sessionId: string,
-  userText: string,
-  asrResult?: { latency: number; tokens: number }
-): Promise<{ response: AgentResponse; session: Session }> {
-  let speech = '';
-  let actions: ToolAction[] = [];
-  let stateUpdate: AgentResponse['state_update'] = {};
-  for await (const ev of streamUserInput(sessionId, userText, asrResult)) {
-    if (ev.type === 'speech-delta') speech += ev.text;
-    if (ev.type === 'actions') {
-      actions = ev.actions;
-      stateUpdate = ev.state_update;
-    }
-    if (ev.type === 'error') throw new Error(ev.message);
-  }
-  const session = sessions.get(sessionId)!;
-  return { response: { speech, actions, state_update: stateUpdate }, session };
-}
