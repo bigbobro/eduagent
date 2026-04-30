@@ -85,6 +85,39 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 
 测试不挂才能 commit。改了某个模块一定要看相关的单测是否仍然合理(typecheck 过 ≠ 行为对)。
 
+## 测试自动化原则(强制)
+
+**Claude 是 coding agent,用户的角色是提需求 + 做决策,不是替我跑测试。** 任何让用户做反复手工动作的"E2E 验证",都是 plan 阶段没把自动化想全。
+
+### 默认就要自动化
+
+写 spec / plan 时,**集成测试方案是独立小节**,不能只列单测就完事:
+
+- **语音/音频**:TTS 生成 fixture audio 喂给 ASR(中英标准句缓存 `tests/fixtures/audio/*.pcm`),不用真人麦克风
+- **浏览器交互**:Playwright,模拟键盘 / pointer / WebSocket
+- **摄像头/麦克风**:fake media stream(Chrome `--use-fake-device-for-media-stream` flag、`navigator.mediaDevices` mock)
+- **第三方 API**:smoke test 用真 endpoint;regression test 录回放(VCR / nock)
+- **状态机**:抽纯逻辑单测 + 集成测用 fake transport
+- **时序 bug**(像握手延迟丢 PCM):故意 sleep / delay shim 触发,验证 buffer
+
+### 真不能自动化才让用户做(少数情况)
+
+- 主观体验(音色 / 动画顺滑度)
+- 无法 mock 的硬件物理(实体麦克风噪声)
+- 用户最终验收决策(是否符合产品意图)
+
+**协议错、配置错、状态机错、时序错、并发错 — 都能自动复现 + 自动断言。**
+
+### 反例(本项目曾经踩的)
+
+- ❌ "按住空格说一句话,看 console 出几行 [bench]"重复 5 轮找"按下 3 秒才识别" — 应该是 TTS 生成 fixture audio + ASR 测试 1 分钟跑完
+- ❌ 让用户贴 dev server log + 浏览器 Console error 多轮 — 应该集成测能直接 capture stderr/stdout 断言
+- ✅ 让用户审 actions 跟 TTS 时序"跳得快"那种主观体感 — 这个真没法自动
+
+### 当我说"你跑一下看看"之前
+
+先反问自己:**这句话能换成"我跑了 X 验证了 Y"吗?** 能就自己跑;不能,先解释为什么必须用户做 + 我考虑过哪些自动化替代。
+
 ## 提交风格
 
 - 单行 subject:`fix(voice): ...` / `feat(...)` / `docs(...)` / `chore(...)`
