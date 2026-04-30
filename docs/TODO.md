@@ -1,5 +1,14 @@
 # EduAgent TODO — 下次开发任务
 
+## 0. 验收过程发现的待办(2026-05-01)
+
+- [ ] **课程 Session resume** — 当前刷新 / 断网 = 课程中断。每次上课应该有一个 session,断网/刷新后能 resume 到上次的 phase / state / 已学词汇。涉及:server 端 session 持久化(SQLite 已有 lessons/turns 表可扩展)、client 端 reconnect 时拉取最新 state、UI"恢复上次进度"提示。
+- [ ] **actions 与 TTS 时序对齐** — 现状是 LLM JSON 解析完 actions 字段就立刻 emit 到画布,但 TTS 还在慢慢播。结果"AI 还在说'这是飞机'但画布已经高亮了下一张图"。可选方案:
+  - 简单:actions 等 TTS `session-finished`(整段说完)再触发 — 字幕完成度好但牺牲实时感
+  - 中等:actions 跟随 TTS `TTSSentenceStart` 事件分批触发,LLM 每句对应一个 action
+  - 复杂:LLM 在 speech 文本里 inline 标 anchor(如"这是 [show:boat] 船"),按文字到达 PCM 时戳触发
+  - spec §6 字幕领先策略当初是接受的,但实测画布跳得太快还是别扭。
+
 ## 1. 补全 Spec 遗留功能
 
 - [ ] **词汇表现追踪** — 在 session.ts 中实现 markWordCorrect/Incorrect,每次学生说完后判断是否涉及目标词汇,写入 word_performance 表

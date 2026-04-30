@@ -55,9 +55,9 @@
 | 17 | 402.3 | 638 | 4100 | 6113 | 6791 | "哪一个?我没看到。" |
 | 18 | — | timeout | — | — | — | 同 r7 |
 
-## 测量打点位置(参考)
+## 测量打点位置(已删除)
 
-`src/lib/voice/lesson-controller.ts` 当前**仍持有 `[bench]` 打点代码**(`benchTRelease/benchRound/benchFirstTokenLogged/benchFirstPcmLogged/benchRoundTripLogged` 5 个字段 + 4 处 console.log)。后续如果不再做基线对比测,Task #28 处理移除;如果要做"优化前/后"对比,先保留。
+`src/lib/voice/lesson-controller.ts` 的 `[bench]` 打点代码(`benchTRelease/benchRound/benchFirstTokenLogged/benchFirstPcmLogged/benchRoundTripLogged` 5 个字段 + 4 处 console.log)在验收完成后已经删除。后续如果要再做"优化前/后"对比,可参考 git 历史 commit `2ea7b89` 之前的版本恢复。
 
 ## 备注
 

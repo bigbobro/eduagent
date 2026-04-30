@@ -32,13 +32,6 @@ export class LessonController {
   private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
   private listenStartedAt = 0;
 
-  // ─── BENCH 打点(验收完删除)─────────────────────────────────────
-  private benchTRelease = 0;
-  private benchRound = 0;
-  private benchFirstTokenLogged = false;
-  private benchFirstPcmLogged = false;
-  private benchRoundTripLogged = false;
-
   on(event: EventName, fn: Listener): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(fn);
@@ -182,14 +175,6 @@ export class LessonController {
       this.setState('awaiting');
       return;
     }
-    // ─── BENCH 打点 ───
-    this.benchTRelease = performance.now();
-    this.benchRound += 1;
-    this.benchFirstTokenLogged = false;
-    this.benchFirstPcmLogged = false;
-    this.benchRoundTripLogged = false;
-    console.log(`[bench] ───── round ${this.benchRound} release at ${new Date().toISOString().slice(11, 23)} ─────`);
-    // ─────────────────
     await this.stopRecording();
     // 关键:不能立刻 close — close 会让 proxy 立刻断 upstream,豆包没机会回 final。
     // 改发 finish 控制帧:proxy 转发负序号终止包给豆包,等 final 自然返回再 close。
@@ -200,7 +185,6 @@ export class LessonController {
     this.asrFinalTimer = setTimeout(() => {
       this.asrFinalTimer = null;
       if (this.state !== 'thinking') return;
-      console.warn('[asr] final timeout — recovering to awaiting');
       this.emit('error', { message: '没听清呢~再说一次' });
       try { this.asr?.close(); } catch {}
       this.asr = null;
@@ -225,11 +209,6 @@ export class LessonController {
       clearTimeout(this.asrFinalTimer);
       this.asrFinalTimer = null;
     }
-    // ─── BENCH 打点 ───
-    if (this.benchTRelease > 0) {
-      console.log(`[bench] r${this.benchRound} asr_final ${Math.round(performance.now() - this.benchTRelease)}ms — "${text.slice(0, 40)}"`);
-    }
-    // ─────────────────
     // 收到 final 才 close ASR WS — 之前 stopListening 用 finish() 让 proxy 等 final
     this.asr?.close();
     this.asr = null;
@@ -272,21 +251,9 @@ export class LessonController {
       // 全部丢弃 — 否则 player.stop() 后又被新 enqueue 重新启动播放。
       // 等下一轮 AI 回应时,handleSseEvent 会切到 speaking,届时不再被 guard 拦。
       if (this.state === 'listening' || this.state === 'thinking') return;
-      // ─── BENCH 打点 ───
-      if (this.benchTRelease > 0 && !this.benchFirstPcmLogged) {
-        this.benchFirstPcmLogged = true;
-        console.log(`[bench] r${this.benchRound} first_pcm ${Math.round(performance.now() - this.benchTRelease)}ms`);
-      }
-      // ─────────────────
       this.player.enqueue(pcm);
     });
     this.tts.on('session-finished', () => {
-      // ─── BENCH 打点 ───
-      if (this.benchTRelease > 0 && !this.benchRoundTripLogged) {
-        this.benchRoundTripLogged = true;
-        console.log(`[bench] r${this.benchRound} round_trip ${Math.round(performance.now() - this.benchTRelease)}ms`);
-      }
-      // ─────────────────
       if (this.state === 'speaking' || this.state === 'greeting') {
         this.setState('awaiting');
       }
@@ -357,12 +324,6 @@ export class LessonController {
       case 'speech-delta':
         ensureTtsSession();
         onFirstSpeech();
-        // ─── BENCH 打点 ───
-        if (this.benchTRelease > 0 && !this.benchFirstTokenLogged) {
-          this.benchFirstTokenLogged = true;
-          console.log(`[bench] r${this.benchRound} llm_first_token ${Math.round(performance.now() - this.benchTRelease)}ms`);
-        }
-        // ─────────────────
         this.tts.sendText(payload.text);
         break;
       case 'speech-end':
