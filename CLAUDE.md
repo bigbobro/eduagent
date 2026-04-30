@@ -87,9 +87,19 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 
 ## 测试自动化原则(强制)
 
-**Claude 是 coding agent,用户的角色是提需求 + 做决策,不是替我跑测试。** 任何让用户做反复手工动作的"E2E 验证",都是 plan 阶段没把自动化想全。
+**Claude 是 coding agent,用户的角色是提需求 + 做决策,不是替我跑测试,也不是替我看日志找 bug。**
 
-### 默认就要自动化
+### A. 自验证职责(基础,每次改代码都要做)
+
+**改完代码,先自己跑通 + 自己加日志,通了才交付用户。**
+
+1. 写新服务 / 加新 endpoint 时,同步加 `console.log` / logger:入口、关键分支、**error path 必加**、出口前。问自己"这服务挂了我能从日志看出哪一步挂吗?"不能就再加。
+2. 改完代码先自己 `pnpm run dev`(`run_in_background: true`)+ `curl` / `wscat` / 小 node 脚本 hit endpoint + 看 stdout/stderr。通了才告诉用户"可以测"。
+3. 看到 stack trace 自己去 fix,不要扔给用户问"是不是 X 配错了"。
+4. 真不能自己验证的场合(浏览器麦克风、主观体感)— 至少把"server 这一侧"自己跑通,只留前端交互给用户。
+5. **不能把"用户跑一下看看"当 fallback**。这句话出现之前,先反问"我跑了 X 验证了 Y 吗?"
+
+### B. 集成 / E2E 自动化(系统层,plan 阶段就要列)
 
 写 spec / plan 时,**集成测试方案是独立小节**,不能只列单测就完事:
 
@@ -111,12 +121,9 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 ### 反例(本项目曾经踩的)
 
 - ❌ "按住空格说一句话,看 console 出几行 [bench]"重复 5 轮找"按下 3 秒才识别" — 应该是 TTS 生成 fixture audio + ASR 测试 1 分钟跑完
-- ❌ 让用户贴 dev server log + 浏览器 Console error 多轮 — 应该集成测能直接 capture stderr/stdout 断言
-- ✅ 让用户审 actions 跟 TTS 时序"跳得快"那种主观体感 — 这个真没法自动
-
-### 当我说"你跑一下看看"之前
-
-先反问自己:**这句话能换成"我跑了 X 验证了 Y"吗?** 能就自己跑;不能,先解释为什么必须用户做 + 我考虑过哪些自动化替代。
+- ❌ asr-proxy 改完直接交付,没自己起 server smoke,等用户报"8 秒 timeout"才加诊断 log → 让用户再测贴 log。**正确做法**:改 proxy 当下就加诊断 log,自己起 server + 写小脚本 ws.connect 模拟客户端,看 server stdout 有没有走预期路径
+- ❌ 让用户贴"dev server 终端最近 30 行"多轮 — 应该 `run_in_background: true` 起 dev,自己 Read output file
+- ✅ 让用户审 actions 跟 TTS 时序"跳得快"主观体感 — 这个真没法自动
 
 ## 提交风格
 
