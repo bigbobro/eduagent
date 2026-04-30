@@ -153,3 +153,13 @@ export function getMessagesForLLM(memory: LessonMemory): { role: string; content
     content: m.content,
   }));
 }
+
+// 流式版本:speech 完整(从 SpeechExtractor 拿到的纯字符串)、actions、state_update 一并 commit
+export function commitAssistantStreamResult(
+  memory: LessonMemory,
+  speech: string,
+  actions: AgentResponse['actions'],
+  stateUpdate: AgentResponse['state_update']
+): LessonMemory {
+  return addAssistantMessage(memory, { speech, actions, state_update: stateUpdate });
+}
