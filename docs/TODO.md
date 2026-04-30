@@ -2,7 +2,7 @@
 
 ## 0. 验收过程发现的待办(2026-05-01)
 
-- [ ] **课程 Session resume** — 当前刷新 / 断网 = 课程中断。每次上课应该有一个 session,断网/刷新后能 resume 到上次的 phase / state / 已学词汇。涉及:server 端 session 持久化(SQLite 已有 lessons/turns 表可扩展)、client 端 reconnect 时拉取最新 state、UI"恢复上次进度"提示。
+- [ ] **课程 Session resume** — 当前刷新 / 断网 / **dev server 重启** = 课程中断。每次上课应该有一个 session,断网/刷新/server 重启后能 resume 到上次的 phase / state / 已学词汇。当前 `src/lib/agent/session.ts` 的 `sessions` 是模块级 in-memory `Map`,server 一重启就丢,客户端 LessonController 仍持有旧 sessionId,POST `/api/chat?action=message` 会被 server `getSession()` 返回 undefined → 404 → 客户端报错。涉及:server 端 session 持久化(SQLite 已有 `lessons/turns/word_performance` 表可扩展)、client 端 reconnect 时拉取最新 state、UI"恢复上次进度"提示。**当前临时 mitigation**:404 时 client 提示"课程已过期,回首页重新进入"(`lesson-controller.ts:230` 附近)。
 - [ ] **actions 与 TTS 时序对齐** — 现状是 LLM JSON 解析完 actions 字段就立刻 emit 到画布,但 TTS 还在慢慢播。结果"AI 还在说'这是飞机'但画布已经高亮了下一张图"。可选方案:
   - 简单:actions 等 TTS `session-finished`(整段说完)再触发 — 字幕完成度好但牺牲实时感
   - 中等:actions 跟随 TTS `TTSSentenceStart` 事件分批触发,LLM 每句对应一个 action

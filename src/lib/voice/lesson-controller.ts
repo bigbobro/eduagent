@@ -227,7 +227,12 @@ export class LessonController {
         signal: this.chatAbort.signal,
       });
       if (!res.ok || !res.body) {
-        this.emit('error', { message: 'AI 没反应过来,再试一次' });
+        // 404 = server 端 sessions Map 在 dev server 重启时清空,客户端持有的 sessionId 失效。
+        // 现状只能让用户回首页重进。后续 server session 做持久化后此分支变可恢复。
+        const reason = res.status === 404
+          ? '课程已过期啦~回首页重新进入课程吧'
+          : 'AI 没反应过来,再试一次';
+        this.emit('error', { message: reason });
         this.setState('awaiting');
         return;
       }

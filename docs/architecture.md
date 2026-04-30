@@ -249,7 +249,7 @@ controller.endLesson:
 
 ## 8. 已知不足(指向 TODO.md 详情)
 
-- **课程 Session resume**:刷新 / 断网 = 课程中断,无恢复机制
+- **课程 Session resume**:`sessions` 是 module-level in-memory Map,server 重启 / 刷新 / 断网 = 客户端旧 sessionId 失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。需 SQLite 持久化 + client resume 流程。
 - **actions 与 TTS 时序**:画布动作领先 AI 讲解,体感跳得太快
 - **MiMo first-token 4 秒**:首音频延迟主要瓶颈,前端无法优化
 - **音色微调**:Tina老师2.0 当前满足,后续可做更细试听
