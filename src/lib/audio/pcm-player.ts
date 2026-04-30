@@ -44,9 +44,9 @@ export class PcmPlayer {
 
   /** 立即停止所有正在响的 source,清空队列。 */
   stop(): void {
-    for (const src of this.active) {
+    this.active.forEach((src) => {
       try { src.stop(); } catch {}
-    }
+    });
     this.active.clear();
     if (this.ctx) {
       this.nextStartTime = this.ctx.currentTime;
