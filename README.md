@@ -15,8 +15,10 @@ AI 驱动的多模态教学系统:豆包流式 ASR / TTS + MiMo LLM 大脑 + 画
                                 └──────────────────────┘
 ```
 
-设计 spec:`docs/superpowers/specs/2026-05-01-voice-pipeline-doubao-design.md`
-实施计划:`docs/superpowers/plans/2026-05-01-voice-pipeline-doubao.md`
+设计 spec(历史快照):`docs/superpowers/specs/2026-05-01-voice-pipeline-doubao-design.md`
+实施计划(历史快照):`docs/superpowers/plans/2026-05-01-voice-pipeline-doubao.md`
+**当前架构事实文档(living doc)**:`docs/architecture.md` ← 想了解 master 上系统现状看这个
+**项目协作规则**:`/CLAUDE.md`
 
 ## 关键模块
 
