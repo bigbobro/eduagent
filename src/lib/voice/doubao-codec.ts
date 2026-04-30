@@ -13,7 +13,6 @@ export const Flags = {
   PositiveSequence: 0x01,
   NegativeSequenceLast: 0x03,
   Event: 0x04,
-  EventWithSession: 0x05,
 } as const;
 
 export const Serialization = {
@@ -125,8 +124,9 @@ export interface TtsEventInput {
 
 export function encodeTtsEvent(input: TtsEventInput): Buffer {
   const ser = input.serialization ?? Serialization.JSON;
-  const flags = input.sessionId ? Flags.EventWithSession : Flags.Event;
-  const header = buildHeader(MessageType.FullClientRequest, flags, ser, Compression.None);
+  // 豆包 V3 双向 TTS:flag 永远 0x04 (with event number)。是否带 sessionId 由 event_id 决定,
+  // 不影响 flag。早先用 0x05 (EventWithSession) 是误读,豆包 V1 协议会把它当 sequence 帧解析。
+  const header = buildHeader(MessageType.FullClientRequest, Flags.Event, ser, Compression.None);
 
   const eventBuf = Buffer.alloc(4);
   eventBuf.writeInt32BE(input.event, 0);
@@ -171,8 +171,11 @@ export function decodeTtsFrame(buf: Buffer): TtsServerFrame {
   const event = buf.readInt32BE(off);
   off += 4;
 
+  // 豆包 V3 双向 TTS:event ∈ {1, 2} 的请求帧没有 connection/session 字段。
+  // 其他事件(connection_id 50/51/52,session_id ≥100 全部数据类)都有 4 字节长度 + 字符串。
+  // 注意:错误帧(messageType=0xf)走错误码字段,不在这里处理。
   let sessionId: string | undefined;
-  if (flags === Flags.EventWithSession) {
+  if (messageType !== MessageType.Error && event !== 1 && event !== 2) {
     const sidLen = buf.readUInt32BE(off);
     off += 4;
     sessionId = buf.subarray(off, off + sidLen).toString('utf8');

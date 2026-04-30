@@ -49,7 +49,9 @@ export function LessonView({ course }: LessonViewProps) {
     };
   }, []);
 
-  const canHold = state === 'awaiting' || state === 'speaking';
+  // 当前版本只在 awaiting/listening 状态可按 — speaking 时空格忽略(不打断)。
+  // listening 必须包含,否则按下后切 listening,enabled=false 会卸载 keyup 监听器。
+  const canHold = state === 'awaiting' || state === 'listening';
 
   useSpacebar({
     enabled: canHold,
@@ -71,7 +73,7 @@ export function LessonView({ course }: LessonViewProps) {
       case 'awaiting': return '按住空格 / 按住按钮说话';
       case 'listening': return '我在听...';
       case 'thinking': return '让我想想...';
-      case 'speaking': return '按住空格可以打断哦';
+      case 'speaking': return '等老师说完~';
       default: return '';
     }
   }, [state]);

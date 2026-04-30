@@ -5,7 +5,7 @@ import { ToolAction } from '@/types/tools';
 import { AsrClient } from './asr-client';
 import { TtsClient } from './tts-client';
 import { PcmPlayer } from '@/lib/audio/pcm-player';
-import { startRecorder, RecorderHandle } from '@/lib/audio/recorder';
+import { startRecorder, prewarmRecorder, disposeRecorder, RecorderHandle } from '@/lib/audio/recorder';
 
 export type LessonStateName =
   | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'ending';
@@ -29,6 +29,15 @@ export class LessonController {
   private player = new PcmPlayer(24000);
   private recorder: RecorderHandle | null = null;
   private chatAbort: AbortController | null = null;
+  private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
+  private listenStartedAt = 0;
+
+  // ─── BENCH 打点(验收完删除)─────────────────────────────────────
+  private benchTRelease = 0;
+  private benchRound = 0;
+  private benchFirstTokenLogged = false;
+  private benchFirstPcmLogged = false;
+  private benchRoundTripLogged = false;
 
   on(event: EventName, fn: Listener): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
@@ -54,8 +63,14 @@ export class LessonController {
 
   async startLesson(courseId: string): Promise<void> {
     this.setState('greeting');
-    // 1) 建 TTS 长连
-    await this.tts.open();
+    // 1) 并行启动:TTS 长连 + mic 预热(权限框、AudioContext、Worklet、MediaStream 全提前就绪)
+    //    开场白播完用户按住空格那一刻,worklet node 只需 connect 一下,几乎瞬间就能出 PCM。
+    await Promise.all([
+      this.tts.open(),
+      prewarmRecorder().catch((e) => {
+        console.warn('[lesson] mic prewarm failed (will retry on first press):', e);
+      }),
+    ]);
     this.bindTtsHandlers();
 
     // 2) 调 /api/chat?action=start,跑开场白
@@ -79,6 +94,10 @@ export class LessonController {
   async endLesson(): Promise<void> {
     this.setState('ending');
     this.chatAbort?.abort();
+    if (this.asrFinalTimer) {
+      clearTimeout(this.asrFinalTimer);
+      this.asrFinalTimer = null;
+    }
     await this.stopRecording();
     this.player.stop();
     this.tts.close();
@@ -93,6 +112,7 @@ export class LessonController {
     }
     this.sessionId = null;
     await this.player.dispose();
+    await disposeRecorder();
     this.setState('idle');
   }
 
@@ -100,16 +120,11 @@ export class LessonController {
 
   async startListening(): Promise<void> {
     if (this.state === 'listening') return;
-    // 在 speaking 状态触发 → 打断
-    if (this.state === 'speaking') {
-      this.player.stop();
-      this.tts.cancelSession();
-      this.emit('subtitle-clear');
-    }
-    if (this.state !== 'awaiting' && this.state !== 'speaking') return;
+    if (this.state !== 'awaiting') return; // speaking 时不打断 — 老师说完才能再说
 
     this.setState('listening');
     this.emit('subtitle-clear');
+    this.listenStartedAt = performance.now();
 
     this.asr = new AsrClient();
     this.asr.on('partial', (text: string) => {
@@ -123,31 +138,75 @@ export class LessonController {
       this.setState('awaiting');
     });
 
+    // 并行启动 ASR WS 与 recorder tap — 总等待时间 = max(asr.open, startRecorder)
+    // recorder 已 prewarm,startRecorder 只是 new WorkletNode + connect,几毫秒就能出 PCM
+    let recorderPromise: Promise<RecorderHandle>;
     try {
-      await this.asr.open();
-    } catch {
-      this.emit('error', { message: 'ASR 连接失败,请重试' });
-      this.setState('awaiting');
-      return;
-    }
-
-    try {
-      this.recorder = await startRecorder({
+      recorderPromise = startRecorder({
         onChunk: (pcm) => this.asr?.sendPcm(pcm),
       });
     } catch (e) {
       this.emit('error', { message: '麦克风开不了哦,请允许权限' });
+      this.setState('awaiting');
+      return;
+    }
+    try {
+      await this.asr.open();
+    } catch {
+      this.emit('error', { message: 'ASR 连接失败,请重试' });
+      // 录音也得清干净
+      try { (await recorderPromise).stop(); } catch {}
+      this.setState('awaiting');
+      return;
+    }
+    try {
+      this.recorder = await recorderPromise;
+    } catch (e) {
+      this.emit('error', { message: '麦克风开不了哦,请允许权限' });
       this.asr?.close();
+      this.asr = null;
       this.setState('awaiting');
     }
   }
 
   async stopListening(): Promise<void> {
     if (this.state !== 'listening') return;
+    const recordedMs = performance.now() - (this.listenStartedAt || performance.now());
+    // 录音 < 800ms — 豆包对超短音频识别置信度不够,几乎一定 timeout。直接前端拦截更友好。
+    if (recordedMs < 800) {
+      await this.stopRecording();
+      try { this.asr?.close(); } catch {}
+      this.asr = null;
+      this.emit('subtitle-clear');
+      this.emit('error', { message: '太短啦~按住多说一会儿' });
+      this.setState('awaiting');
+      return;
+    }
+    // ─── BENCH 打点 ───
+    this.benchTRelease = performance.now();
+    this.benchRound += 1;
+    this.benchFirstTokenLogged = false;
+    this.benchFirstPcmLogged = false;
+    this.benchRoundTripLogged = false;
+    console.log(`[bench] ───── round ${this.benchRound} release at ${new Date().toISOString().slice(11, 23)} ─────`);
+    // ─────────────────
     await this.stopRecording();
-    this.asr?.close();
+    // 关键:不能立刻 close — close 会让 proxy 立刻断 upstream,豆包没机会回 final。
+    // 改发 finish 控制帧:proxy 转发负序号终止包给豆包,等 final 自然返回再 close。
+    this.asr?.finish();
     this.setState('thinking');
-    // ASR final 事件会触发 handleAsrFinal → /api/chat
+    // 兜底:豆包偶发不回 final → state 永远 thinking → 按钮灰锁死。5 秒后强制自救。
+    if (this.asrFinalTimer) clearTimeout(this.asrFinalTimer);
+    this.asrFinalTimer = setTimeout(() => {
+      this.asrFinalTimer = null;
+      if (this.state !== 'thinking') return;
+      console.warn('[asr] final timeout — recovering to awaiting');
+      this.emit('error', { message: '没听清呢~再说一次' });
+      try { this.asr?.close(); } catch {}
+      this.asr = null;
+      this.setState('awaiting');
+    }, 5000);
+    // ASR final 事件会触发 handleAsrFinal → /api/chat;handleAsrFinal 末尾再 close ASR WS。
   }
 
   private async stopRecording(): Promise<void> {
@@ -161,6 +220,19 @@ export class LessonController {
 
   private async handleAsrFinal(text: string): Promise<void> {
     if (!this.sessionId) return;
+    // 清兜底超时
+    if (this.asrFinalTimer) {
+      clearTimeout(this.asrFinalTimer);
+      this.asrFinalTimer = null;
+    }
+    // ─── BENCH 打点 ───
+    if (this.benchTRelease > 0) {
+      console.log(`[bench] r${this.benchRound} asr_final ${Math.round(performance.now() - this.benchTRelease)}ms — "${text.slice(0, 40)}"`);
+    }
+    // ─────────────────
+    // 收到 final 才 close ASR WS — 之前 stopListening 用 finish() 让 proxy 等 final
+    this.asr?.close();
+    this.asr = null;
     if (!text || !text.trim()) {
       this.emit('subtitle', { text: '没听清呢~再说一次', source: 'ai' });
       this.setState('awaiting');
@@ -196,9 +268,25 @@ export class LessonController {
       this.emit('subtitle', { text, source: 'ai' });
     });
     this.tts.on('pcm', (pcm: ArrayBuffer) => {
+      // 打断保护:用户按空格切到 listening 后,豆包可能还有 inflight PCM 推过来,
+      // 全部丢弃 — 否则 player.stop() 后又被新 enqueue 重新启动播放。
+      // 等下一轮 AI 回应时,handleSseEvent 会切到 speaking,届时不再被 guard 拦。
+      if (this.state === 'listening' || this.state === 'thinking') return;
+      // ─── BENCH 打点 ───
+      if (this.benchTRelease > 0 && !this.benchFirstPcmLogged) {
+        this.benchFirstPcmLogged = true;
+        console.log(`[bench] r${this.benchRound} first_pcm ${Math.round(performance.now() - this.benchTRelease)}ms`);
+      }
+      // ─────────────────
       this.player.enqueue(pcm);
     });
     this.tts.on('session-finished', () => {
+      // ─── BENCH 打点 ───
+      if (this.benchTRelease > 0 && !this.benchRoundTripLogged) {
+        this.benchRoundTripLogged = true;
+        console.log(`[bench] r${this.benchRound} round_trip ${Math.round(performance.now() - this.benchTRelease)}ms`);
+      }
+      // ─────────────────
       if (this.state === 'speaking' || this.state === 'greeting') {
         this.setState('awaiting');
       }
@@ -269,6 +357,12 @@ export class LessonController {
       case 'speech-delta':
         ensureTtsSession();
         onFirstSpeech();
+        // ─── BENCH 打点 ───
+        if (this.benchTRelease > 0 && !this.benchFirstTokenLogged) {
+          this.benchFirstTokenLogged = true;
+          console.log(`[bench] r${this.benchRound} llm_first_token ${Math.round(performance.now() - this.benchTRelease)}ms`);
+        }
+        // ─────────────────
         this.tts.sendText(payload.text);
         break;
       case 'speech-end':

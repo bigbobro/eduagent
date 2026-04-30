@@ -7,6 +7,21 @@ class PcmRecorder extends AudioWorkletProcessor {
     super();
     this._buf = new Int16Array(SAMPLES_PER_CHUNK);
     this._offset = 0;
+    // main thread 用 {type:'flush'} 通知 worklet 把残余 PCM(< 200ms)立刻吐出来。
+    // 没这个的话,用户松手时 worklet 当前 buffer 里 0-199ms 的数据会被 disconnect 直接丢,
+    // 体感是"最后一两个字被截掉"。
+    this.port.onmessage = (e) => {
+      const msg = e && e.data;
+      if (msg && msg.type === 'flush') {
+        if (this._offset > 0) {
+          const out = new Int16Array(this._offset);
+          out.set(this._buf.subarray(0, this._offset));
+          this.port.postMessage(out.buffer, [out.buffer]);
+          this._buf = new Int16Array(SAMPLES_PER_CHUNK);
+          this._offset = 0;
+        }
+      }
+    };
   }
 
   process(inputs) {

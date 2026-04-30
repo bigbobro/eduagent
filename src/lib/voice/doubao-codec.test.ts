@@ -103,8 +103,8 @@ describe('doubao-codec — TTS direction', () => {
     const payload = Buffer.from('{"k":"v"}', 'utf8');
     const buf = encodeTtsEvent({ event: 100, sessionId: sid, payload });
 
-    // flags = EventWithSession (0101)
-    expect(buf[1] & 0x0f).toBe(0x05);
+    // 豆包 V3:flag 永远 0x04,sessionId 有无由 event 决定
+    expect(buf[1] & 0x0f).toBe(0x04);
     let off = 4;
     expect(buf.readInt32BE(off)).toBe(100); // event
     off += 4;
@@ -125,7 +125,7 @@ describe('doubao-codec — TTS direction', () => {
     // header(4) + event(4) + sidLen(4) + sid + payloadSize(4) + pcm
     const frame = Buffer.alloc(4 + 4 + 4 + sidBuf.length + 4 + pcm.length);
     frame[0] = 0x11;
-    frame[1] = 0x95; // type=FullServerResponse(1001), flags=EventWithSession(0101)
+    frame[1] = 0x94; // type=FullServerResponse(1001), flags=Event(0100)
     frame[2] = 0x00; // ser=Raw, comp=None
     frame[3] = 0x00;
     let off = 4;
@@ -147,7 +147,7 @@ describe('doubao-codec — TTS direction', () => {
     const json = Buffer.from('{"ok":true}', 'utf8');
     const frame = Buffer.alloc(4 + 4 + 4 + sidBuf.length + 4 + json.length);
     frame[0] = 0x11;
-    frame[1] = 0x95;
+    frame[1] = 0x94; // type=FullServerResponse(1001), flags=Event(0100)
     frame[2] = 0x10; // ser=JSON
     frame[3] = 0x00;
     let off = 4;
@@ -175,7 +175,6 @@ describe('doubao-codec — constants', () => {
     expect(Flags.PositiveSequence).toBe(0x01);
     expect(Flags.NegativeSequenceLast).toBe(0x03);
     expect(Flags.Event).toBe(0x04);
-    expect(Flags.EventWithSession).toBe(0x05);
     expect(Serialization.Raw).toBe(0x00);
     expect(Serialization.JSON).toBe(0x01);
     expect(Compression.None).toBe(0x00);

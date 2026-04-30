@@ -125,10 +125,12 @@ function bridge(clientWs: WsClient): void {
             speech_rate: -10,
             loudness_rate: 0,
           },
-          additions: {
+          // 豆包文档规定 additions 是 jsonstring(序列化后的 JSON 字符串),不是 object。
+          // Go 示例:additions = fmt.Sprintf("{\"disable_default_bit_rate\":true}")
+          additions: JSON.stringify({
             disable_markdown_filter: false,
             cache_config: { text_type: 1, use_cache: true, use_segment_cache: true },
-          },
+          }),
         };
         const payload = JSON.stringify({
           event: 100,
@@ -140,7 +142,12 @@ function bridge(clientWs: WsClient): void {
       }
       case 'text-chunk': {
         if (!currentSession) return;
-        const payload = JSON.stringify({ event: 200, namespace: 'BidirectionalTTS', text: msg.text });
+        // 豆包文档:TaskRequest 的 text 在 req_params.text 里,不是顶层
+        const payload = JSON.stringify({
+          event: 200,
+          namespace: 'BidirectionalTTS',
+          req_params: { text: msg.text },
+        });
         upstream.send(encodeTtsEvent({ event: 200, sessionId: currentSession.sessionId, payload: Buffer.from(payload, 'utf8') }));
         break;
       }

@@ -49,6 +49,14 @@ export class AsrClient {
     }
   }
 
+  /** 通知 proxy 录音结束,等上游 final 后再 close。比直接 close 多一个 round trip,
+   *  但避免上游 ASR session 被立刻撕掉、final 永远收不到。 */
+  finish(): void {
+    if (this.ws && this.ws.readyState === this.ws.OPEN) {
+      try { this.ws.send(JSON.stringify({ type: 'finish' })); } catch {}
+    }
+  }
+
   close(): void {
     try { this.ws?.close(); } catch {}
     this.ws = null;
