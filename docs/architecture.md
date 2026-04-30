@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:`2ea7b89`(2026-05-01)E2E 验收期间多处集成 bug 修复 + 体验优化。
+最近重大同步:E2E 验收期间多处集成 bug 修复 + 体验优化(2026-05-01)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -261,7 +261,10 @@ controller.endLesson:
 
 ## 9. 文件演进历史(粗粒度)
 
-- `8c002f4`(2026-05-01)— 实施完成,初版语音管线 sync 文档
-- `2ea7b89`(2026-05-01)— **E2E 验收期间多处集成 bug 修复**(本次架构定型的关键 commit)
-- `6ec1bf0`(2026-05-01)— 删 [bench] 打点 + TODO 增补
-- 本 commit — 新增 architecture.md + CLAUDE.md(living doc 制度建立)
+- 2026-05-01 — 初版语音管线实施 + sync 文档(README/TODO/benchmarks)
+- 2026-05-01 — **E2E 验收期间多处集成 bug 修复**(架构定型的关键改动)
+- 2026-05-01 — 删 [bench] 打点 + TODO 增补
+- 2026-05-01 — 新增 architecture.md + CLAUDE.md(本 living doc 制度建立)
+- 2026-05-01 — git history redact secrets + CLAUDE.md 加凭据规则
+
+> 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。

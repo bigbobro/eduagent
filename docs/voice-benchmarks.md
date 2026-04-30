@@ -57,7 +57,7 @@
 
 ## 测量打点位置(已删除)
 
-`src/lib/voice/lesson-controller.ts` 的 `[bench]` 打点代码(`benchTRelease/benchRound/benchFirstTokenLogged/benchFirstPcmLogged/benchRoundTripLogged` 5 个字段 + 4 处 console.log)在验收完成后已经删除。后续如果要再做"优化前/后"对比,可参考 git 历史 commit `2ea7b89` 之前的版本恢复。
+`src/lib/voice/lesson-controller.ts` 的 `[bench]` 打点代码(`benchTRelease/benchRound/benchFirstTokenLogged/benchFirstPcmLogged/benchRoundTripLogged` 5 个字段 + 4 处 console.log)在验收完成后已经删除。后续如要做"优化前/后"对比,可参考 git 历史中"删除 [bench] 打点"那个 commit 的父 commit 恢复 — 用 `git log --oneline --grep='bench'` 查。
 
 ## 备注
 
