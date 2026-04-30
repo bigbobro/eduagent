@@ -28,6 +28,9 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# git history backups (e.g. before redaction operations) — never commit these
+.git.backup-*
+
 # sqlite runtime
 /db/*.db
 /db/*.db-shm

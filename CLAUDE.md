@@ -51,6 +51,30 @@
 - **TTS 长连复用 / ASR 按轮建连。** 详见 architecture.md。
 - **VOICE_MOCK=true** 跳过豆包/MiMo,本地无网络可跑全链路(为了 CI 与离线开发)。
 
+## 凭据(secrets)规则
+
+**任何文档(README、spec、plan、CLAUDE.md、architecture.md、TODO、benchmarks、git commit message、PR description)中,严禁出现真实凭据值。**
+
+包括但不限于:
+- `MIMO_API_KEY`(`tp-...` 开头)、`DOUBAO_ACCESS_KEY`、`DOUBAO_APP_ID`
+- 数据库连接串里的密码段
+- OAuth client secret、JWT signing key
+
+文档里需要演示 env 配置时,**只能用占位**:
+```
+MIMO_API_KEY=<your-mimo-api-key>
+DOUBAO_ACCESS_KEY=<your-access-key>
+```
+
+**触发情况** — 一旦发现 docs / commit / PR 中含有真实凭据(即使 repo 是 private):
+1. 立刻在对应控制台 **rotate**(作废 + 重生成)— 这是绝对必须的安全动作,即使后续重写 git history,旧 commit 也可能已被抓取
+2. 用 `git filter-repo --replace-text` 重写 git history,把真实值替换成占位
+3. force push 覆盖 GitHub
+4. 排查别处是否还有泄露(grep `tp-` / 已知 key 前缀 / `*.access_key`)
+5. 在 architecture.md / CLAUDE.md 加新防护规则(如本节)
+
+凡是 Claude 在写 docs / spec / plan 时,如需引用 `.env.local` 内容做配置说明,**禁止从用户的 .env.local 复制粘贴真实值**,只能写占位。
+
 ## 跑测试
 
 ```bash
