@@ -74,6 +74,10 @@ export async function* streamLLM(
   messages: { role: string; content: string }[],
   signal?: AbortSignal
 ): AsyncGenerator<StreamEvent> {
+  if (process.env.VOICE_MOCK === 'true') {
+    yield* mockStreamLLM();
+    return;
+  }
   const start = Date.now();
   const apiMessages = [{ role: 'system', content: systemPrompt }, ...messages];
 
@@ -149,4 +153,28 @@ export async function* streamLLM(
     usage,
     latency: Date.now() - start,
   };
+}
+
+async function* mockStreamLLM(): AsyncGenerator<StreamEvent> {
+  const fixed = JSON.stringify({
+    speech: 'Hello! 我是兔老师。Look at this. 这是 a boat,小船!你跟我说一遍,boat。',
+    actions: [{ tool: 'show', params: { image_id: 'boat' } }],
+    state_update: { current_word: 'boat', phase: 'learning' },
+  });
+  // 模拟 token 流
+  const chunkSize = 8;
+  for (let i = 0; i < fixed.length; i += chunkSize) {
+    await sleep(50);
+    yield { delta: fixed.slice(i, i + chunkSize), done: false };
+  }
+  yield {
+    done: true,
+    fullText: fixed,
+    usage: { inputTokens: 100, outputTokens: 50 },
+    latency: 500,
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
