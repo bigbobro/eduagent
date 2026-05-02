@@ -49,3 +49,6 @@ next-env.d.ts
 
 # worktrees
 .worktrees/
+
+# Lesson reports — 内部诊断,不污染 repo;真要分享某份单独 commit
+docs/lesson-reports/*.md
