@@ -215,7 +215,7 @@ async function main(): Promise<void> {
   }
 }
 
-const isMain = process.argv[1]?.includes('lesson-report-data');
+const isMain = process.argv[1]?.endsWith('lesson-report-data.ts');
 if (isMain) {
   void main();
 }
