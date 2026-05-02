@@ -12,6 +12,36 @@
 
 ---
 
+## Pre-flight 上下文(下游 agent 必读)
+
+**先读这些文件再动手:**
+- `CLAUDE.md`(项目根)— 项目级强制规则(测试自动化、文档同步、commit 风格、凭据安全)
+- `docs/superpowers/specs/2026-05-02-lesson-report-generator-design.md`(本 plan 对应 spec,设计意图与边界)
+- `docs/architecture.md`(living doc,系统现状,Task 8 要往里同步)
+- `src/lib/db/schema.ts`(实际 DB schema 来源)
+- `src/data/courses/transportation.ts`、`src/types/course.ts`(课程定义结构,Task 4 / Task 5 的 `defaultCourseLoader` 依据)
+
+**依赖状态:** 不要 `pnpm install`。`tsx` / `better-sqlite3` / `vitest` / `@types/better-sqlite3` 都已在 `package.json`。
+
+**测试与 typecheck 命令:**
+- 单文件单测:`pnpm test scripts/lesson-report-data.test.ts`
+- 全测试套:`pnpm test`(原有 27 个 + 本 plan 新增 ~13 个 = ~40 个)
+- typecheck:`pnpm exec tsc --noEmit`
+- 测试 / typecheck 任一不过 → **不准 commit**(项目 CLAUDE.md §8 硬规则)
+
+**DB 前置:** 本 plan 假设 `db/eduagent.db` 已有至少一节真实开发期跑过的课(给 Task 6 / Task 9 自验证用)。如果 DB 不存在或为空,先跑一次 `pnpm dev` 完成一节真课再跑 Task 6;或者用 `VOICE_MOCK=true pnpm dev` 跑 mock 课也行。
+
+**Commit message 风格(项目 CLAUDE.md 提交风格节):**
+- 单行 subject:`feat(report): ...` / `docs(...)` / `chore(...)` / `fix(...)` 等
+- body 用 `-` bullet 列实质改动
+- 末尾追加 `Co-Authored-By: <你的模型名> <noreply@anthropic.com>`(plan 各 task 给的 Co-Authored-By 行是占位写 Opus 4.7,**实施时换成你自己的模型名**)
+- 用 HEREDOC 传 message 防 shell 转义
+- 不允许 `--no-verify`、`--amend`(项目 §8 规则)
+
+**凭据规则(项目 CLAUDE.md §7):** 任何 commit message / docs / 代码注释里禁止出现真实 API key 值。本 plan 只读 SQLite 不接外部 API,无凭据风险,但仍按规则。
+
+---
+
 ## File Structure
 
 | 路径 | 状态 | 职责 |
@@ -900,20 +930,26 @@ Expected:
 
 如果上一节是 transportation 课,以上字段都该有真实值。
 
-- [ ] **Step 2: 跑指定 session(用今天那节 cf63ef96)**
+- [ ] **Step 2: 跑指定 session**
 
-Run:
+先列最近 5 节挑一个(plan 撰写时存在的 `cf63ef96-5dd1-4f40-89a7-ad324a311680` 是 transportation 课,可能仍可用,也可能数据库已演进):
+
 ```bash
-pnpm tsx scripts/lesson-report-data.ts cf63ef96-5dd1-4f40-89a7-ad324a311680 | python3 -c "import json,sys; d=json.load(sys.stdin); print('id', d['session']['id']); print('duration', d['session']['durationSec']); print('avg', d['tokens']['llm']['avgInputPerRound']); print('high', d['anomalies']['highAvgInput']); print('words', d['session']['targetWords'])"
+sqlite3 db/eduagent.db "SELECT id, course_id, interaction_count, start_time FROM lesson_logs ORDER BY start_time DESC LIMIT 5;"
 ```
+
+挑一节 `interaction_count > 0` 且 `course_id='transportation'` 的 session,记下 `<SID>`,然后:
+
+```bash
+pnpm tsx scripts/lesson-report-data.ts <SID> | python3 -c "import json,sys; d=json.load(sys.stdin); print('id', d['session']['id']); print('duration', d['session']['durationSec']); print('avg', d['tokens']['llm']['avgInputPerRound']); print('high', d['anomalies']['highAvgInput']); print('words', d['session']['targetWords'])"
+```
+
 Expected:
-```
-id cf63ef96-5dd1-4f40-89a7-ad324a311680
-duration 593
-avg <some int around 1399>
-high True
-words ['car', 'bus', 'train', 'airplane', 'bicycle', 'boat']
-```
+- `id` 与 `<SID>` 一致
+- `duration` 是非负整数(若 endTime 为空会是 None,挑别的)
+- `avg` 是非负整数
+- `high` 是 True 或 False
+- `words` 是 `['car', 'bus', 'train', 'airplane', 'bicycle', 'boat']`(transportation 课固定六个词)
 
 - [ ] **Step 3: 跑不存在的 session(验证错误路径)**
 
@@ -1157,13 +1193,21 @@ git status docs/lesson-reports/
 ```
 Expected: 报告 .md 文件不出现在 untracked 列表(只有 `.gitkeep` 被追踪,且已 commit 过)。
 
-- [ ] **Step 4: Claude 内跑指定 session(可选,用一节更早的课)**
+- [ ] **Step 4: Claude 内跑指定 session(用一节边界 case 课)**
 
-在 Claude 里输:`/lesson-report 8edee934-3702-4a64-8de7-92755777e329`
+先查找一节边界 case session(0 交互 或 endTime=null):
 
-(这是 db 里另一节早期 session)
+```bash
+sqlite3 db/eduagent.db "SELECT id, course_id, interaction_count, end_time FROM lesson_logs WHERE end_time IS NULL OR interaction_count = 0 ORDER BY start_time DESC LIMIT 3;"
+```
 
-预期 Claude 跑出对应 session 的报告,文件名日期是 `2026-04-30`。注意该 session interactions=0 / endTime=null,看报告是否正确处理这两个边界(标"零交互"+ "课程未正常结束")。
+如查到结果,挑一个 `<SID2>`,在 Claude 里输:`/lesson-report <SID2>`
+
+预期 Claude 跑出报告,**正确处理这两个边界**:
+- 报告头标 `⚠️ 课程未正常结束(end_time 为空)`(若 endTime 为 null)
+- 词汇覆盖与诊断节标"零交互,无数据可分析"(若 interactions 为空)
+
+如查不到任何边界 case session,本步骤跳过。
 
 - [ ] **Step 5: 跑错误 session 路径**
 
