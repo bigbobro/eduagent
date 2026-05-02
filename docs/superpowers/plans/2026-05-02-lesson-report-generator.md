@@ -1226,6 +1226,25 @@ Expected: 40 个全过。
 
 ---
 
+## 完工验收(Definition of Done)
+
+**实施 agent 在标"全部完成"前,必须逐条自查通过。任一不过 → 不算完。**
+
+- [ ] `pnpm test` 全部通过(原 27 个 + 本 plan 新增 ~13 个 ≈ 40 个测试)
+- [ ] `pnpm exec tsc --noEmit` 无错
+- [ ] `pnpm tsx scripts/lesson-report-data.ts`(无参)能输出有效 JSON,字段含 `session.targetWords` 非空
+- [ ] `pnpm tsx scripts/lesson-report-data.ts not-a-real-id` exit 1,stderr 有可读错误 + 最近 5 节列表
+- [ ] Claude 内 `/lesson-report` 跑通,在 `docs/lesson-reports/` 落档一份 markdown,文件名日期来自 session.startTime(不是今天)
+- [ ] 该 markdown 文件被 `.gitignore` 忽略(`git status` 不显示),`.gitkeep` 已被 commit
+- [ ] `docs/architecture.md` 末尾有"开发工具链 — 课后报告生成器"节
+- [ ] `docs/TODO.md` §0 课程反馈条目下有引用 `/lesson-report` 的一行
+- [ ] 9 个 task 各自产生独立 commit(linear,无 amend / 无 force push)
+- [ ] 本 plan 所有 `- [ ]` checkbox 全部改成 `- [x]`
+
+任何一条不过,把不过的原因写出来,回到对应 task 修;不要标"基本完成"或"绝大多数通过"敷衍。
+
+---
+
 ## Self-Review 备忘(plan 编写者已自查,实施者无需重做)
 
 - 已对照 spec §6 实施 checklist,9 个 task 全覆盖(脚本 / 单测 / slash command / .gitkeep / .gitignore / architecture.md / TODO.md / 自验证)
