@@ -12,6 +12,8 @@
   4. **Token 消耗偏高**:平均 1,400 input / 轮(历史对话全量带入)。后期加滑动窗口或摘要压缩。
   5. **ASR/TTS 用量未埋点**:DB 里 `asr.requests=0 / tts.requests=0`,只有 LLM 在算。`logger.ts` / token 统计逻辑这块缺埋点。
 
+  现已通过 `/lesson-report` 自动生成,后续每节实测课的反馈走该工具,详见 `docs/superpowers/specs/2026-05-02-lesson-report-generator-design.md`。
+
 
 - [ ] **课程 Session resume** — 当前刷新 / 断网 / **dev server 重启** = 课程中断。每次上课应该有一个 session,断网/刷新/server 重启后能 resume 到上次的 phase / state / 已学词汇。当前 `src/lib/agent/session.ts` 的 `sessions` 是模块级 in-memory `Map`,server 一重启就丢,客户端 LessonController 仍持有旧 sessionId,POST `/api/chat?action=message` 会被 server `getSession()` 返回 undefined → 404 → 客户端报错。涉及:server 端 session 持久化(SQLite 已有 `lessons/turns/word_performance` 表可扩展)、client 端 reconnect 时拉取最新 state、UI"恢复上次进度"提示。**当前临时 mitigation**:404 时 client 提示"课程已过期,回首页重新进入"(`lesson-controller.ts:230` 附近)。
 - [ ] **actions 与 TTS 时序对齐** — 现状是 LLM JSON 解析完 actions 字段就立刻 emit 到画布,但 TTS 还在慢慢播。结果"AI 还在说'这是飞机'但画布已经高亮了下一张图"。可选方案:

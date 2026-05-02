@@ -268,3 +268,24 @@ controller.endLesson:
 - 2026-05-01 — git history redact secrets + CLAUDE.md 加凭据规则
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
+
+---
+
+## 10. 开发工具链 — 课后报告生成器
+
+实测课后用 `/lesson-report` slash command 生成内部诊断报告,驱动迭代决策。
+
+调用链:
+
+    /lesson-report [session-id?]
+      ↓ Claude 读 .claude/commands/lesson-report.md
+      ↓ 跑 pnpm tsx scripts/lesson-report-data.ts [session-id?]
+      ↓ 拿 JSON(基础聚合 + anomaly flags + 全部 interactions)
+      ↓ Claude 按 prompt 模板生成 markdown
+      ↓ Write 到 docs/lesson-reports/YYYY-MM-DD-<sid8>.md(已 gitignore)
+
+**职责切分**:
+- **`scripts/lesson-report-data.ts`**(数据层,有单测):基础聚合 + 课程目标词 + anomaly flags(`highAvgInput` / `asrUsageNotTracked` / `ttsUsageNotTracked` / `tokensCorrupted`)。pure 函数 `buildReport(db, sessionId, courseLoader)`,接受依赖注入。
+- **`.claude/commands/lesson-report.md`**(LLM 层):报告模板 + 写作要求,LLM 看 raw `interactions` 判 ASR 误识 / 话术循环卡死。
+
+**报告范围**:只产出**工程信号**(ASR 误识 / 话术循环 / token / 埋点),教学策略类观察只列不评判。spec 见 `docs/superpowers/specs/2026-05-02-lesson-report-generator-design.md`。
