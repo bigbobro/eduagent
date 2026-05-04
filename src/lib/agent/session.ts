@@ -2,11 +2,19 @@ import { v4 as uuidv4 } from 'uuid';
 import { Course } from '@/types/course';
 import { LessonMemory, TokenUsage, InteractionLog } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
-import { createMemory, addUserMessage, getMessagesForLLM, commitAssistantStreamResult } from './memory';
+import {
+  createMemory,
+  addUserMessage,
+  getMessagesForLLM,
+  commitAssistantStreamResult,
+  detectCurrentWordAttempt,
+  markWordCorrect,
+  markWordIncorrect,
+} from './memory';
 import { buildSystemPrompt } from './prompt';
 import { streamLLM } from '@/lib/mimo/llm';
 import { StreamingSpeechExtractor } from './speech-extractor';
-import { createLessonLog, finishLessonLog, insertInteraction } from '@/lib/db/queries';
+import { createLessonLog, finishLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
 
 export interface Session {
   id: string;
@@ -68,7 +76,14 @@ export async function* streamUserInput(
     return;
   }
 
+  const wordAttempt = detectCurrentWordAttempt(session.memory, session.course, userText);
   session.memory = addUserMessage(session.memory, userText);
+  if (wordAttempt) {
+    session.memory = wordAttempt.correct
+      ? markWordCorrect(session.memory, wordAttempt.word)
+      : markWordIncorrect(session.memory, wordAttempt.word);
+    upsertWordPerformance(session.id, wordAttempt.word, wordAttempt.correct);
+  }
 
   const systemPrompt = buildSystemPrompt(session.course, session.memory);
   const messages = getMessagesForLLM(session.memory);
@@ -127,6 +142,8 @@ export async function* streamUserInput(
     session.tokenUsage.asr.requests += 1;
     session.tokenUsage.asr.tokens += asrResult.tokens;
   }
+  session.tokenUsage.tts.requests += 1;
+  session.tokenUsage.tts.characters += result.speech.length;
 
   const interactionLog: InteractionLog = {
     timestamp: new Date(),
@@ -136,6 +153,7 @@ export async function* streamUserInput(
     modelCalls: {
       asr: asrResult,
       llm: { latency: llmLatency, inputTokens, outputTokens },
+      tts: { latency: 0, characters: result.speech.length },
     },
   };
   insertInteraction(session.id, interactionLog);

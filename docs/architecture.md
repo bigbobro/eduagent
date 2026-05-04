@@ -46,10 +46,10 @@
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
 | `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,7 状态机,统一编排 ASR + SSE + TTS** |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
-| `src/lib/agent/session.ts` | LLM 一轮对话:取 history → 调 streamLLM → 收 chunk |
+| `src/lib/agent/session.ts` | LLM 一轮对话:词汇尝试判定 → 取 history → 调 streamLLM → 收 chunk → 记录 usage |
 | `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta** |
-| `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史 |
-| `src/lib/agent/prompt.ts` | 课堂 system prompt 拼装 |
+| `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史、当前词精确尝试判定 |
+| `src/lib/agent/prompt.ts` | 课堂 system prompt 拼装,包含已学词总结与连续失败切策略约束 |
 | `src/lib/mimo/llm.ts` | MiMo 调用,`streamLLM` 异步生成 token delta + final usage |
 | `src/lib/audio/recorder.ts` | **mic + AudioContext + worklet 模块单例**,`prewarmRecorder` 在 startLesson 提前就绪 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
@@ -113,8 +113,10 @@ LessonView mount → new LessonController
 ASR final 到达 client
   └─ controller.handleAsrFinal(text)
        ├─ clearTimeout(asrFinalTimer), asr.close, asr=null
-       ├─ POST /api/chat { action:'message', sessionId, text }
-       │   server: streamLLM (MiMo) → SpeechExtractor 状态机 → SSE
+       ├─ POST /api/chat { action:'message', sessionId, text, asrResult }
+       │   server: detectCurrentWordAttempt → upsertWordPerformance
+       │           → streamLLM (MiMo) → SpeechExtractor 状态机 → SSE
+       │           → token_usage 记录 LLM + ASR + TTS 字符数
        │            speech-delta × N + actions + done
        └─ consumeSSE:
             speech-delta:
@@ -228,6 +230,8 @@ controller.endLesson:
 | 5s 不 9s 的 ASR final 兜底 | 用户更快感知失败 | 9s 太长,影响"再说一次"的连续性 |
 | 不打断(speaking 时空格忽略) | 简化优先 | 实测打断后 inflight PCM 难完全清干净;后续再加 |
 | 字幕领先音频 | 不做时间戳同步 | spec 当时接受;但**实测画布跳得比讲解快 ~3s,见 TODO** |
+| 词汇正确性判定 | 当前目标英文词精确 token 命中 | 保守优先,`train` 算对、`tree` 不算;不做发音相似度猜测 |
+| ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 
 ---
 
@@ -252,6 +256,8 @@ controller.endLesson:
 - **课程 Session resume**:`sessions` 是 module-level in-memory Map,server 重启 / 刷新 / 断网 = 客户端旧 sessionId 失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。需 SQLite 持久化 + client resume 流程。
 - **actions 与 TTS 时序**:画布动作领先 AI 讲解,体感跳得太快
 - **MiMo first-token 4 秒**:首音频延迟主要瓶颈,前端无法优化
+- **ASR 识别质量**:当前只补了 usage 与保守词汇判定,还没有给豆包 ASR 注入课程 hotwords/context
+- **Token 消耗偏高**:仍保留最近 20 轮原文,尚未做滑动窗口或摘要压缩
 - **音色微调**:Tina老师2.0 当前满足,后续可做更细试听
 - **VAD 自动停止**:依赖用户主动松手,无静音兜底(防"按住不放")
 - **WebSocket 重连退避**:当前重连一次,可加指数退避

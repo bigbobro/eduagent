@@ -1,5 +1,6 @@
 import { LessonMemory, Message, InterestSignal, WordPerf, LessonPhase } from '@/types/session';
 import { AgentResponse } from '@/types/tools';
+import { Course } from '@/types/course';
 
 const MAX_HISTORY = 20;
 
@@ -66,21 +67,6 @@ export function addAssistantMessage(
   const messages = [...memory.messages, message].slice(-MAX_HISTORY);
 
   const update = response.state_update;
-  const wordPerf = new Map(memory.wordPerformance);
-
-  // Update word performance if we can detect a correct/incorrect response
-  if (memory.currentWord && memory.phase === 'learning') {
-    const existing = wordPerf.get(memory.currentWord) || {
-      attempts: 0,
-      correct: 0,
-      lastAttempt: new Date(),
-    };
-    wordPerf.set(memory.currentWord, {
-      ...existing,
-      attempts: existing.attempts + 1,
-      lastAttempt: new Date(),
-    });
-  }
 
   return {
     ...memory,
@@ -88,7 +74,30 @@ export function addAssistantMessage(
     currentWord: update.current_word || memory.currentWord,
     phase: (update.phase as LessonPhase) || memory.phase,
     wordsLearned: update.words_learned || memory.wordsLearned,
-    wordPerformance: wordPerf,
+  };
+}
+
+export interface WordAttempt {
+  word: string;
+  correct: boolean;
+}
+
+export function detectCurrentWordAttempt(
+  memory: LessonMemory,
+  course: Course,
+  userText: string
+): WordAttempt | null {
+  const currentWord = memory.currentWord.trim().toLowerCase();
+  if (!currentWord) return null;
+  if (!['review', 'learning', 'quiz'].includes(memory.phase)) return null;
+
+  const targetWords = new Set(course.objectives.words.map((w) => w.english.toLowerCase()));
+  if (!targetWords.has(currentWord)) return null;
+
+  const tokens: string[] = userText.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) ?? [];
+  return {
+    word: currentWord,
+    correct: tokens.includes(currentWord),
   };
 }
 

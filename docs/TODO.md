@@ -2,15 +2,16 @@
 
 ## 0. 验收过程发现的待办(2026-05-01 / 2026-05-02)
 
-- [ ] **课程反馈分析(2026-05-02 transportation 课观察)** — session `cf63ef96-5dd1-4f40-89a7-ad324a311680`,30 轮 / 9 分 53 秒,LLM 41,973 in / 3,327 out。下次开发要消化这 5 个反馈,**暂不拆**,等做完"课后报告生成器"后统一拆需求:
+- [x] **课程反馈分析 P0 第一段(2026-05-02 transportation 课观察)** — session `cf63ef96-5dd1-4f40-89a7-ad324a311680`,30 轮 / 9 分 53 秒,LLM 41,973 in / 3,327 out。已先消化其中最影响下一次判断的 3 个 P0 问题:ASR/TTS usage 埋点、当前词词汇表现追踪、总结/连续失败 prompt 硬约束。GoalPower 记录见 `docs/superpowers/specs/2026-05-04-p0-observability-teaching-loop.md`。
   1. **ASR 误识严重**(儿童 + L2 英语 + 中英夹杂硬伤):
      - "准备好了" → `翠翠`
      - "Airplane" → `Apple` / `AirPods` / `阿伟` / `奥利` / `Airplay` / `I play`
      - "Boat" → `The tree` / `Fruit`
-  2. **LLM 幻觉**:课程结尾老师两次总结 `car, bus, train, airplane, bicycle, 还有 boat`,**bicycle 本节课从未教过**。需要 system prompt 硬约束"只能总结实际出现过的词",或给 LLM 注入"已学词列表"作为 ground truth。
-  3. **教学循环卡死**:Airplane 引导 8 轮全错,老师没切换策略(分音节、模仿飞机声、跳过),只机械重复"跟老师一起说"。需加规则:**同一目标词连续 3 次错误 → 必须切策略**(分音节 / 类比中文谐音 / 跳过留到下次)。
+     - 后续仍需做 ASR hotwords/context 注入,本轮未做。
+  2. **LLM 幻觉**:课程结尾老师两次总结 `car, bus, train, airplane, bicycle, 还有 boat`,**bicycle 本节课从未教过**。已加 system prompt 硬约束:复习/结尾只能总结 `wordsLearned` / 已学词汇。
+  3. **教学循环卡死**:Airplane 引导 8 轮全错,老师没切换策略(分音节、模仿飞机声、跳过),只机械重复"跟老师一起说"。已加当前词精确尝试判定 + 词汇表现记录 + prompt 规则:**同一目标词连续 3 次错误 → 必须切策略**。
   4. **Token 消耗偏高**:平均 1,400 input / 轮(历史对话全量带入)。后期加滑动窗口或摘要压缩。
-  5. **ASR/TTS 用量未埋点**:DB 里 `asr.requests=0 / tts.requests=0`,只有 LLM 在算。`logger.ts` / token 统计逻辑这块缺埋点。
+  5. **ASR/TTS 用量未埋点**:已补。ASR 从 `LessonController` final 结果上报请求数 + 文本长度;TTS 按生成的 assistant `speech` 记录请求数 + 字符数。
 
   现已通过 `/lesson-report` 自动生成,后续每节实测课的反馈走该工具,详见 `docs/superpowers/specs/2026-05-02-lesson-report-generator-design.md`。
 
@@ -24,7 +25,7 @@
 
 ## 1. 补全 Spec 遗留功能
 
-- [ ] **词汇表现追踪** — 在 session.ts 中实现 markWordCorrect/Incorrect,每次学生说完后判断是否涉及目标词汇,写入 word_performance 表
+- [x] **词汇表现追踪** — 在 session.ts 中实现 markWordCorrect/Incorrect,每次学生说完后判断是否涉及目标词汇,写入 word_performance 表
 - [ ] **完整兴趣信号检测** — 增强 memory.ts 的兴趣检测逻辑,识别更多信号类型(confusion、engagement),在 prompt 中注入更丰富的兴趣上下文
 - [ ] **logger.ts** — 创建独立日志模块,统一日志格式,支持控制台 + SQLite 双输出
 - [ ] **generate 的 state_update 记录** — LLM 生成新内容时,在结构化输出中记录 generated_content 字段
