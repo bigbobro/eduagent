@@ -37,7 +37,7 @@ describe('StreamingSpeechExtractor', () => {
   it('extracts speech even when actions appears first in JSON', () => {
     const ex = new StreamingSpeechExtractor();
     const out = feedAll(ex, [
-      '{"actions": [{"tool":"show","params":{"image_id":"car"}}], ',
+      '{"actions": [{"tool":"show_card","params":{"card_id":"car"}}], ',
       '"speech": "看小汽车!"}',
     ]);
     expect(out).toBe('看小汽车!');
@@ -51,10 +51,10 @@ describe('StreamingSpeechExtractor', () => {
 
   it('finalize parses the full JSON for actions/state_update', () => {
     const ex = new StreamingSpeechExtractor();
-    const full = '{"speech":"hi","actions":[{"tool":"show","params":{"image_id":"car"}}],"state_update":{"current_word":"car"}}';
+    const full = '{"speech":"hi","actions":[{"tool":"show_card","params":{"card_id":"car"}}],"state_update":{"current_word":"car"}}';
     feedAll(ex, [full]);
     const result = ex.finalize();
-    expect(result.actions).toEqual([{ tool: 'show', params: { image_id: 'car' } }]);
+    expect(result.actions).toEqual([{ tool: 'show_card', params: { card_id: 'car' } }]);
     expect(result.state_update).toEqual({ current_word: 'car' });
   });
 
