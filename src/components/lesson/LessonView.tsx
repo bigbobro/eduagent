@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ImageCanvas } from './ImageCanvas';
+import { WordCardCanvas } from './WordCardCanvas';
 import { SubtitleBar } from './SubtitleBar';
 import { HoldToTalkButton } from './HoldToTalkButton';
 import { Bunny, BunnyMood } from './Bunny';
@@ -25,21 +25,31 @@ const STATE_TO_MOOD: Record<LessonStateName, BunnyMood> = {
   ending: 'idle',
 };
 
+function pickLatestCardId(actions: ToolAction[]): string | null {
+  for (let i = actions.length - 1; i >= 0; i--) {
+    const a = actions[i];
+    if (a.tool === 'show_card') return a.params.card_id;
+  }
+  return null;
+}
+
 export function LessonView({ course }: LessonViewProps) {
   const controllerRef = useRef<LessonController | null>(null);
   const [state, setState] = useState<LessonStateName>('idle');
   const [subtitle, setSubtitle] = useState<{ text: string; source: 'user' | 'ai' | 'idle' }>({ text: '', source: 'idle' });
-  const [actions, setActions] = useState<ToolAction[]>([]);
+  const [currentCardId, setCurrentCardId] = useState<string>(() => course.cards[0]?.id || '');
   const [error, setError] = useState<string | null>(null);
 
-  // 单例 controller(挂载时建,卸载时清理)
   useEffect(() => {
     const c = new LessonController();
     controllerRef.current = c;
     c.on('state', setState);
     c.on('subtitle', (s: { text: string; source: 'user' | 'ai' }) => setSubtitle(s));
     c.on('subtitle-clear', () => setSubtitle({ text: '', source: 'idle' }));
-    c.on('actions', (a: ToolAction[]) => setActions(a));
+    c.on('actions', (a: ToolAction[]) => {
+      const next = pickLatestCardId(a);
+      if (next) setCurrentCardId(next);
+    });
     c.on('error', (err: { message: string }) => {
       setError(err.message);
       setTimeout(() => setError(null), 3000);
@@ -95,11 +105,7 @@ export function LessonView({ course }: LessonViewProps) {
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem', overflow: 'hidden' }}>
         <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
-          <ImageCanvas
-            images={course.images}
-            currentImageId={course.images[0]?.id || ''}
-            actions={actions}
-          />
+          <WordCardCanvas cards={course.cards} currentCardId={currentCardId} />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1rem', flexShrink: 0 }}>
