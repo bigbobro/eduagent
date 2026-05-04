@@ -2,6 +2,7 @@
 import path from 'path';
 import fs from 'fs';
 import type { Database } from 'better-sqlite3';
+import { getCourseById } from '../src/data/courses/transportation';
 
 export interface ReportData {
   session: {
@@ -164,25 +165,13 @@ function parseTokenUsage(raw: string): ParsedUsage {
   }
 }
 
-interface CourseModule {
-  [key: string]: { title: string; objectives: { words: Array<{ english: string }> } } | unknown;
-}
-
 export const defaultCourseLoader: CourseLoader = async (courseId) => {
-  try {
-    const mod = (await import(`../src/data/courses/${courseId}`)) as CourseModule;
-    const candidate = Object.values(mod).find(
-      (v): v is { title: string; objectives: { words: Array<{ english: string }> } } =>
-        typeof v === 'object' && v !== null && 'title' in v && 'objectives' in v
-    );
-    if (!candidate) return null;
-    return {
-      title: candidate.title,
-      words: candidate.objectives.words.map((w) => w.english),
-    };
-  } catch {
-    return null;
-  }
+  const course = getCourseById(courseId);
+  if (!course) return null;
+  return {
+    title: course.title,
+    words: course.cards.filter((card) => card.kind === 'word').map((card) => card.english),
+  };
 };
 
 async function main(): Promise<void> {

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, it, expect } from 'vitest';
-import { buildReport, type CourseLoader } from './lesson-report-data';
+import { buildReport, defaultCourseLoader, type CourseLoader } from './lesson-report-data';
 
 function createMemDb(): Database.Database {
   const db = new Database(':memory:');
@@ -207,6 +207,13 @@ describe('buildReport — course definition', () => {
     const r = await buildReport(db, 's', noopCourseLoader);
     expect(r.session.courseTitle).toBe('unknown');
     expect(r.session.targetWords).toEqual([]);
+  });
+
+  it('defaultCourseLoader reads v2 word cards', async () => {
+    const course = await defaultCourseLoader('timeNumbers');
+
+    expect(course?.title).toBe('时间和大数字 Time & Big Numbers');
+    expect(course?.words).toEqual(['hour', 'minute', 'second', 'hundred', 'thousand', 'million', 'billion']);
   });
 });
 
