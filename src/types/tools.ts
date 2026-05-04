@@ -1,32 +1,18 @@
-export type FocusStyle = 'zoom' | 'highlight' | 'circle' | 'pulse';
-export type AnnotateType = 'circle' | 'checkmark' | 'arrow' | 'text';
-
-export interface ShowParams {
-  image_id: string;
+export interface ShowCardParams {
+  card_id: string;
 }
 
-export interface FocusParams {
-  target: string;
-  style: FocusStyle;
-}
+export type ToolName = 'show_card';
 
-export interface AnnotateParams {
-  type: AnnotateType;
-  target: string;
-  content?: string;
+export interface ToolAction {
+  tool: 'show_card';
+  params: ShowCardParams;
 }
 
 export interface GenerateState {
   type: 'sentence' | 'question' | 'comparison';
   content: string;
   topic: string;
-}
-
-export type ToolName = 'show' | 'focus' | 'annotate';
-
-export interface ToolAction {
-  tool: ToolName;
-  params: ShowParams | FocusParams | AnnotateParams;
 }
 
 export interface AgentResponse {

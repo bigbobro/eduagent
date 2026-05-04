@@ -91,7 +91,11 @@ export function detectCurrentWordAttempt(
   if (!currentWord) return null;
   if (!['review', 'learning', 'quiz'].includes(memory.phase)) return null;
 
-  const targetWords = new Set(course.objectives.words.map((w) => w.english.toLowerCase()));
+  const targetWords = new Set(
+    course.cards
+      .filter((c) => c.kind === 'word')
+      .map((c) => c.english.toLowerCase())
+  );
   if (!targetWords.has(currentWord)) return null;
 
   const tokens: string[] = userText.toLowerCase().match(/[a-z]+(?:'[a-z]+)?/g) ?? [];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { transportationCourse } from '@/data/courses/transportation';
+import { timeNumbersCourse } from '@/data/courses/timeNumbers';
 import { LessonMemory } from '@/types/session';
 import { createMemory, markWordIncorrect } from './memory';
 import { buildSystemPrompt } from './prompt';
@@ -32,5 +33,36 @@ describe('buildSystemPrompt P0 guardrails', () => {
 
     expect(prompt).toContain('连续 3 次错误');
     expect(prompt).toContain('必须切换策略');
+  });
+});
+
+describe('buildSystemPrompt v2 wordcard protocol', () => {
+  it('only declares show_card, not the legacy show/focus/annotate tools', () => {
+    const memory = createMemory();
+    const prompt = buildSystemPrompt(transportationCourse, memory);
+
+    expect(prompt).toContain('show_card');
+    expect(prompt).not.toMatch(/\btool":\s*"show"/);
+    expect(prompt).not.toContain('focus');
+    expect(prompt).not.toContain('annotate');
+    expect(prompt).not.toContain('可交互区域');
+    expect(prompt).not.toContain('总览图');
+  });
+
+  it('lists every card with id / english / chinese / kind', () => {
+    const memory = createMemory();
+    const prompt = buildSystemPrompt(timeNumbersCourse, memory);
+
+    expect(prompt).toContain('## 可用卡片');
+    expect(prompt).toContain('hour: hour / 小时 (word)');
+    expect(prompt).toContain('sentence_hour_minute: One hour has sixty minutes. / 一小时有 60 分钟。 (sentence)');
+  });
+
+  it('exposes review/new card id lists', () => {
+    const memory = createMemory();
+    const prompt = buildSystemPrompt(transportationCourse, memory);
+
+    expect(prompt).toContain('建议先复习: car, bus');
+    expect(prompt).toContain('新教卡顺序: train, airplane, bicycle, boat');
   });
 });

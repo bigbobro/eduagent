@@ -1,34 +1,17 @@
-export interface Word {
+export interface WordCard {
+  id: string;
   english: string;
   chinese: string;
-  phonetic?: string;
-  imageId?: string;
-  difficulty: number;
-  tags: string[];
-}
-
-export interface ImageRegion {
-  id: string;
-  label: string;
-  bbox: {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  };
-}
-
-export interface CourseImage {
-  id: string;
-  url: string;
-  description: string;
-  regions: ImageRegion[];
+  imageUrl: string;
+  kind: 'word' | 'sentence';
+  difficulty?: number;
+  tags?: string[];
 }
 
 export interface TeachingHints {
   opening: string;
-  reviewWords: string[];
-  newWords: string[];
+  reviewCardIds: string[];
+  newCardIds: string[];
   quizQuestions: string[];
   closing: string;
 }
@@ -38,10 +21,9 @@ export interface Course {
   title: string;
   description: string;
   targetAge: [number, number];
+  cards: WordCard[];
   objectives: {
-    words: Word[];
     sentences: string[];
   };
-  images: CourseImage[];
   teachingHints: TeachingHints;
 }
