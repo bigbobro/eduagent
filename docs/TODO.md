@@ -91,7 +91,9 @@
 要交付的 Codex skill 应覆盖:
 
 - [ ] **课程设计步骤** — 给定课程主题(如"transportation"/"animals")时,skill 引导:词汇表(中英 + 音节)、教学顺序、phase 划分、对话脚本骨架、目标 word performance 阈值。产物为一份标准结构的 `lessons/<id>.json` 草案。
-- [ ] **物料生成步骤** — 调 imagegen 把每个词汇 / 场景生成对应教学图(128×128 SVG/PNG);每张图同时存原图 + 对应 `WordCard` 条目(中英文 + imageUrl + kind)。
+- [ ] **物料生成步骤** — 调 imagegen 把每个词汇 / 场景生成对应教学图;每张图同时存原图 + 对应 `WordCard` 条目(中英文 + imageUrl + kind)。
+  - **图片生成比例:4:3 横版**(如 1024×768)。幼儿教学画布为 1:1 正方形,图片区占上 75%(恰好 4:3),文字区占下 25%。图片必须填满 4:3 区域,不留空白。
+  - **风格**:简洁、色彩鲜明、主体居中偏上(避免主体太靠底部被文字区遮挡)。
 - [ ] **落库检查步骤** — 把课程 JSON + 物料注入到 `lessons/` 目录 + `src/lib/courses.ts` 注册;自动跑校验:JSON schema(`cards[]` 结构)、引用的图片是否都存在、中英文词汇是否齐全。校验失败 → 阻断 + 给出诊断。
 - [ ] **skill 自身位置** — 放在 `~/.claude/skills/eduagent-course-author/`(或项目内 `.claude/skills/`),包含 SKILL.md(流程说明)+ 子文件(prompt 模板、schema、checklist)。
 - [x] **依赖 §0** — §0 画布重设计已完成(2026-05-05),schema 已定稿为 `cards[]` + `teachingHints`。

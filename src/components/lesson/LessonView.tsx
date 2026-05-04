@@ -90,7 +90,7 @@ export function LessonView({ course }: LessonViewProps) {
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }} className="bg-gray-50">
-      <div className="flex items-center justify-between px-6 py-3 bg-white shadow-sm">
+      <div className="flex items-center justify-between px-6 bg-white shadow-sm" style={{ height: '56px', flexShrink: 0 }}>
         <h1 className="text-xl font-bold text-gray-800">{course.title}</h1>
         {state !== 'idle' && (
           <Button variant="danger" size="sm" onClick={handleEnd}>结束课堂</Button>
@@ -103,33 +103,41 @@ export function LessonView({ course }: LessonViewProps) {
         </div>
       )}
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem', overflow: 'hidden' }}>
-        <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: '1rem', overflow: 'hidden' }}>
           <WordCardCanvas cards={course.cards} currentCardId={currentCardId} />
-        </div>
 
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1rem', flexShrink: 0 }}>
-          <div style={{ flex: 1 }}>
-            <SubtitleBar
-              text={subtitle.text}
-              source={subtitle.source}
-              isPlaying={isPlaying}
-            />
-            <div className="mt-1 text-xs text-gray-500 text-center">{helpText}</div>
-          </div>
-          <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-            <Bunny mood={mood} size={80} />
-            {state === 'idle' ? (
-              <Button size="lg" onClick={handleStart}>开始上课</Button>
-            ) : (
+          {state !== 'idle' && (
+            <div style={{ position: 'absolute', bottom: '1.75rem', right: '1.75rem', zIndex: 10, display: 'flex', alignItems: 'flex-end', gap: '0.75rem' }}>
               <HoldToTalkButton
                 disabled={!canHold}
                 active={state === 'listening'}
                 onPressStart={onPressStart}
                 onPressEnd={onPressEnd}
               />
-            )}
-          </div>
+              <Bunny mood={mood} size={80} />
+            </div>
+          )}
+        </div>
+
+        <div style={{ flexShrink: 0, padding: '0 1rem 1rem 1rem', display: 'flex', alignItems: 'center', gap: '1rem', height: '100px' }}>
+          {state === 'idle' ? (
+            <>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
+                <Bunny mood="idle" size={80} />
+                <Button size="lg" onClick={handleStart}>开始上课</Button>
+              </div>
+            </>
+          ) : (
+            <div style={{ flex: 1 }}>
+              <SubtitleBar
+                text={subtitle.text}
+                source={subtitle.source}
+                isPlaying={isPlaying}
+              />
+              <div className="mt-1 text-xs text-gray-500 text-center">{helpText}</div>
+            </div>
+          )}
         </div>
       </div>
     </div>

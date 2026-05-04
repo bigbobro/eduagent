@@ -28,27 +28,28 @@ export function WordCardCanvas({ cards, currentCardId }: WordCardCanvasProps) {
   return (
     <div
       data-kind={card.kind}
-      className="w-full h-full bg-white rounded-lg shadow-sm flex flex-col overflow-hidden transition-opacity duration-300"
+      className="mx-auto bg-white rounded-xl shadow-md overflow-hidden transition-opacity duration-300"
+      style={{ aspectRatio: '1 / 1', maxHeight: '100%', maxWidth: '100%' }}
     >
       <div
-        className="flex items-center justify-center bg-white p-4"
-        style={{ flexBasis: isSentence ? '55%' : '70%', flexShrink: 0 }}
+        className="relative overflow-hidden"
+        style={{ height: '75%' }}
       >
         <img
           src={card.imageUrl}
           alt={card.english}
-          className="max-w-full max-h-full object-contain"
+          className="absolute inset-0 w-full h-full object-cover"
         />
       </div>
       <div
-        className="flex flex-col items-center justify-center text-center px-6 py-4 border-t bg-gray-50"
-        style={{ flex: 1, minHeight: 0 }}
+        className="flex flex-col items-center justify-center text-center px-4"
+        style={{ height: '25%' }}
       >
         <div
           className={
             isSentence
-              ? 'text-2xl font-bold text-gray-800 leading-snug'
-              : 'text-4xl font-bold text-gray-800'
+              ? 'text-5xl sm:text-6xl font-bold text-gray-800 leading-snug'
+              : 'text-7xl sm:text-8xl font-bold text-gray-800'
           }
         >
           {card.english}
@@ -56,8 +57,8 @@ export function WordCardCanvas({ cards, currentCardId }: WordCardCanvasProps) {
         <div
           className={
             isSentence
-              ? 'text-lg text-gray-600 mt-2'
-              : 'text-2xl text-gray-600 mt-2'
+              ? 'text-3xl sm:text-4xl text-gray-600 mt-1'
+              : 'text-5xl sm:text-6xl text-gray-600 mt-1'
           }
         >
           {card.chinese}

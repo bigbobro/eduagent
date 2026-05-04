@@ -54,10 +54,10 @@
 | `src/lib/audio/recorder.ts` | **mic + AudioContext + worklet 模块单例**,`prewarmRecorder` 在 startLesson 提前就绪 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
-| `src/components/lesson/LessonView.tsx` | UI 容器,绑定 LessonController + 空格 + 按钮 + 兔子 + 字幕 + 画布 |
+| `src/components/lesson/LessonView.tsx` | UI 容器,绑定 LessonController + 空格 + 按钮 + 兔子 + 字幕 + 画布;idle 时画布下方显示 Bunny+开始按钮,上课后 Bunny+说话按钮移至画布右下角,下方切为字幕栏 |
 | `src/components/lesson/HoldToTalkButton.tsx` | pointerdown/up + setPointerCapture |
 | `src/components/lesson/Bunny.tsx` | 4 状态 SVG 角色(idle/listening/thinking/speaking) |
-| `src/components/lesson/WordCardCanvas.tsx` | 词卡画布:图 + 中英文独立 DOM 层,按 `show_card` 切换当前卡片 |
+| `src/components/lesson/WordCardCanvas.tsx` | 词卡画布:1:1 正方形,图片区 75%(4:3) + 文字区 25%,按 `show_card` 切换当前卡片 |
 | `src/components/lesson/SubtitleBar.tsx` | 字幕,user/ai 区分 |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/schema.ts` + `queries.ts` | SQLite 表结构 + 查询封装 |
@@ -232,6 +232,7 @@ controller.endLesson:
 | 字幕领先音频 | 不做时间戳同步 | spec 当时接受;但**实测画布跳得比讲解快 ~3s,见 TODO** |
 | 词汇正确性判定 | 当前目标英文词精确 token 命中 | 保守优先,`train` 算对、`tree` 不算;不做发音相似度猜测 |
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
+| 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 
 ---
 
