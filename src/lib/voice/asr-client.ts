@@ -1,11 +1,26 @@
 type AsrEventName = 'partial' | 'final' | 'error' | 'open' | 'close';
 type Listener<T = any> = (data: T) => void;
 
+export interface AsrClientSessionContext {
+  courseId?: string;
+  targetWords?: string[];
+  cardId?: string;
+}
+
 interface AsrPartial { type: 'partial'; text: string }
 interface AsrFinal { type: 'final'; text: string }
 interface AsrError { type: 'error'; code: string; message: string }
 
 type AsrServerMsg = AsrPartial | AsrFinal | AsrError;
+
+let sessionContext: AsrClientSessionContext = {};
+
+export function setAsrSessionContext(context: AsrClientSessionContext): void {
+  sessionContext = {
+    ...context,
+    targetWords: context.targetWords?.filter(Boolean),
+  };
+}
 
 export class AsrClient {
   private ws: WebSocket | null = null;
@@ -25,10 +40,7 @@ export class AsrClient {
   }
 
   async open(): Promise<void> {
-    const url =
-      (typeof window !== 'undefined'
-        ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`
-        : '') + '/api/voice/asr';
+    const url = buildAsrUrl(sessionContext);
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
@@ -70,4 +82,19 @@ export class AsrClient {
     else if (msg.type === 'final') this.emit('final', msg.text);
     else if (msg.type === 'error') this.emit('error', { code: msg.code, message: msg.message });
   }
+}
+
+function buildAsrUrl(context: AsrClientSessionContext): string {
+  const base =
+    (typeof window !== 'undefined'
+      ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`
+      : '') + '/api/voice/asr';
+  const params = new URLSearchParams();
+  if (context.courseId) params.set('courseId', context.courseId);
+  if (context.cardId) params.set('cardId', context.cardId);
+  if (context.targetWords && context.targetWords.length > 0) {
+    params.set('targetWords', context.targetWords.join(','));
+  }
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }

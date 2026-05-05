@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button';
 import { Course } from '@/types/course';
 import { ToolAction } from '@/types/tools';
 import { LessonController, LessonStateName } from '@/lib/voice/lesson-controller';
+import { setAsrSessionContext } from '@/lib/voice/asr-client';
 import { useSpacebar } from '@/hooks/useSpacebar';
 
 interface LessonViewProps {
@@ -39,6 +40,10 @@ export function LessonView({ course }: LessonViewProps) {
   const [subtitle, setSubtitle] = useState<{ text: string; source: 'user' | 'ai' | 'idle' }>({ text: '', source: 'idle' });
   const [currentCardId, setCurrentCardId] = useState<string>(() => course.cards[0]?.id || '');
   const [error, setError] = useState<string | null>(null);
+  const targetWords = useMemo(
+    () => course.cards.filter((card) => card.kind === 'word').map((card) => card.english),
+    [course]
+  );
 
   useEffect(() => {
     const c = new LessonController();
@@ -57,6 +62,18 @@ export function LessonView({ course }: LessonViewProps) {
     return () => {
       c.endLesson().catch(() => {});
     };
+  }, []);
+
+  useEffect(() => {
+    setAsrSessionContext({
+      courseId: course.id,
+      targetWords,
+      cardId: currentCardId,
+    });
+  }, [course.id, currentCardId, targetWords]);
+
+  useEffect(() => {
+    return () => setAsrSessionContext({});
   }, []);
 
   // 当前版本只在 awaiting/listening 状态可按 — speaking 时空格忽略(不打断)。

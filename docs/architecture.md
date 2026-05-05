@@ -40,7 +40,7 @@
 | `server.ts` | 自定义 Next.js server,WebSocket upgrade 路由分发 |
 | `src/lib/init.ts` | 启动期 env 校验(DOUBAO_*、MIMO_*),`VOICE_MOCK=true` 时放行 |
 | `src/lib/voice/doubao-codec.ts` | 豆包二进制协议编解码,ASR/TTS 共用 |
-| `src/lib/voice/asr-proxy.ts` | server 端 ASR 代理,**握手期 PCM buffer + finish 缓存** |
+| `src/lib/voice/asr-proxy.ts` | server 端 ASR 代理,**握手期 PCM buffer + finish 缓存 + targetWords hot_words 注入** |
 | `src/lib/voice/tts-proxy.ts` | server 端 TTS 代理,**长连复用**(StartConnection 一次,session 多次) |
 | `src/lib/voice/asr-client.ts` | 浏览器 ASR WS 包装,`finish()` 通知 proxy 录音结束 |
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
@@ -91,7 +91,7 @@ LessonView mount → new LessonController
        ├─ setState('listening'), 记 listenStartedAt
        ├─ new AsrClient,绑 partial/final/error
        ├─ Promise.all:
-       │   ├─ asr.open() → WS /api/voice/asr → 豆包 ASR upstream 握手
+       │   ├─ asr.open() → WS /api/voice/asr?courseId&targetWords&cardId → 豆包 ASR upstream 握手
        │   │   server 收到 PCM 时:upstreamReady ? 直接发 : 进 pendingPcm 缓存
        │   └─ startRecorder({ onChunk: pcm => asr.sendPcm(pcm) })
        │         worklet emit 200ms PCM × N
@@ -201,6 +201,7 @@ controller.endLesson:
 - **`show_utterances: true` 必传**,否则 response 没有 utterances 字段,无法判 final。
 - **`result_type: 'full'`**,不是 'single'。single 是增量,只返回当前分句,前面字会丢。
 - **`enable_ddc: false`**,儿童语料场景关掉语义顺滑(否则停顿/重复词被删字)。
+- **targetWords hot_words 注入**:浏览器 ASR WS 带 `courseId` / `targetWords` / `cardId` query,proxy 在 full client request 中写入 `request.corpus.context = "{\"hotwords\":[...]}"`。豆包本地协议文档没有 per-word weight 字段,也没有 `language_hint`;当前继续不传 `audio.language`,使用默认中英文识别能力。
 - **客户端不能直接 close WS**:必须发 `{type:'finish'}` 控制帧给 proxy,proxy 发 -seq 给豆包后等 final 自然回来,client 收到 final 才 close。直接 close 会让上游 session 立刻断,final 永远收不到,UI 卡 thinking。
 - **proxy 必须 buffer upstream 握手期间的 PCM**:client WS 几十 ms 就 open,但 proxy → 豆包 upstream 握手 + 发 full client request 要 1-3 秒。这段时间 client 已经在送 PCM,如果 proxy 直接 drop,前 1-3 秒说话会丢失。
 

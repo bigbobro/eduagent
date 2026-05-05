@@ -2,6 +2,7 @@ import type { IncomingMessage } from 'http';
 import type { Socket } from 'net';
 import { WebSocket as WsClient, WebSocketServer } from 'ws';
 import { randomUUID } from 'crypto';
+import { getCourseById } from '../../data/courses/transportation';
 import {
   encodeFullClientRequest,
   encodeAudioOnlyRequest,
@@ -15,16 +16,125 @@ const DOUBAO_ASR_URL = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_asyn
 
 const wss = new WebSocketServer({ noServer: true });
 
+export interface AsrSessionInfo {
+  courseId?: string;
+  targetWords?: string[];
+  cardId?: string;
+}
+
+interface AsrRequestPayload {
+  user: { uid: string; platform: string };
+  audio: { format: 'pcm'; rate: 16000; bits: 16; channel: 1 };
+  request: {
+    model_name: 'bigmodel';
+    enable_punc: boolean;
+    enable_ddc: boolean;
+    show_utterances: boolean;
+    result_type: 'full';
+    end_window_size: number;
+    corpus?: {
+      context: string;
+    };
+  };
+}
+
 export function handleASRUpgrade(req: IncomingMessage, socket: Socket, head: Buffer): void {
   if (process.env.VOICE_MOCK === 'true') {
     return handleMockASR(req, socket, head);
   }
   wss.handleUpgrade(req, socket, head, (clientWs) => {
-    bridge(clientWs);
+    bridge(clientWs, parseAsrSessionInfoFromUrl(req.url));
   });
 }
 
-function bridge(clientWs: WsClient): void {
+export function parseAsrSessionInfoFromUrl(reqUrl: string | undefined): AsrSessionInfo {
+  const url = new URL(reqUrl || '/api/voice/asr', 'ws://localhost');
+  const courseId = cleanWord(url.searchParams.get('courseId') || undefined);
+  const cardId = cleanWord(url.searchParams.get('cardId') || undefined);
+  const queryTargetWords = url.searchParams
+    .getAll('targetWords')
+    .flatMap(splitWords)
+    .map(cleanWord)
+    .filter((word): word is string => Boolean(word));
+  const courseTargetWords = courseId ? getCourseTargetWords(courseId) : [];
+  const targetWords = dedupeWords(queryTargetWords.length > 0 ? queryTargetWords : courseTargetWords);
+  return {
+    ...(courseId ? { courseId } : {}),
+    ...(targetWords.length > 0 ? { targetWords } : {}),
+    ...(cardId ? { cardId } : {}),
+  };
+}
+
+export function buildAsrRequestPayload(session: AsrSessionInfo = {}, uid: string = 'eduagent-test'): AsrRequestPayload {
+  const hotWords = buildHotWords(session);
+  const payload: AsrRequestPayload = {
+    user: { uid, platform: 'web' },
+    audio: { format: 'pcm', rate: 16000, bits: 16, channel: 1 },
+    request: {
+      model_name: 'bigmodel',
+      enable_punc: true,
+      enable_ddc: false,
+      show_utterances: true,
+      result_type: 'full',
+      end_window_size: 800,
+    },
+  };
+
+  if (hotWords.length > 0) {
+    payload.request.corpus = {
+      context: JSON.stringify({
+        hotwords: hotWords.map((word) => ({ word })),
+      }),
+    };
+  }
+
+  return payload;
+}
+
+function buildHotWords(session: AsrSessionInfo): string[] {
+  const words = [...(session.targetWords || [])];
+  const cardWord = getCardHotWord(session.courseId, session.cardId);
+  if (cardWord) words.push(cardWord);
+  return dedupeWords(words.map(cleanWord).filter((word): word is string => Boolean(word)));
+}
+
+function getCourseTargetWords(courseId: string): string[] {
+  const course = getCourseById(courseId);
+  if (!course) return [];
+  return course.cards
+    .filter((card) => card.kind === 'word')
+    .map((card) => card.english);
+}
+
+function getCardHotWord(courseId: string | undefined, cardId: string | undefined): string | null {
+  if (!courseId || !cardId) return null;
+  const course = getCourseById(courseId);
+  const card = course?.cards.find((item) => item.id === cardId);
+  return card?.english || null;
+}
+
+function splitWords(value: string): string[] {
+  return value.split(/[,，|]/g);
+}
+
+function cleanWord(value: string | undefined): string | undefined {
+  const word = value?.trim();
+  return word || undefined;
+}
+
+function dedupeWords(words: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const word of words) {
+    const key = word.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(word);
+  }
+  return result;
+}
+
+function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
   const requestId = randomUUID();
   const tag = `[asr ${requestId.slice(0, 8)}]`;
   console.log(`${tag} bridge open`);
@@ -59,18 +169,10 @@ function bridge(clientWs: WsClient): void {
   upstream.on('open', () => {
     upstreamReady = true;
     console.log(`${tag} upstream open`);
-    const payload = {
-      user: { uid: `eduagent-${requestId}`, platform: 'web' },
-      audio: { format: 'pcm', rate: 16000, bits: 16, channel: 1 },
-      request: {
-        model_name: 'bigmodel',
-        enable_punc: true,
-        enable_ddc: false,
-        show_utterances: true,
-        result_type: 'full',
-        end_window_size: 800,
-      },
-    };
+    const payload = buildAsrRequestPayload(session, `eduagent-${requestId}`);
+    if (payload.request.corpus) {
+      console.log(`${tag} hot_words ${payload.request.corpus.context}`);
+    }
     upstream.send(encodeFullClientRequest(payload, sequence++));
     // flush 握手期间缓存的 PCM
     if (pendingPcm.length > 0) {
