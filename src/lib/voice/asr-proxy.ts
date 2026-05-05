@@ -91,6 +91,28 @@ export function buildAsrRequestPayload(session: AsrSessionInfo = {}, uid: string
   return payload;
 }
 
+export function correctAsrTextWithSessionContext(text: string, session: AsrSessionInfo = {}): string {
+  const cardText = getCardHotWord(session.courseId, session.cardId);
+  if (!cardText) return text;
+
+  const normalizedText = normalizeForCorrection(text);
+  const normalizedCard = normalizeForCorrection(cardText);
+  if (!normalizedText || normalizedText.includes(normalizedCard)) return text;
+
+  if (isWordCard(session.courseId, session.cardId)) {
+    const aliases = getWordAliases(normalizedCard);
+    if (aliases.some((alias) => aliasMatches(normalizedText, alias))) {
+      return cardText;
+    }
+  }
+
+  if (isSentenceCard(session.courseId, session.cardId) && sentenceLooksLikeCard(text, cardText)) {
+    return cardText;
+  }
+
+  return text;
+}
+
 function buildHotWords(session: AsrSessionInfo): string[] {
   const words = [...(session.targetWords || [])];
   const cardWord = getCardHotWord(session.courseId, session.cardId);
@@ -111,6 +133,51 @@ function getCardHotWord(courseId: string | undefined, cardId: string | undefined
   const course = getCourseById(courseId);
   const card = course?.cards.find((item) => item.id === cardId);
   return card?.english || null;
+}
+
+function isWordCard(courseId: string | undefined, cardId: string | undefined): boolean {
+  if (!courseId || !cardId) return false;
+  const course = getCourseById(courseId);
+  return course?.cards.find((item) => item.id === cardId)?.kind === 'word';
+}
+
+function isSentenceCard(courseId: string | undefined, cardId: string | undefined): boolean {
+  if (!courseId || !cardId) return false;
+  const course = getCourseById(courseId);
+  return course?.cards.find((item) => item.id === cardId)?.kind === 'sentence';
+}
+
+function getWordAliases(normalizedCard: string): string[] {
+  const aliases: Record<string, string[]> = {
+    hour: ['our', 'h r o', 'hro', '啊我'],
+    thousand: ['1st', 'first', 'official', '官方', '弯的房子'],
+  };
+  return aliases[normalizedCard] || [];
+}
+
+function aliasMatches(normalizedText: string, alias: string): boolean {
+  if (/[\u4e00-\u9fff]/.test(alias)) return normalizedText.includes(alias);
+  if (alias.includes(' ')) return normalizedText === alias;
+  return normalizedText.split(' ').includes(alias);
+}
+
+function sentenceLooksLikeCard(text: string, cardText: string): boolean {
+  const normalizedText = normalizeForCorrection(text);
+  const normalizedCard = normalizeForCorrection(cardText);
+  if (normalizedCard === 'one thousand is ten hundreds') {
+    return (
+      (normalizedText.includes('1000') || normalizedText.includes('thousand')) &&
+      (normalizedText.includes('10') || normalizedText.includes('ten'))
+    );
+  }
+  return false;
+}
+
+function normalizeForCorrection(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ')
+    .trim();
 }
 
 function splitWords(value: string): string[] {
@@ -214,14 +281,16 @@ function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
     if (frame.serialization !== Serialization.JSON) return;
     const json = safeParse(frame.payload.toString('utf8'));
     if (!json) return;
-    const text = json?.result?.text ?? '';
+    const rawText = json?.result?.text ?? '';
     const utterances = json?.result?.utterances ?? [];
     const isFinal =
       utterances.length > 0 &&
       utterances.every((u: any) => u.definite === true);
+    const text = isFinal ? correctAsrTextWithSessionContext(rawText, session) : rawText;
     if (isFinal) {
       finalSeen = true;
-      console.log(`${tag} final: "${text}" (${utterances.length} utts)`);
+      const correction = text !== rawText ? ` corrected_from="${rawText}"` : '';
+      console.log(`${tag} final: "${text}"${correction} (${utterances.length} utts)`);
     }
     clientWs.send(JSON.stringify({ type: isFinal ? 'final' : 'partial', text }));
   });

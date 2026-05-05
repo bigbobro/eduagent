@@ -28,8 +28,9 @@
    - timeNumbers 实测同样严重:`hour` -> 「啊我」/「H R O」,`thousand` -> 「官方」/「弯的房子」/「1st」(报告 §1)。
    - [x] 在 `src/lib/voice/asr-proxy.ts` 建链时把 session `targetWords` + 当前 `card_id` 关键词作为 hot_words 注入豆包请求(协议实际入口是 `request.corpus.context` JSON string 的 `hotwords`)。
    - [x] 调研豆包 ASR 中英混合 language hint:本地协议未出现 `language_hint`;`audio.language` 不传时默认支持中英文,当前保持不传。
-   - [x] 加自动化回归(**部分完成**):hotwords 注入 JSON shape 单测已写(`tests/asr-hot-words.test.ts` 3 case)。
-   - [ ] **fixture audio 端到端回归待补**:目前 `tests/fixtures/audio/*.wav` 是 4KB 占位 WAV(只有 header 无音频内容)。需用豆包 TTS 真合成儿童音色音频 + 端到端跑 ASR proxy 断言识别命中目标词。已交回 Codex 二次补完。当前阶段真实效果验证依赖第 3 节课实测(当前阶段次序第 3 步)。
+   - [x] 加自动化回归:hotwords 注入 JSON shape 单测 + 真实 fixture 质量检查(`tests/asr-hot-words.test.ts`)。
+   - [x] fixture audio 端到端回归已补:`tests/fixtures/audio/{hour,minute,thousand,one_thousand_is_ten_hundreds}.wav` 已由豆包 TTS 真实合成;`pnpm run voice:asr-hotwords` 会跑 baseline + hotwords 两组真实 ASR 并写本地报告到 `docs/lesson-reports/asr-hotwords-regression-*.json`。
+   - [x] 效果验证结论:豆包热词直传本身对 `hour -> Our.`、`One thousand is ten hundreds -> 1000 is 10.` 未改善,已在 ASR final 阶段加基于当前 `cardId` 的保守纠正 fallback。当前阶段仍需第 3 节课实测验证真人儿童语音体感。
 
 2. **写第 3 节课**
    - 主题待定(候选:animals / colors / family / food / body parts)。
