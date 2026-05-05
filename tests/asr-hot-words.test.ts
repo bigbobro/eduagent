@@ -3,7 +3,6 @@ import fs from 'fs';
 import path from 'path';
 import {
   buildAsrRequestPayload,
-  correctAsrTextWithSessionContext,
   parseAsrSessionInfoFromUrl,
 } from '@/lib/voice/asr-proxy';
 
@@ -42,31 +41,6 @@ describe('ASR hot words', () => {
     const payload = buildAsrRequestPayload();
 
     expect(payload.request.corpus).toBeUndefined();
-  });
-
-  it('corrects known ASR misses only when the current card context is explicit', () => {
-    expect(
-      correctAsrTextWithSessionContext('Our.', {
-        courseId: 'timeNumbers',
-        targetWords: ['hour'],
-        cardId: 'hour',
-      })
-    ).toBe('hour');
-    expect(
-      correctAsrTextWithSessionContext('1000 is 10.', {
-        courseId: 'timeNumbers',
-        targetWords: ['thousand', 'hundred'],
-        cardId: 'sentence_thousand_hundred',
-      })
-    ).toBe('One thousand is ten hundreds.');
-    expect(correctAsrTextWithSessionContext('Our.', {})).toBe('Our.');
-    expect(
-      correctAsrTextWithSessionContext('Your.', {
-        courseId: 'timeNumbers',
-        targetWords: ['hour'],
-        cardId: 'hour',
-      })
-    ).toBe('Your.');
   });
 
   it('keeps ASR regression fixtures as real non-empty PCM WAV audio', () => {

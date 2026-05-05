@@ -12,36 +12,39 @@
 - [x] `/lesson-report` 已兼容 v2 课程结构。
 - [x] timeNumbers 跑过一节实测 → 报告 `docs/lesson-reports/2026-05-05-eb25ad66.md`。
 
-## 当前阶段次序(2026-05-05 review 后)
+## 当前阶段次序(2026-05-06 review 后)
 
-按"内容驱动 + 最小止损"思路。先解决直接卡学习的 ASR 硬伤,再写新课暴露真实痛点,实测累积到 2-3 个 session 后再决定是否启动状态感知重构。
+按"内容驱动 + 最小止损 + LLM 容错替代规则纠正"思路。先把 ASR 注入路径打通(已 done),撤掉过拟合的字典 fallback;**然后并行两条线**:写新课产出内容,以及启动教学循环 v1.1 让 LLM 基于 raw ASR + cardId 自行容错。
 
-1. **(止损)P1 §1 ASR hot_words 注入** — 1-2 小时投入,直接解决 timeNumbers 报告里 thousand → 「官方」/ hour → 「啊我」这类阻断学习的硬伤
-2. **(内容)P1 §2 写第 3 节课** — 走通现有架构产出新内容,顺带暴露架构痛点是不是真普遍
-3. **(实测)再跑一节实测 + lesson-report** — 对比 timeNumbers 报告:ASR 改后命中率有没有改善、状态感知问题(提前结课 / 总结口径)是不是每节都犯
-4. **(决策)** 等 2-3 个 session 报告积累后再决定:启动 P1 §3 教学循环 v1.1?启动 P1 §4 Hybrid 重构?或继续内容?
+1. **(止损·完成)P1 §1 ASR hot_words 注入** — 已落地;真实回归证明协议层 hot_words 对短英文词与数字归一化无救命效果,字典纠正 fallback 已撤;ASR 容错路径转交 P1 §3 LLM 容错判定承担
+2. **(内容)P1 §2 写第 3 节课** — 走通现有架构产出新内容
+3. **(工程)P1 §3 教学循环 v1.1** — 已 ungate(2026-05-06)。理由:hotwords 不救命这件事,是除了 timeNumbers 单节实测之外的独立证据,证明短英文词 ASR 不可信不是个偶发数据点,LLM 容错判定是必须的
+4. **(实测)用第 3 节课跑实测 + lesson-report** — 验证 §3 LLM 容错是否真的解决"轮 14 已说对仍要求复读"和"提前结课"
+5. **(决策)** 看真人实测报告再决定:启动 P1 §4 Hybrid 重构?或继续内容?
 
 ## P1 队列
 
-1. **ASR hot words / context**
+1. **ASR hot words / context** *(完成,但效果有限——见下方真实回归基线)*
    - transportation 实测里儿童英文误识明显:`Airplane` -> `Apple` / `AirPods` 等。
    - timeNumbers 实测同样严重:`hour` -> 「啊我」/「H R O」,`thousand` -> 「官方」/「弯的房子」/「1st」(报告 §1)。
    - [x] 在 `src/lib/voice/asr-proxy.ts` 建链时把 session `targetWords` + 当前 `card_id` 关键词作为 hot_words 注入豆包请求(协议实际入口是 `request.corpus.context` JSON string 的 `hotwords`)。
    - [x] 调研豆包 ASR 中英混合 language hint:本地协议未出现 `language_hint`;`audio.language` 不传时默认支持中英文,当前保持不传。
-   - [x] 加自动化回归:hotwords 注入 JSON shape 单测 + 真实 fixture 质量检查(`tests/asr-hot-words.test.ts`)。
-   - [x] fixture audio 端到端回归已补:`tests/fixtures/audio/{hour,minute,thousand,one_thousand_is_ten_hundreds}.wav` 已由豆包 TTS 真实合成;`pnpm run voice:asr-hotwords` 会跑 baseline + hotwords 两组真实 ASR 并写本地报告到 `docs/lesson-reports/asr-hotwords-regression-*.json`。
-   - [x] 效果验证结论:豆包热词直传本身对 `hour -> Our.`、`One thousand is ten hundreds -> 1000 is 10.` 未改善,已在 ASR final 阶段加基于当前 `cardId` 的保守纠正 fallback。当前阶段仍需第 3 节课实测验证真人儿童语音体感。
+   - [x] 加自动化回归:hotwords 注入 JSON shape 单测 + fixture WAV 真实音频质量检查(`tests/asr-hot-words.test.ts`);`pnpm run voice:asr-hotwords` 跑 baseline + hotwords 真实 ASR 写报告到 `docs/lesson-reports/asr-hotwords-regression-*.json`。
+   - **2026-05-06 真实回归基线结论**:协议层 hot_words 对 `hour -> Our.`、`One thousand is ten hundreds -> 1000 is 10.` 未生效——豆包 ASR 在英文短词与数字归一化上 weak,不是 hot_words 能调的。
+   - **2026-05-06 撤销字典化 fallback**:此前 Codex 加的 `correctAsrTextWithSessionContext`(把 `Our.` 强改 `hour` / `1000 is 10.` 强改 `One thousand is ten hundreds`)已删除。原因:(1) 字典基于 timeNumbers 一节的具体误识结果枚举,过拟合,新课会重新写一遍;(2) 让 ASR 文本被覆写,下游 LLM 看不到学生实际说了什么,反而损害"基于 raw ASR 自行容错判定 mastery"的路径。容错改由 P1 §3 LLM 容错判定承担。
 
 2. **写第 3 节课**
    - 主题待定(候选:animals / colors / family / food / body parts)。
    - 目标:走通现有架构产出更多教学内容,暴露架构痛点是否普遍;不开发新功能,只用现有 `cards[]` + `show_card` 接口。
    - 完成后跑 /lesson-report,与 timeNumbers 报告对比。
 
-3. **教学循环 v1.1 — 状态感知(进度 / 收敛 / 总结)** *(gated:等 2-3 节实测后再启动)*
+3. **教学循环 v1.1 — 状态感知 + LLM 容错(进度 / 收敛 / 总结 / ASR 容错)** *(2026-05-06 ungate)*
    - timeNumbers 实测里 LLM 不基于"已掌握"信号收敛:学生轮 14 已说对 thousand,轮 15 仍要求复读;课末总结说"已掌握 thousand"但句子层完全失败(报告 §2)。
    - 课程进度也不基于"剩余目标":定义 7 词 + 4 句共 11 个 card,实测只覆盖 3/7 词 + 1/4 句,LLM 在轮 16 仍主动 wrap up,轮 17 学生说"现在学万"被拒。
-   - **gating 理由**:单节样本说服力有限,要看新课实测是不是同样症状再启动,避免基于一节课就改架构。
+   - **新增任务(承接撤销的 ASR fallback)**:豆包 ASR 在英文短词与数字归一化上 weak,字典纠正过拟合不可持续。让 LLM 直接拿 raw ASR + 当前 cardId 自行容错判定学生是否说对(LLM 容错能力 >> 规则字典)。
+   - **ungate 理由**:hotwords 不救命的回归实测,加上 timeNumbers 的状态感知缺失,是两条独立证据。LLM 容错判定是必须的,不再等 2-3 节实测。
    - [ ] LessonController 维护 `wordMastery: Record<word, { correctCount, lastCorrectRound }>` + `cardProgress: Record<card_id, 'untouched' | 'attempted' | 'mastered'>`,作为 LLM 上下文显式传入。
+   - [ ] **LLM ASR 容错判定**:LLM 拿 raw ASR + 当前 card 的英文目标 + 课程目标词列表,自己判定学生是否说对(允许同音、近似、被豆包归一化为数字等)。判定结果写入 `wordMastery`。加 fixture 单测:fake「raw ASR = 'Our.', card = 'hour'」→ 断言判定 correct;fake「raw ASR = '1000 is 10.', card = 'sentence_thousand_hundred'」→ 断言判定 correct。
    - [ ] system prompt 加规则「同一目标词 mastered 后必须切换到下一个 untouched card」,加 fixture 单测:fake「连续 2 轮 user = thousand」→ 断言下一轮 LLM 不再要求复读。
    - [ ] system prompt 加规则「`cardProgress` 中存在 untouched card 时不得使用结课话术」(防止剩 8 个 card 没教就 wrap up),加 fixture 单测验证。
    - [ ] 课末总结改为基于 `wordMastery` + `cardProgress` 实际数据生成,不交给 LLM 自由发挥(避免"掌握"口径与实际不匹配)。

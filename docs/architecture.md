@@ -40,7 +40,7 @@
 | `server.ts` | 自定义 Next.js server,WebSocket upgrade 路由分发 |
 | `src/lib/init.ts` | 启动期 env 校验(DOUBAO_*、MIMO_*),`VOICE_MOCK=true` 时放行 |
 | `src/lib/voice/doubao-codec.ts` | 豆包二进制协议编解码,ASR/TTS 共用 |
-| `src/lib/voice/asr-proxy.ts` | server 端 ASR 代理,**握手期 PCM buffer + finish 缓存 + targetWords hot_words 注入 + final 保守纠正** |
+| `src/lib/voice/asr-proxy.ts` | server 端 ASR 代理,**握手期 PCM buffer + finish 缓存 + targetWords hot_words 注入** |
 | `src/lib/voice/tts-proxy.ts` | server 端 TTS 代理,**长连复用**(StartConnection 一次,session 多次) |
 | `src/lib/voice/asr-client.ts` | 浏览器 ASR WS 包装,`finish()` 通知 proxy 录音结束 |
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
@@ -202,7 +202,7 @@ controller.endLesson:
 - **`result_type: 'full'`**,不是 'single'。single 是增量,只返回当前分句,前面字会丢。
 - **`enable_ddc: false`**,儿童语料场景关掉语义顺滑(否则停顿/重复词被删字)。
 - **targetWords hot_words 注入**:浏览器 ASR WS 带 `courseId` / `targetWords` / `cardId` query,proxy 在 full client request 中写入 `request.corpus.context = "{\"hotwords\":[...]}"`。豆包本地协议文档没有 per-word weight 字段,也没有 `language_hint`;当前继续不传 `audio.language`,使用默认中英文识别能力。
-- **ASR final 保守纠正**:真实回归证明豆包热词直传对 `hour -> Our.`、`One thousand is ten hundreds -> 1000 is 10.` 未生效。proxy 只在 final 阶段、且当前 `cardId` 明确指向目标卡时做窄规则纠正,例如 `hour` 卡把 `Our.` 纠为 `hour`,句卡 `sentence_thousand_hundred` 把 `1000 is 10.` 纠为 `One thousand is ten hundreds.`。partial 不纠正。
+- **真实回归基线(2026-05-05)**:hotwords 注入对 `hour -> Our.`、`One thousand is ten hundreds -> 1000 is 10.` 未生效——豆包 ASR 在英文短词与数字归一化场景上 weak,protocol 层 hot_words 不解决根因。曾尝试过的"final 阶段窄规则纠正(`Our.` → `hour`)"已撤销,因为字典化纠正会过拟合到一节课的具体误识结果,且让下游 LLM 看不见 ASR 真实输出,反而损害"基于 raw ASR 自行容错判定"的 mastery 检测路径。真实 ASR 容错改由教学循环 v1.1 的 LLM 容错判定承担(见 TODO P1 §3)。
 - **客户端不能直接 close WS**:必须发 `{type:'finish'}` 控制帧给 proxy,proxy 发 -seq 给豆包后等 final 自然回来,client 收到 final 才 close。直接 close 会让上游 session 立刻断,final 永远收不到,UI 卡 thinking。
 - **proxy 必须 buffer upstream 握手期间的 PCM**:client WS 几十 ms 就 open,但 proxy → 豆包 upstream 握手 + 发 full client request 要 1-3 秒。这段时间 client 已经在送 PCM,如果 proxy 直接 drop,前 1-3 秒说话会丢失。
 
@@ -259,7 +259,7 @@ controller.endLesson:
 - **课程 Session resume**:`sessions` 是 module-level in-memory Map,server 重启 / 刷新 / 断网 = 客户端旧 sessionId 失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。需 SQLite 持久化 + client resume 流程。
 - **actions 与 TTS 时序**:`show_card` 动作领先 AI 讲解,体感跳得太快
 - **MiMo first-token 4 秒**:首音频延迟主要瓶颈,前端无法优化
-- **ASR 识别质量**:已补 targetWords hotwords + final 保守纠正;真实儿童语音体感仍需下一节课实测验证
+- **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。真实儿童语音容错改由教学循环 v1.1 的 LLM 容错判定承担,等下一节课实测时一并跑
 - **Token 消耗偏高**:仍保留最近 20 轮原文,尚未做滑动窗口或摘要压缩
 - **音色微调**:Tina老师2.0 当前满足,后续可做更细试听
 - **VAD 自动停止**:依赖用户主动松手,无静音兜底(防"按住不放")

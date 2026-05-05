@@ -15,7 +15,6 @@ import {
 } from '../src/lib/voice/doubao-codec';
 import {
   buildAsrRequestPayload,
-  correctAsrTextWithSessionContext,
   type AsrSessionInfo,
 } from '../src/lib/voice/asr-proxy';
 
@@ -118,11 +117,7 @@ async function main(): Promise<void> {
 
     console.log(`[asr-regression] ${item.id}: hotwords`);
     const hotwordsText = await runAsr(pcmWithSilence, item.session, item.id, 'hotwords');
-    const hotwords = assessResult(
-      correctAsrTextWithSessionContext(hotwordsText, item.session),
-      item.requiredTerms,
-      hotwordsText
-    );
+    const hotwords = assessResult(hotwordsText, item.requiredTerms);
     console.log(`[asr-regression] ${item.id}: hotwords="${hotwords.text}" matched=${hotwords.matched}`);
 
     results.push({
