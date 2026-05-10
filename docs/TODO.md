@@ -12,13 +12,13 @@
 - [x] `/lesson-report` 已兼容 v2 课程结构。
 - [x] timeNumbers 跑过一节实测 → 报告 `docs/lesson-reports/2026-05-05-eb25ad66.md`。
 
-## 当前阶段次序(2026-05-06 review 后)
+## 当前阶段次序(2026-05-10 v1.1 后)
 
-按"内容驱动 + 最小止损 + LLM 容错替代规则纠正"思路。先把 ASR 注入路径打通(已 done),撤掉过拟合的字典 fallback;**然后并行两条线**:写新课产出内容,以及启动教学循环 v1.1 让 LLM 基于 raw ASR + cardId 自行容错。
+按"内容驱动 + 最小止损 + LLM 容错替代规则纠正"思路。ASR 注入路径已打通,过拟合字典 fallback 已撤,教学循环 v1.1 已落地。下一步写第 3 节课并用真人实测 + lesson-report 验证 v1.1。
 
 1. **(止损·完成)P1 §1 ASR hot_words 注入** — 已落地;真实回归证明协议层 hot_words 对短英文词与数字归一化无救命效果,字典纠正 fallback 已撤;ASR 容错路径转交 P1 §3 LLM 容错判定承担
-2. **(内容)P1 §2 写第 3 节课** — 走通现有架构产出新内容
-3. **(工程)P1 §3 教学循环 v1.1** — 已 ungate(2026-05-06)。理由:hotwords 不救命这件事,是除了 timeNumbers 单节实测之外的独立证据,证明短英文词 ASR 不可信不是个偶发数据点,LLM 容错判定是必须的
+2. **(工程·完成)P1 §3 教学循环 v1.1** — 已落地:drillParts、cardProgress、clearedCardIds、LLM attempt_assessment、history 6 轮窗口
+3. **(内容)P1 §2 写第 3 节课** — 走通 v1.1 后的现有架构产出新内容
 4. **(实测)用第 3 节课跑实测 + lesson-report** — 验证 §3 LLM 容错是否真的解决"轮 14 已说对仍要求复读"和"提前结课"
 5. **(决策)** 看真人实测报告再决定:启动 P1 §4 Hybrid 重构?或继续内容?
 
@@ -43,12 +43,12 @@
    - 课程进度也不基于"剩余目标":定义 7 词 + 4 句共 11 个 card,实测只覆盖 3/7 词 + 1/4 句,LLM 在轮 16 仍主动 wrap up,轮 17 学生说"现在学万"被拒。
    - **新增任务(承接撤销的 ASR fallback)**:豆包 ASR 在英文短词与数字归一化上 weak,字典纠正过拟合不可持续。让 LLM 直接拿 raw ASR + 当前 cardId 自行容错判定学生是否说对(LLM 容错能力 >> 规则字典)。
    - **ungate 理由**:hotwords 不救命的回归实测,加上 timeNumbers 的状态感知缺失,是两条独立证据。LLM 容错判定是必须的,不再等 2-3 节实测。
-   - [ ] LessonController 维护 `wordMastery: Record<word, { correctCount, lastCorrectRound }>` + `cardProgress: Record<card_id, 'untouched' | 'attempted' | 'mastered'>`,作为 LLM 上下文显式传入。
-   - [ ] **LLM ASR 容错判定**:LLM 拿 raw ASR + 当前 card 的英文目标 + 课程目标词列表,自己判定学生是否说对(允许同音、近似、被豆包归一化为数字等)。判定结果写入 `wordMastery`。加 fixture 单测:fake「raw ASR = 'Our.', card = 'hour'」→ 断言判定 correct;fake「raw ASR = '1000 is 10.', card = 'sentence_thousand_hundred'」→ 断言判定 correct。
-   - [ ] system prompt 加规则「同一目标词 mastered 后必须切换到下一个 untouched card」,加 fixture 单测:fake「连续 2 轮 user = thousand」→ 断言下一轮 LLM 不再要求复读。
-   - [ ] system prompt 加规则「`cardProgress` 中存在 untouched card 时不得使用结课话术」(防止剩 8 个 card 没教就 wrap up),加 fixture 单测验证。
-   - [ ] 课末总结改为基于 `wordMastery` + `cardProgress` 实际数据生成,不交给 LLM 自由发挥(避免"掌握"口径与实际不匹配)。
-   - [ ] LLM context 裁剪:平均 input 1401 tokens/轮、峰值 1636,确认/实现历史滚动窗口(如最近 6 轮 + summary),加单测断言 fake 17 轮 session 第 17 轮 input < 阈值。
+   - [x] 课程数据新增必填 `drillParts:string[]`,现有两课全补,作为 close/wrong 时慢读拆解脚手架。
+   - [x] 服务端 memory 维护 `currentCardId` + `cardProgress: Record<card_id, 'untouched' | 'attempted' | 'cleared' | 'needs_review'>` + `clearedCardIds`,并把 `show_card` action 作为 currentCardId 真相来源。
+   - [x] **LLM ASR 容错判定**:LLM 拿 raw ASR + 当前 card 英文目标 + `drillParts` + 课程目标词列表,在同次 JSON 里输出 `attempt_assessment`。单词同音/近音可 correct;句子语义接近但不完整先 close。
+   - [x] close/wrong 教学策略:单次输出必须 3 步慢读脚手架(正确示范 → 按 drillParts 慢读 2-3 次 → 请按麦克风再读一次);同一卡第 3 次非 correct 进入 `needs_review`,必须换策略或暂时跳过。
+   - [x] system prompt 加规则:`cleared` 只表示本节课可推进,不是长期掌握;untouched card 非空不得结课。服务端也拒绝 premature closing state_update。
+   - [x] LLM context 裁剪:history 保留最近 12 条 message(约最近 6 轮),依赖 memory 状态注入课堂事实。
 
 4. **(暂记,不实施)Hybrid 预渲染话术架构 — LLM 退化为决策器**
 

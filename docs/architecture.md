@@ -114,8 +114,10 @@ ASR final 到达 client
   └─ controller.handleAsrFinal(text)
        ├─ clearTimeout(asrFinalTimer), asr.close, asr=null
        ├─ POST /api/chat { action:'message', sessionId, text, asrResult }
-       │   server: detectCurrentWordAttempt → upsertWordPerformance
-       │           → streamLLM (MiMo) → SpeechExtractor 状态机 → SSE
+       │   server: add raw ASR user message
+       │           → streamLLM (MiMo, prompt 含 currentCardId/cardProgress/drillParts)
+       │           → SpeechExtractor 状态机 → SSE
+       │           → commit attempt_assessment + show_card 到 cardProgress/clearedCardIds
        │           → token_usage 记录 LLM + ASR + TTS 字符数
        │            speech-delta × N + actions + done
        └─ consumeSSE:
@@ -128,6 +130,7 @@ ASR final 到达 client
               ◀── TTSSentenceStart (event=350) → tts.on('subtitle') → emit subtitle
             actions:
               emit('actions') → LessonView 从最后一条 show_card 提取 card_id → WordCardCanvas 切换当前卡片
+              server 同步使用 show_card 作为 currentCardId 的事实来源
             done → tts.finishSession (event=102)
               ◀── SessionFinished (event=152) → setState('awaiting')
 ```
@@ -259,8 +262,8 @@ controller.endLesson:
 - **课程 Session resume**:`sessions` 是 module-level in-memory Map,server 重启 / 刷新 / 断网 = 客户端旧 sessionId 失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。需 SQLite 持久化 + client resume 流程。
 - **actions 与 TTS 时序**:`show_card` 动作领先 AI 讲解,体感跳得太快
 - **MiMo first-token 4 秒**:首音频延迟主要瓶颈,前端无法优化
-- **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。真实儿童语音容错改由教学循环 v1.1 的 LLM 容错判定承担,等下一节课实测时一并跑
-- **Token 消耗偏高**:仍保留最近 20 轮原文,尚未做滑动窗口或摘要压缩
+- **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。当前由教学循环 v1.1 的 LLM `attempt_assessment` 基于 raw ASR + currentCardId + drillParts 做课堂内容错判定,真实儿童语音效果等下一节课实测
+- **Token 消耗偏高**:LLM message history 已裁到最近 12 条(约 6 轮),仍未做摘要压缩
 - **音色微调**:Tina老师2.0 当前满足,后续可做更细试听
 - **VAD 自动停止**:依赖用户主动松手,无静音兜底(防"按住不放")
 - **WebSocket 重连退避**:当前重连一次,可加指数退避
@@ -276,6 +279,7 @@ controller.endLesson:
 - 2026-05-01 — 新增 architecture.md + CLAUDE.md(本 living doc 制度建立)
 - 2026-05-01 — git history redact secrets + CLAUDE.md 加凭据规则
 - 2026-05-05 — **画布 v2:WordCardCanvas 替换 ImageCanvas** — 协议从 show/focus/annotate 统一为 `show_card`;课程数据从 `images[]` 迁移到 `cards[]`(`kind: 'word'|'sentence'`);画布层从图叠层改为图+中英文独立 DOM;删除 ShowTool/FocusTool/AnnotateTool 组件
+- 2026-05-10 — **教学循环 v1.1:课堂内进度引擎 + drillParts** — 每张 card 必填 `drillParts`;服务端用 `show_card` 同步 currentCardId;LLM 输出 `attempt_assessment`;memory 维护 `cardProgress` / `clearedCardIds`;history 裁到最近 12 条
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 

@@ -7,12 +7,12 @@ export const transportationCourse: Course = {
   description: '学习常见的交通工具英文名称',
   targetAge: [3, 6],
   cards: [
-    { id: 'car',      english: 'car',      chinese: '小汽车', imageUrl: '/images/transportation/car.svg',      kind: 'word', difficulty: 1, tags: ['vehicle'] },
-    { id: 'bus',      english: 'bus',      chinese: '公交车', imageUrl: '/images/transportation/bus.svg',      kind: 'word', difficulty: 1, tags: ['vehicle'] },
-    { id: 'train',    english: 'train',    chinese: '火车',   imageUrl: '/images/transportation/train.svg',    kind: 'word', difficulty: 2, tags: ['vehicle'] },
-    { id: 'airplane', english: 'airplane', chinese: '飞机',   imageUrl: '/images/transportation/airplane.svg', kind: 'word', difficulty: 2, tags: ['vehicle'] },
-    { id: 'bicycle',  english: 'bicycle',  chinese: '自行车', imageUrl: '/images/transportation/bicycle.svg',  kind: 'word', difficulty: 2, tags: ['vehicle'] },
-    { id: 'boat',     english: 'boat',     chinese: '船',     imageUrl: '/images/transportation/boat.svg',     kind: 'word', difficulty: 2, tags: ['vehicle'] },
+    { id: 'car',      english: 'car',      chinese: '小汽车', imageUrl: '/images/transportation/car.svg',      kind: 'word', drillParts: ['car'], difficulty: 1, tags: ['vehicle'] },
+    { id: 'bus',      english: 'bus',      chinese: '公交车', imageUrl: '/images/transportation/bus.svg',      kind: 'word', drillParts: ['bus'], difficulty: 1, tags: ['vehicle'] },
+    { id: 'train',    english: 'train',    chinese: '火车',   imageUrl: '/images/transportation/train.svg',    kind: 'word', drillParts: ['train'], difficulty: 2, tags: ['vehicle'] },
+    { id: 'airplane', english: 'airplane', chinese: '飞机',   imageUrl: '/images/transportation/airplane.svg', kind: 'word', drillParts: ['air', 'plane'], difficulty: 2, tags: ['vehicle'] },
+    { id: 'bicycle',  english: 'bicycle',  chinese: '自行车', imageUrl: '/images/transportation/bicycle.svg',  kind: 'word', drillParts: ['bi', 'cy', 'cle'], difficulty: 2, tags: ['vehicle'] },
+    { id: 'boat',     english: 'boat',     chinese: '船',     imageUrl: '/images/transportation/boat.svg',     kind: 'word', drillParts: ['boat'], difficulty: 2, tags: ['vehicle'] },
   ],
   objectives: {
     sentences: ['What is this?', 'This is a ___.', 'Can you say ___?', 'I like ___.'],

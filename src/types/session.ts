@@ -22,12 +22,18 @@ export interface WordPerf {
   lastAttempt: Date;
 }
 
+export type CardProgressState = 'untouched' | 'attempted' | 'cleared' | 'needs_review';
+
 export interface LessonMemory {
   messages: Message[];
   currentWord: string;
+  currentCardId: string;
   phase: LessonPhase;
   wordsLearned: string[];
   wordsToReview: string[];
+  clearedCardIds: string[];
+  cardProgress: Record<string, CardProgressState>;
+  cardAttemptStreak: Record<string, number>;
   interestSignals: InterestSignal[];
   wordPerformance: Map<string, WordPerf>;
   silentTurns: number;

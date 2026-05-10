@@ -15,7 +15,7 @@ describe('buildSystemPrompt P0 guardrails', () => {
 
     const prompt = buildSystemPrompt(transportationCourse, memory);
 
-    expect(prompt).toContain('只能总结已学词汇');
+    expect(prompt).toContain('只能总结本节已通过词汇');
     expect(prompt).toContain('car, bus');
   });
 
@@ -54,8 +54,8 @@ describe('buildSystemPrompt v2 wordcard protocol', () => {
     const prompt = buildSystemPrompt(timeNumbersCourse, memory);
 
     expect(prompt).toContain('## 可用卡片');
-    expect(prompt).toContain('hour: hour / 小时 (word)');
-    expect(prompt).toContain('sentence_hour_minute: One hour has sixty minutes. / 一小时有 60 分钟。 (sentence)');
+    expect(prompt).toContain('hour: hour / 小时 (word); drillParts=hour');
+    expect(prompt).toContain('sentence_hour_minute: One hour has sixty minutes. / 一小时有 60 分钟。 (sentence); drillParts=One hour | has sixty | minutes');
   });
 
   it('exposes review/new card id lists', () => {
@@ -64,5 +64,40 @@ describe('buildSystemPrompt v2 wordcard protocol', () => {
 
     expect(prompt).toContain('建议先复习: car, bus');
     expect(prompt).toContain('新教卡顺序: train, airplane, bicycle, boat');
+  });
+});
+
+describe('buildSystemPrompt v1.1 progress and drill contract', () => {
+  it('exposes card progress, current card, and cleared semantics', () => {
+    const memory = {
+      ...createMemory(),
+      currentCardId: 'hour',
+      clearedCardIds: ['minute'],
+      cardProgress: {
+        hour: 'attempted' as const,
+        minute: 'cleared' as const,
+        second: 'untouched' as const,
+        thousand: 'needs_review' as const,
+      },
+    };
+
+    const prompt = buildSystemPrompt(timeNumbersCourse, memory);
+
+    expect(prompt).toContain('cleared 只表示');
+    expect(prompt).toContain('当前卡片: hour');
+    expect(prompt).toContain('cleared cards: minute');
+    expect(prompt).toContain('untouched cards: second');
+    expect(prompt).toContain('needs_review cards: thousand');
+  });
+
+  it('describes ASR assessment and drill rules', () => {
+    const prompt = buildSystemPrompt(timeNumbersCourse, createMemory());
+
+    expect(prompt).toContain('attempt_assessment');
+    expect(prompt).toContain('raw ASR "Our." 对当前卡 hour 可以判 correct');
+    expect(prompt).toContain('raw ASR "1000 is 10." 对 One thousand is ten hundreds. 判 close');
+    expect(prompt).toContain('3 步慢读脚手架');
+    expect(prompt).toContain('drillParts');
+    expect(prompt).toContain('不得说"今天到这里/下课/结束"');
   });
 });

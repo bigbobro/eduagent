@@ -9,6 +9,7 @@ const wordCard: WordCard = {
   chinese: '飞机',
   imageUrl: '/images/transportation/airplane.svg',
   kind: 'word',
+  drillParts: ['air', 'plane'],
 };
 
 const sentenceCard: WordCard = {
@@ -17,6 +18,7 @@ const sentenceCard: WordCard = {
   chinese: '一小时有 60 分钟。',
   imageUrl: '/images/time-numbers/sentence-hour-minute.png',
   kind: 'sentence',
+  drillParts: ['One hour', 'has sixty', 'minutes'],
 };
 
 const cards: WordCard[] = [wordCard, sentenceCard];

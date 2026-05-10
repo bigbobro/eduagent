@@ -7,9 +7,7 @@ import {
   addUserMessage,
   getMessagesForLLM,
   commitAssistantStreamResult,
-  detectCurrentWordAttempt,
-  markWordCorrect,
-  markWordIncorrect,
+  initializeCardProgress,
 } from './memory';
 import { buildSystemPrompt } from './prompt';
 import { streamLLM } from '@/lib/mimo/llm';
@@ -33,7 +31,7 @@ export function createSession(course: Course): Session {
     id,
     courseId: course.id,
     course,
-    memory: createMemory(),
+    memory: initializeCardProgress(createMemory(), course),
     tokenUsage: {
       asr: { requests: 0, tokens: 0 },
       llm: { requests: 0, inputTokens: 0, outputTokens: 0 },
@@ -76,14 +74,7 @@ export async function* streamUserInput(
     return;
   }
 
-  const wordAttempt = detectCurrentWordAttempt(session.memory, session.course, userText);
   session.memory = addUserMessage(session.memory, userText);
-  if (wordAttempt) {
-    session.memory = wordAttempt.correct
-      ? markWordCorrect(session.memory, wordAttempt.word)
-      : markWordIncorrect(session.memory, wordAttempt.word);
-    upsertWordPerformance(session.id, wordAttempt.word, wordAttempt.correct);
-  }
 
   const systemPrompt = buildSystemPrompt(session.course, session.memory);
   const messages = getMessagesForLLM(session.memory);
@@ -129,12 +120,21 @@ export async function* streamUserInput(
   };
 
   // commit memory + token + interaction log
+  const beforePerformance = new Map(session.memory.wordPerformance);
   session.memory = commitAssistantStreamResult(
     session.memory,
     result.speech,
     result.actions,
     result.state_update
   );
+  const assessment = result.state_update.attempt_assessment;
+  if (assessment && result.state_update.current_word) {
+    const before = beforePerformance.get(result.state_update.current_word);
+    const after = session.memory.wordPerformance.get(result.state_update.current_word);
+    if (after && (!before || after.attempts > before.attempts)) {
+      upsertWordPerformance(session.id, result.state_update.current_word, assessment.result === 'correct');
+    }
+  }
   session.tokenUsage.llm.requests += 1;
   session.tokenUsage.llm.inputTokens += inputTokens;
   session.tokenUsage.llm.outputTokens += outputTokens;

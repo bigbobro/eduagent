@@ -4,6 +4,7 @@ export interface WordCard {
   chinese: string;
   imageUrl: string;
   kind: 'word' | 'sentence';
+  drillParts: string[];
   difficulty?: number;
   tags?: string[];
 }
