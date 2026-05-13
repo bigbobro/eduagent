@@ -2,9 +2,11 @@
 
 **作者**:Claude(脑暴 with 用户)
 **日期**:2026-05-12
-**状态**:Spec(待用户审阅)
+**状态**:✅ **设计阶段完成 — Spec + Plan 已 commit**
+**关联 plan**:`docs/superpowers/plans/2026-05-13-frontend-redesign.md`(L1-L17,34 个 task)
+**下一会话起点**:打开 plan,从 **Task 1: Design tokens** 开始执行
 **关联代码**:`src/app/**`、`src/components/**`、`src/lib/{progress,pin,stats}.ts`(新建)
-**关联 living doc**:`docs/architecture.md`(前端章节,待 L17 同步)
+**关联 living doc**:`docs/architecture.md`(前端章节,Task 34 同步)
 
 ---
 
