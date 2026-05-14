@@ -12,7 +12,10 @@
 html, body { height: 100%; overflow: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  /* Reduce all motion EXCEPT elements marked .bunny-motion — Bunny mood animations
+     (ear twitch / head tilt / mouth move) provide semantic feedback for the
+     listening / thinking / speaking states and should remain even in reduce mode. */
+  *:not(.bunny-motion), *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

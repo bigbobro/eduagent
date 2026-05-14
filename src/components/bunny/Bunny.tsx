@@ -74,14 +74,15 @@ export function Bunny({
 function HeadGroup() {
   return (
     <g data-part="head-group">
-      <ellipse data-part="ear" data-part-id="ear-l" cx="80" cy="40" rx="9" ry="32" fill="#FCEBE3" stroke="#F4B5B0" strokeWidth="2" />
-      <ellipse data-part="ear" data-part-id="ear-r" cx="120" cy="40" rx="9" ry="32" fill="#FCEBE3" stroke="#F4B5B0" strokeWidth="2" />
-      <g data-part="head">
+      <ellipse className="bunny-motion" data-part="ear" data-part-id="ear-l" cx="80" cy="40" rx="9" ry="32" fill="#FCEBE3" stroke="#F4B5B0" strokeWidth="2" />
+      <ellipse className="bunny-motion" data-part="ear" data-part-id="ear-r" cx="120" cy="40" rx="9" ry="32" fill="#FCEBE3" stroke="#F4B5B0" strokeWidth="2" />
+      <g className="bunny-motion" data-part="head">
         <circle cx="100" cy="100" r="44" fill="#FFFFFF" stroke="#F4B5B0" strokeWidth="2.5" />
         <circle cx="86" cy="98" r="4" fill="#4B3F35" />
         <circle cx="114" cy="98" r="4" fill="#4B3F35" />
         <ellipse cx="100" cy="118" rx="5" ry="3" fill="#F4B5B0" />
         <path
+          className="bunny-motion"
           data-part="mouth"
           d="M 90 130 Q 100 138 110 130"
           stroke="#4B3F35"
