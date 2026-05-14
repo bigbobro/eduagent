@@ -5,6 +5,7 @@ export const timeNumbersCourse: Course = {
   title: '时间和大数字 Time & Big Numbers',
   description: '学习 hour, minute, second 以及 hundred, thousand, million, billion',
   targetAge: [3, 6],
+  theme: 'time-numbers',
   cards: [
     { id: 'hour',     english: 'hour',     chinese: '小时',  imageUrl: '/images/time-numbers/hour.png',     kind: 'word', drillParts: ['hour'], difficulty: 1, tags: ['time'] },
     { id: 'minute',   english: 'minute',   chinese: '分钟',  imageUrl: '/images/time-numbers/minute.png',   kind: 'word', drillParts: ['min', 'it'], difficulty: 1, tags: ['time'] },

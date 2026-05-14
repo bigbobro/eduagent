@@ -17,11 +17,14 @@ export interface TeachingHints {
   closing: string;
 }
 
+export type CourseTheme = 'transport' | 'time-numbers' | 'animals' | 'food' | 'colors';
+
 export interface Course {
   id: string;
   title: string;
   description: string;
   targetAge: [number, number];
+  theme: CourseTheme;
   cards: WordCard[];
   objectives: {
     sentences: string[];

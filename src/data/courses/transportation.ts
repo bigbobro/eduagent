@@ -6,6 +6,7 @@ export const transportationCourse: Course = {
   title: '交通工具 Transportation',
   description: '学习常见的交通工具英文名称',
   targetAge: [3, 6],
+  theme: 'transport',
   cards: [
     { id: 'car',      english: 'car',      chinese: '小汽车', imageUrl: '/images/transportation/car.svg',      kind: 'word', drillParts: ['car'], difficulty: 1, tags: ['vehicle'] },
     { id: 'bus',      english: 'bus',      chinese: '公交车', imageUrl: '/images/transportation/bus.svg',      kind: 'word', drillParts: ['bus'], difficulty: 1, tags: ['vehicle'] },
