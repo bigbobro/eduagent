@@ -1,11 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { WordCardCanvas } from './WordCardCanvas';
+import { useRouter } from 'next/navigation';
+import { WordBook } from './WordBook';
 import { SubtitleBar } from './SubtitleBar';
-import { HoldToTalkButton } from './HoldToTalkButton';
-import { Bunny, type BunnyMood } from '@/components/bunny/Bunny';
+import { BloomButton } from './BloomButton';
+import { Bunny, type BunnyMood, type BunnyPose } from '@/components/bunny/Bunny';
+import { SceneFrame } from '@/components/scene/SceneFrame';
 import { Button } from '@/components/ui/Button';
+import { ArrowLeft } from '@/components/ui/icons';
 import { Course } from '@/types/course';
 import { ToolAction } from '@/types/tools';
 import { LessonController, LessonStateName } from '@/lib/voice/lesson-controller';
@@ -25,6 +28,15 @@ const STATE_TO_MOOD: Record<LessonStateName, BunnyMood> = {
   speaking: 'speaking',
   ending: 'idle',
 };
+const STATE_TO_POSE: Record<LessonStateName, BunnyPose> = {
+  idle: 'stand',
+  greeting: 'stand',
+  awaiting: 'stand',
+  listening: 'stand',
+  thinking: 'stand',
+  speaking: 'point',
+  ending: 'stand',
+};
 
 function pickLatestCardId(actions: ToolAction[]): string | null {
   for (let i = actions.length - 1; i >= 0; i--) {
@@ -35,14 +47,18 @@ function pickLatestCardId(actions: ToolAction[]): string | null {
 }
 
 export function LessonView({ course }: LessonViewProps) {
+  const router = useRouter();
   const controllerRef = useRef<LessonController | null>(null);
   const [state, setState] = useState<LessonStateName>('idle');
-  const [subtitle, setSubtitle] = useState<{ text: string; source: 'user' | 'ai' | 'idle' }>({ text: '', source: 'idle' });
+  const [subtitle, setSubtitle] = useState<{ text: string; source: 'user' | 'ai' | 'idle' }>({
+    text: '',
+    source: 'idle',
+  });
   const [currentCardId, setCurrentCardId] = useState<string>(() => course.cards[0]?.id || '');
   const [error, setError] = useState<string | null>(null);
   const targetWords = useMemo(
-    () => course.cards.filter((card) => card.kind === 'word').map((card) => card.english),
-    [course]
+    () => course.cards.filter((c) => c.kind === 'word').map((c) => c.english),
+    [course],
   );
 
   useEffect(() => {
@@ -65,21 +81,11 @@ export function LessonView({ course }: LessonViewProps) {
   }, []);
 
   useEffect(() => {
-    setAsrSessionContext({
-      courseId: course.id,
-      targetWords,
-      cardId: currentCardId,
-    });
+    setAsrSessionContext({ courseId: course.id, targetWords, cardId: currentCardId });
   }, [course.id, currentCardId, targetWords]);
+  useEffect(() => () => setAsrSessionContext({}), []);
 
-  useEffect(() => {
-    return () => setAsrSessionContext({});
-  }, []);
-
-  // 当前版本只在 awaiting/listening 状态可按 — speaking 时空格忽略(不打断)。
-  // listening 必须包含,否则按下后切 listening,enabled=false 会卸载 keyup 监听器。
   const canHold = state === 'awaiting' || state === 'listening';
-
   useSpacebar({
     enabled: canHold,
     onDown: () => controllerRef.current?.startListening(),
@@ -87,76 +93,91 @@ export function LessonView({ course }: LessonViewProps) {
   });
 
   const handleStart = () => controllerRef.current?.startLesson(course.id);
-  const handleEnd = () => controllerRef.current?.endLesson();
-  const onPressStart = () => controllerRef.current?.startListening();
-  const onPressEnd = () => controllerRef.current?.stopListening();
+  const handleLeave = () => router.push('/');
+  const handleDone = () => router.push(`/lesson/${course.id}/done`);
 
   const isPlaying = state === 'speaking' || state === 'greeting';
-  const mood: BunnyMood = STATE_TO_MOOD[state];
-
   const helpText = useMemo(() => {
     switch (state) {
-      case 'greeting': return '等老师讲完哦~';
-      case 'awaiting': return '按住空格 / 按住按钮说话';
-      case 'listening': return '我在听...';
-      case 'thinking': return '让我想想...';
-      case 'speaking': return '等老师说完~';
-      default: return '';
+      case 'greeting':
+        return '等老师讲完哦~';
+      case 'awaiting':
+        return '按住花朵 / 空格说话';
+      case 'listening':
+        return '我在听...';
+      case 'thinking':
+        return '让我想想...';
+      case 'speaking':
+        return '等老师说完~';
+      case 'ending':
+        return '今天的课结束啦,看看你学到了什么';
+      default:
+        return '准备好了吗?';
+    }
+  }, [state]);
+
+  useEffect(() => {
+    if (state === 'ending') {
+      const t = setTimeout(handleDone, 1500);
+      return () => clearTimeout(t);
     }
   }, [state]);
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }} className="bg-gray-50">
-      <div className="flex items-center justify-between px-6 bg-white shadow-sm" style={{ height: '56px', flexShrink: 0 }}>
-        <h1 className="text-xl font-bold text-gray-800">{course.title}</h1>
-        {state !== 'idle' && (
-          <Button variant="danger" size="sm" onClick={handleEnd}>结束课堂</Button>
+    <main className="w-screen h-screen relative">
+      <SceneFrame variant="cabin" enterFrom="yard">
+        <header className="absolute top-0 left-0 right-0 h-14 px-6 flex items-center justify-between z-20">
+          <button
+            type="button"
+            onClick={handleLeave}
+            className="flex items-center gap-2 px-3 py-2 rounded-bunny-md text-bunny-ink hover:bg-bunny-pink-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bunny-pink"
+            aria-label="离开课堂回院子"
+          >
+            <ArrowLeft width={20} height={20} />
+            <span className="font-zh text-sm">离开</span>
+          </button>
+          <h1 className="font-zh text-xl text-bunny-ink">{course.title}</h1>
+          <div className="w-20" />
+        </header>
+
+        {error && (
+          <div className="absolute top-14 left-0 right-0 bg-bunny-berry/10 border-l-4 border-bunny-berry px-4 py-2 text-sm text-bunny-ink z-20">
+            {error}
+          </div>
         )}
-      </div>
 
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-400 px-4 py-2 text-sm text-red-700">
-          {error}
+        <div className="absolute inset-0 top-14 bottom-32 flex items-center justify-center gap-8 px-12">
+          <div className="flex-shrink-0">
+            <Bunny pose={STATE_TO_POSE[state]} mood={STATE_TO_MOOD[state]} size={240} />
+          </div>
+          <div className="flex-1 max-w-3xl h-full flex items-center justify-center">
+            <WordBook cards={course.cards} currentCardId={currentCardId} />
+          </div>
         </div>
-      )}
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ flex: 1, minHeight: 0, position: 'relative', padding: '1rem', overflow: 'hidden' }}>
-          <WordCardCanvas cards={course.cards} currentCardId={currentCardId} />
-
-          {state !== 'idle' && (
-            <div style={{ position: 'absolute', bottom: '1.75rem', right: '1.75rem', zIndex: 10, display: 'flex', alignItems: 'flex-end', gap: '0.75rem' }}>
-              <HoldToTalkButton
+        <footer className="absolute bottom-0 left-0 right-0 px-8 pb-6 z-20 flex items-end gap-6">
+          {state === 'idle' ? (
+            <div className="flex-1 flex items-center justify-center gap-6">
+              <Button size="lg" onClick={handleStart}>
+                开始上课
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex-1">
+                <SubtitleBar text={subtitle.text} source={subtitle.source} isPlaying={isPlaying} />
+                <div className="mt-2 text-center font-zh text-sm text-bunny-ink-soft">{helpText}</div>
+              </div>
+              <BloomButton
                 disabled={!canHold}
                 active={state === 'listening'}
-                onPressStart={onPressStart}
-                onPressEnd={onPressEnd}
+                onPressStart={() => controllerRef.current?.startListening()}
+                onPressEnd={() => controllerRef.current?.stopListening()}
               />
-              <Bunny pose="stand" mood={mood} size={80} />
-            </div>
-          )}
-        </div>
-
-        <div style={{ flexShrink: 0, padding: '0 1rem 1rem 1rem', display: 'flex', alignItems: 'center', gap: '1rem', height: '100px' }}>
-          {state === 'idle' ? (
-            <>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
-                <Bunny pose="sit" mood="idle" size={80} />
-                <Button size="lg" onClick={handleStart}>开始上课</Button>
-              </div>
             </>
-          ) : (
-            <div style={{ flex: 1 }}>
-              <SubtitleBar
-                text={subtitle.text}
-                source={subtitle.source}
-                isPlaying={isPlaying}
-              />
-              <div className="mt-1 text-xs text-gray-500 text-center">{helpText}</div>
-            </div>
           )}
-        </div>
-      </div>
-    </div>
+        </footer>
+      </SceneFrame>
+    </main>
   );
 }
