@@ -54,11 +54,11 @@
 | `src/lib/audio/recorder.ts` | **mic + AudioContext + worklet 模块单例**,`prewarmRecorder` 在 startLesson 提前就绪 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
-| `src/components/lesson/LessonView.tsx` | UI 容器,绑定 LessonController + 空格 + 按钮 + 兔子 + 字幕 + 画布;idle 时画布下方显示 Bunny+开始按钮,上课后 Bunny+说话按钮移至画布右下角,下方切为字幕栏 |
-| `src/components/lesson/HoldToTalkButton.tsx` | pointerdown/up + setPointerCapture |
-| `src/components/lesson/Bunny.tsx` | 4 状态 SVG 角色(idle/listening/thinking/speaking) |
-| `src/components/lesson/WordCardCanvas.tsx` | 词卡画布:1:1 正方形,图片区 75%(4:3) + 文字区 25%,按 `show_card` 切换当前卡片 |
-| `src/components/lesson/SubtitleBar.tsx` | 字幕,user/ai 区分 |
+| `src/components/lesson/LessonView.tsx` | v2 木屋布局:SceneFrame variant=cabin,Bunny 全身居左,WordBook 居中,底部 SubtitleBar + BloomButton;state==ending 自动跳总结页 |
+| `src/components/lesson/BloomButton.tsx` | pointerdown/up + setPointerCapture,5 瓣花朵 SVG(active 时绽放,idle 收拢) |
+| `src/components/bunny/Bunny.tsx` | **单一全身 Bunny**,pose × mood 矩阵(5 pose: sit/stand/point/hold-flower/read,4 mood: idle/listening/thinking/speaking) |
+| `src/components/lesson/WordBook.tsx` | 桌上图画书:warmpaper 底 + 框架投影,AnimatePresence 切卡片 |
+| `src/components/lesson/SubtitleBar.tsx` | v2 字幕,bunny tones(user=sky / ai=cream / idle=warmpaper),AI 播放时 bunny-pink pulse dot |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/schema.ts` + `queries.ts` | SQLite 表结构 + 查询封装 |
 
@@ -280,6 +280,7 @@ controller.endLesson:
 - 2026-05-01 — git history redact secrets + CLAUDE.md 加凭据规则
 - 2026-05-05 — **画布 v2:WordCardCanvas 替换 ImageCanvas** — 协议从 show/focus/annotate 统一为 `show_card`;课程数据从 `images[]` 迁移到 `cards[]`(`kind: 'word'|'sentence'`);画布层从图叠层改为图+中英文独立 DOM;删除 ShowTool/FocusTool/AnnotateTool 组件
 - 2026-05-10 — **教学循环 v1.1:课堂内进度引擎 + drillParts** — 每张 card 必填 `drillParts`;服务端用 `show_card` 同步 currentCardId;LLM 输出 `attempt_assessment`;memory 维护 `cardProgress` / `clearedCardIds`;history 裁到最近 12 条
+- 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};客户端 PIN 门控;详见 §11
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 
@@ -303,3 +304,73 @@ controller.endLesson:
 - **`.claude/commands/lesson-report.md`**(LLM 层):报告模板 + 写作要求,LLM 看 raw `interactions` 判 ASR 误识 / 话术循环卡死。
 
 **报告范围**:只产出**工程信号**(ASR 误识 / 话术循环 / token / 埋点),教学策略类观察只列不评判。spec 见 `docs/superpowers/specs/2026-05-02-lesson-report-generator-design.md`。
+
+---
+
+## 11. 前端架构(Bunny 的小院子,2026-05 重构)
+
+5 个空间 / 5 个页面 / 1 个 Bunny 全身组件:
+
+```
+/                          院子全景  · SceneFrame variant=yard
+/lesson/[id]               木屋内    · SceneFrame variant=cabin
+/lesson/[id]/done          草地总结  · SceneFrame variant=grass
+/journal                   储物间    · SceneFrame variant=storage
+/parents                   阁楼      · SceneFrame variant=attic (PIN 客户端门控)
+```
+
+### 关键模块
+
+| 文件 | 职责 |
+|------|------|
+| `src/components/scene/SceneFrame.tsx` | 5 variant 场景外壳 + 进退场动画(`enterFrom` 决定 fromYard/fromCabin/默认) |
+| `src/components/scene/{Yard,Cabin,Grass,Storage,Attic}Scene.tsx` | 5 个 SVG 背景(1280×800 viewBox,preserveAspectRatio slice) |
+| `src/components/bunny/Bunny.tsx` | 单一全身组件,pose(5) × mood(4) 矩阵,styled-jsx mood 动画 |
+| `src/components/lesson/{WordBook,SubtitleBar,BloomButton,LessonView}.tsx` | 木屋内上课 UI |
+| `src/components/home/LetterCard.tsx` | 信件造型课程卡(layoutId 转场到木屋) |
+| `src/components/done/StickerWord.tsx` | 草地贴纸(spring 飘落 + ✦ 闪光) |
+| `src/components/journal/{WordEntry,BookShelf}.tsx` | 储物间词条卡 + 书架分组 |
+| `src/components/parents/{PinGate,StatsCard,SessionRow,SettingsAccordion}.tsx` | 阁楼 PIN + dashboard |
+| `src/components/ui/{Button,Surface,Stars,PinPad,icons/}.tsx` | UI 原子 |
+| `src/components/ui/ErrorBoundary.tsx` | root 兜底,出错回院子 |
+| `src/lib/progress.ts` / `stats.ts` / `pin.ts` | 纯聚合 + 客户端 PIN |
+| `src/app/api/{progress,sessions,stats}/route.ts` | 三个只读聚合 API |
+| `src/app/template.tsx` | 每次路由切换的外层 fade-in(SceneFrame 处理 variant-specific 动画) |
+| `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 5 页面 + 4 API |
+
+### Design tokens
+
+- 调色:`tailwind.config.ts` 中 `bunny-*` 前缀 — bg(cream / warmpaper / sky / night)、grass / wood / pink / gold / berry / leaf、ink(主 / soft / faint)
+- 字体:Fredoka(英文,`next/font/google`)+ LXGW WenKai TC(中文,CDN @import)
+- 圆角阶:`bunny-sm 12px` / `bunny-md 20px` / `bunny-lg 28px`
+- 阴影:`shadow-soft` / `shadow-medium` / `shadow-bunny`(bunny-pink 投影,emphasis 用)
+
+### PIN 门控
+
+家长后台 PIN 在客户端 `lib/pin.ts`,SHA-256 加盐 hash 存 localStorage,错 3 次锁 30s,成功验证 reset 失败计数。不走服务端 API(单用户本地工具)。
+
+### 数据流
+
+```
+fetch /api/courses    → 首页 LetterCard 列表
+fetch /api/progress   → 储物间 / 总结页(WordMastery + 3 星掌握筛选)
+fetch /api/sessions   → 阁楼 SessionRow 列表(默认 limit=10)
+fetch /api/stats      → 阁楼 StatsCard(7 天柱状图 + 总分钟 + 掌握词数)
+voice WS / SSE        → 上课页(沿用 LessonController,完全不变)
+```
+
+### Mastery 派生
+
+```ts
+masteryStarsFromRatio(correct, attempts):
+  attempts === 0      → 0
+  ratio >= 0.9        → 3
+  ratio >= 0.6        → 2
+  ratio > 0           → 1
+```
+
+`buildProgressSnapshot` 跨多 lesson SUM(attempts/correct),`lastPracticed` 取 `MAX(start_time)`。
+
+### Reduced-motion 策略
+
+`prefers-reduced-motion: reduce` 时,**除 `.bunny-motion` 元素外**的所有动画/过渡降级为 0.01ms。Bunny mood 动画(耳抖、嘴动、头摆)保留,作为 listening/thinking/speaking 的语义反馈。
