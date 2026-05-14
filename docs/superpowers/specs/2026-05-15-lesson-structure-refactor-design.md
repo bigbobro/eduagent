@@ -19,18 +19,21 @@
 
 ### 目标(in scope)
 
-- 新增 `Course.phases?` optional schema,表达三阶段结构
-- 新建 `PhasedLessonController`(包装 v2 controller,在外面加 phase 状态机)
+- 新增 `Course.phases` schema,表达三阶段结构;本 epic 完成后新标准课程必须带 phases
+- 新建 `PhasedLessonController`(包装 LessonController 音频管线,在外面加 phase 状态机)
 - 新建 `PhasedLessonView` + 三个 phase 子组件(`IntroPhase` / `InteractivePhase` / `ReinforcePhase`)
-- `LessonClient` 根据 `course.phases` 存在与否,路由到 v2 或 phased 实现
+- `LessonClient` 进入三阶段实现;不再保留旧课程 v2 fallback
 - 实现 `pick-word` 和 `repeat-after-me` 两种 quiz 类型
 - 新建 food 示范课走通三阶段,并体现"单词 + 短句"的常规课程目标
+- 旧课程 `transportation` / `timeNumbers` 退役并从可见课程列表删除
+- 最后 cleanup 删除旧课程数据、旧路由分支、旧 LessonView 入口与相关死引用
 - 服务端 LLM prompt 增加 phase context,每个 phase 不同的提示词
 
 ### 非目标(out of scope)
 
 - **不重新引入 Agent 工具层**(放大 / 圈出 / 慢速等都不做,下个 epic)
-- **不迁移现有 2 节课**(transportation / timeNumbers 保留 v2 跑法,**0 回归**)
+- 不迁移旧课内容到 phases;旧课直接退役,food 是新标准第一课
+- 不在本 epic 一开始删除底层 `LessonController` 音频管线;`PhasedLessonController` 仍复用它的 ASR/TTS/SSE 编排
 - **不引入 Unit/单元概念**(三阶段是单节课内的)
 - 不做 quiz 类型 3-6(拖拽匹配 / 找一找 / 错题回放 / 复述长句),下个 epic
 - 不做 phase 之间的进度持久化(同一 session 内三阶段一次跑完;断网/刷新与现有行为一致——session 失效,回首页)
@@ -49,36 +52,37 @@
 
 ```
 LessonClient.tsx
-  ├─ 检查 course.phases 是否存在
-  │   ├─ 是 → PhasedLessonController + PhasedLessonView (本 spec 新增)
-  │   └─ 否 → LessonController + LessonView (v2,不动)
+  └─ PhasedLessonController + PhasedLessonView
   │
 PhasedLessonController (src/lib/voice/phased-lesson-controller.ts, 新)
-  ├─ 内部持有一个 v2 LessonController 实例(复用 ASR/TTS/SSE 编排)
+  ├─ 内部持有一个 LessonController 实例(复用 ASR/TTS/SSE 编排)
   ├─ 外层 phase 状态机:idle → intro → interactive → reinforcement → done
-  ├─ 监听 v2 controller 的 actions / state 变化判定阶段切换
+  ├─ 监听 controller 的 actions / state 变化判定阶段切换
   └─ phase 切换时调 /api/chat?action=phase-transition,server 切换 prompt
 
 PhasedLessonView (src/components/lesson/PhasedLessonView.tsx, 新)
   ├─ 顶层布局壳 (Bunny / SubtitleBar 跨 phase 共享)
   └─ 按 currentPhase 切子组件:
        ├─ IntroPhase (新)        — 大场景图 + 点图触发发音,BloomButton 灰
-       ├─ InteractivePhase (新)  — 包装 v2 WordBook + BloomButton
+       ├─ InteractivePhase (新)  — 复用 WordBook + BloomButton
        └─ ReinforcePhase (新)    — quiz 关卡
 
-src/lib/voice/lesson-controller.ts / src/components/lesson/LessonView.tsx (v2)
-  → 完全不动,旧课继续走这条路
+src/lib/voice/lesson-controller.ts
+  → 暂时作为底层音频/SSE 管线复用,不再作为独立课程路径
+
+src/components/lesson/LessonView.tsx
+  → food 全链路验收后在 cleanup 中删除或退役
 ```
 
 **关键决策:**
-- **复用 v2 而非另起炉灶**:PhasedLessonController 内部 own 一个 v2 LessonController,核心音频管线只有一份。
+- **复用音频管线而非另起炉灶**:PhasedLessonController 内部 own 一个 LessonController,核心 ASR/TTS/SSE 管线只有一份。
 - **规则驱动切阶段**:phase 切换由 controller 判定,不靠 LLM。可预测、可测、可回滚。
 - **三阶段 UI 独立**:布局差异显著(大图 / 卡片 / 关卡),独立子组件比"if/else 分支"清晰。
-- **0 回归**:旧 controller 和 LessonView 一行不动,老课跑老代码。
+- **新标准唯一化**:food 跑通后清理旧课与旧 UI fallback,避免长期维护两套课程路径。
 
 ## 5. 数据 Schema
 
-`src/types/course.ts` 新增类型,**原有 Course 字段全部保留**,只加 optional `phases`:
+`src/types/course.ts` 新增类型。实现中可先以过渡兼容方式加入,但本 epic 最终状态里 `phases` 是新标准课程的必填字段:
 
 ```ts
 export type Course = {
@@ -90,7 +94,7 @@ export type Course = {
   cards: Card[];
   objectives: { sentences: string[] };
   teachingHints: TeachingHints;
-  phases?: Phases;  // ← 新增 optional
+  phases: Phases;
 };
 
 export type Phases = {
@@ -126,7 +130,7 @@ export type Quiz =
 | `pick-word` | 听懂(comprehension) | AI 读 prompt(如 "Where is the apple?"),屏幕展示 1 张目标 + 2-3 张干扰图,孩子 tap 选对的 |
 | `repeat-after-me` | 说出来(production) | AI 说 targetText,孩子跟读,沿用现有 ASR + LLM `attempt_assessment` 通路判定 |
 
-常规主题课默认用 `word` cards 承载可视化目标,用 `objectives.sentences` 和 `repeat-after-me.targetText` 承载 1-2 个核心短句。`kind='sentence'` cards 保留给 timeNumbers 这类抽象关系课,不作为每节新课的必填项。
+常规主题课默认用 `word` cards 承载可视化目标,用 `objectives.sentences` 和 `repeat-after-me.targetText` 承载 1-2 个核心短句。`kind='sentence'` cards 保留给未来时间/数字这类抽象关系课,不作为每节新课的必填项。
 
 ## 6. 状态机
 
@@ -149,7 +153,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | `任意 → idle` | endLesson |
 
 **如何记录(单一事实源在 server,client 通过 SSE 镜像):**
-- `introducedCardIds`:PhasedLessonController 监听 v2 controller 的 `actions` 事件(SSE 里的 `show_card`),提取唯一 card_id 累计到客户端 set
+- `introducedCardIds`:PhasedLessonController 监听 LessonController 的 `actions` 事件(SSE 里的 `show_card`),提取唯一 card_id 累计到客户端 set
 - `clearedCardIds` / `totalAttempts`:server `memory.cardProgress` / `clearedCardIds` 是事实源。**server 在每轮 SSE 末尾**(`done` 事件)**追加一个 `progress_snapshot`** 字段(`{ clearedCardIds: string[], totalAttempts: number }`),client controller 读出并更新本地镜像
 - `answeredQuizIds`:client 维护(quiz UI 状态),同时通过 `/api/chat?action=quiz-answer` 写回 server(供 lesson-report 用)
 
@@ -157,8 +161,8 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 
 | Phase | 内部状态机 | 实现 |
 |-------|----------|------|
-| **intro** | greeting → speaking → awaiting → speaking → ...(无 listening) | 复用 v2 controller 实例,**禁用 listening**(useSpacebar 在 intro 阶段忽略空格),prompt 切到"逐个介绍 cards"模式 |
-| **interactive** | 完整 v2 7 状态机 | 完全复用 v2,prompt 切回"互动练习"模式 |
+| **intro** | greeting → speaking → awaiting → speaking → ...(无 listening) | 复用 LessonController 实例,**禁用 listening**(useSpacebar 在 intro 阶段忽略空格),prompt 切到"逐个介绍 cards"模式 |
+| **interactive** | 完整 LessonController 7 状态机 | 复用 LessonController,prompt 切回"互动练习"模式 |
 | **reinforcement** | quiz-presenting → quiz-waiting → quiz-checking → (next quiz / done) | 新写 mini 状态机,在 quiz-checking 内 dispatch:`pick-word` 走 tap 判定 / `repeat-after-me` 走 ASR + LLM judge |
 
 ### 6.4 切阶段瞬间
@@ -180,17 +184,15 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - Bunny 居左下,姿态 `pose=stand mood=speaking`
 - SubtitleBar 底部
 - **BloomButton 灰着但保留位置**(避免布局跳变;视觉上明确告诉孩子"现在不用说话")
-- **交互**:点 cards 中的某一张(场景图里的 hotspot 区域)→ 触发 v2 controller 调 LLM 输出该 card 的 narration(复用 v2 通路)
+- **交互**:点 cards 中的某一张(场景图里的 hotspot 区域)→ 触发 LessonController 调 LLM 输出该 card 的 narration(复用现有 SSE/TTS 通路)
 - intro 完成后:phase 切换动画
 
 ### 7.2 InteractivePhase
 
-- **视觉布局沿用 v2**:SceneFrame cabin + Bunny + WordBook + BloomButton + SubtitleBar
-- **0 回归约束:不修改 `LessonView.tsx`**。实现路径二选一:
-  - (a) 把 v2 LessonView 的内容布局抽成一个无副作用的子组件(如 `LessonStage`),v2 LessonView 和 InteractivePhase 都 render 它。这要求 v2 LessonView 内部能 accept `controller` 作为 prop 注入(若现状是内部 new,需要小修)。
-  - (b) 在 InteractivePhase 内**复制**相同的 JSX 编排,不动 v2 LessonView。短期两份代码共存,等老课迁移时合并。
-- 默认走 (a) 路径,但前提是 LessonView 不需要破坏性改动;否则退到 (b)。
-- v2 LessonController 在 PhasedLessonController 里被持有 + 驱动
+- **视觉布局复用现有课堂元素**:SceneFrame cabin + Bunny + WordBook + BloomButton + SubtitleBar
+- 直接在 InteractivePhase 内重新组合这些元素,controller 通过 prop 注入。
+- `LessonView.tsx` 不再是要长期保护的旧课入口;food 全链路验收后,在 cleanup 阶段删除或退役。
+- LessonController 在 PhasedLessonController 里被持有 + 驱动,作为底层 ASR/TTS/SSE 管线。
 
 ### 7.3 ReinforcePhase
 
@@ -232,8 +234,8 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 
 ### 9.1 Session 模型
 
-- `Session` 增加 `currentPhase: 'intro' | 'interactive' | 'reinforcement' | 'done' | null`(null 表示老课,无 phase)
-- 初始化时:有 `course.phases` → `currentPhase = 'intro'`;没有 → null
+- `Session` 增加 `currentPhase: 'intro' | 'interactive' | 'reinforcement' | 'done'`
+- 初始化时:`currentPhase = 'intro'`
 
 ### 9.2 Prompt 切换
 
@@ -242,7 +244,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - `intro`:"你是 introduction 阶段。逐个指认 cards,每张说一句温和的引入,**不要问孩子能不能说**。每张 card 输出 `show_card` action。讲完最后一张主动停下来。"
 - `interactive`:沿用当前 prompt(完整 v2 模式),但要求先练目标词,再自然带一个 `objectives.sentences` 里的核心短句
 - `reinforcement`:"你是 reinforcement 阶段。**不再介绍新词**。按 quiz 列表逐题出题,等待客户端答案信号(server 通过 `action=quiz-answer` 传)。"
-- 老课(无 phase):沿用当前 prompt 不变(向后兼容)
+- 本 epic 最终状态不保留无 phase 课程;若实现过程短暂保留兼容分支,cleanup 阶段必须删除
 
 ### 9.3 新 API
 
@@ -295,7 +297,8 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - [ ] `pnpm test` 全部通过(含新增的 phased-lesson-controller 单测、quiz 判定单测、prompt 切换集成测)
 - [ ] `pnpm exec vitest run tests/integration/food-lesson-e2e` 全程跑通(三阶段都被走过 + 最终 phase=done)
 - [ ] 跑 `pnpm run dev` + 访问 `/lesson/food` → 三阶段顺序进入 + endLesson 正常退出
-- [ ] 访问 `/lesson/transportation` → **0 回归**(走 v2 路径,跟今天一样)
+- [ ] `/api/courses` 只返回新标准课程(本 epic 完成时至少包含 `food`)
+- [ ] 访问 `/lesson/transportation` / `/lesson/timeNumbers` 不再作为验收项;旧课已退役,页面可 404 或不出现在课程列表
 - [ ] `/lesson-report` 跑 food session → 报告生成不报错(包含三阶段标记字段)
 
 **手测验收**(不强求 implementation agent 验证,由用户最终决定):
@@ -319,7 +322,6 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 ## 14. 后续 epic(本 spec 不做)
 
 - **Agent 工具层**:放大 / 圈出 / 慢速 / 换问法 / 出新图 / 奖励 — 把"工具是 Agent 的能力"原则落地
-- **迁移老课**:把 transportation / timeNumbers 加上 phases 字段,删 v2 controller
 - **更多 quiz 类型**:拖拽匹配 / 找一找(在大图里点) / 错题回放 / 复述长句
 - **跨 session 进度**:phase 完成情况持久化,断网/刷新可 resume
 - **场景图精修**:把 ImageGen 单体图进一步统一成正式插画风格

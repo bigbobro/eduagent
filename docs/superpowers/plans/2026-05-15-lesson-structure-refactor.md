@@ -4,9 +4,9 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-15-lesson-structure-refactor-design.md`(必读,本 plan 是它的 actionable 落地)
 
-**Goal:** 把"一种交互模式贯穿一节课"重构为显式三阶段闭环(导入 → 互动 → 巩固),用 food 示范课跑通新结构。
+**Goal:** 把"一种交互模式贯穿一节课"重构为显式三阶段闭环(导入 → 互动 → 巩固),用 food 示范课跑通新结构,并在最后 cleanup 中退役旧课与旧 v2 UI 入口。
 
-**Architecture:** Course schema 加 optional `phases` 字段;新建 `PhasedLessonController` 包装 v2 `LessonController`,外层 phase 状态机规则驱动切换;三个 phase 子组件独立(`IntroPhase` / `InteractivePhase` / `ReinforcePhase`);`LessonClient` 根据 `course.phases` 在不在选路。旧课走旧路径,0 回归。
+**Architecture:** Course schema 加 `phases` 字段;新建 `PhasedLessonController` 包装 `LessonController` 的 ASR/TTS/SSE 管线,外层 phase 状态机规则驱动切换;三个 phase 子组件独立(`IntroPhase` / `InteractivePhase` / `ReinforcePhase`);`LessonClient` 最终只走 `PhasedLessonView`。旧课 `transportation` / `timeNumbers` 不迁移,本 epic 末尾退役。
 
 **Tech Stack:** Next.js 14 自定义 server + TypeScript 严格模式 + vitest + React 18 + @testing-library/react + Tailwind (Bunny 主题) + 现有 ASR/TTS/LLM 管线全部复用。
 
@@ -16,6 +16,7 @@
 
 **新建**(纯新增):
 - `src/data/courses/food.ts` — food 示范课数据
+- `src/data/courses/index.ts` — 新课程 registry(`allCourses` / `getCourseById`)
 - `src/data/courses/food.test.ts` — food 课程专属校验单测
 - `public/images/food/scene.svg` — 食物餐桌场景图(每张 card 一个 `<g id="card-X">` hotspot,嵌入单体 PNG)
 - `public/images/food/{apple,banana,bread,milk,egg,rice}.png` — ImageGen 生成的单卡图
@@ -24,25 +25,29 @@
 - `src/components/lesson/PhasedLessonView.tsx` — 顶层 phase 路由
 - `src/components/lesson/IntroPhase.tsx` — 导入子组件
 - `src/components/lesson/IntroPhase.test.tsx`
-- `src/components/lesson/InteractivePhase.tsx` — 互动子组件(包 v2 LessonView)
+- `src/components/lesson/InteractivePhase.tsx` — 互动子组件(复用课堂元素,接注入 controller)
 - `src/components/lesson/ReinforcePhase.tsx` — 巩固子组件(题板编排)
 - `src/components/lesson/QuizPickWord.tsx` + `.test.tsx`
 - `src/components/lesson/QuizRepeatAfterMe.tsx` + `.test.tsx`
 
-**修改**(增量,不破坏现有):
-- `src/types/course.ts` — 加 `Phases` / `Quiz` 等类型 + `Course.phases?` optional 字段
+**修改**:
+- `src/types/course.ts` — 加 `Phases` / `Quiz` 等类型;实现初期可短暂 optional,最终 cleanup 后 `Course.phases` 必填
 - `src/types/session.ts`(如果存在)/ `src/lib/agent/session.ts` — Session 加 `currentPhase`
 - `src/lib/agent/prompt.ts` — 按 `session.currentPhase` 注入不同段
 - `src/lib/agent/session.ts` — 新增 `setSessionPhase` + 在 `streamUserInput` 末尾 yield `progress_snapshot`
 - `src/lib/agent/orchestrator.ts` — `mapEventToSSE` 加 `progress_snapshot` 事件映射
 - `src/app/api/chat/route.ts` — 加 `action='phase-transition'` 和 `action='quiz-answer'` 分支
-- `src/lib/voice/lesson-controller.ts` — **加一个 public 方法 `sendCustomAction(body)`**(additive,既有方法不动)
-- `src/data/courses/transportation.ts` — `allCourses` 数组追加 `foodCourse`
-- `src/app/lesson/[id]/LessonClient.tsx` — 根据 `course.phases` 路由
+- `src/lib/voice/lesson-controller.ts` — **加一个 public 方法 `sendCustomAction(body)`**(底层管线复用)
+- `src/app/lesson/[id]/LessonClient.tsx` — 最终直接走 `PhasedLessonView`
+- 现有 `@/data/courses/transportation` registry 引用改为 `@/data/courses`
 - `docs/architecture.md` — 同步 §2 模块清单 / §4 状态机 / §6 关键决策(最后一步)
 
-**完全不动**(0 回归 promise):
-- `src/components/lesson/LessonView.tsx` — v2 LessonView **一行不改**
+**最后 cleanup 退役/删除**:
+- `src/data/courses/transportation.ts`
+- `src/data/courses/timeNumbers.ts`
+- `src/components/lesson/LessonView.tsx` 及只服务旧入口的测试/引用
+
+**继续复用**:
 - `src/components/lesson/WordBook.tsx` / `BloomButton.tsx` / `SubtitleBar.tsx` — 直接复用
 - `src/components/bunny/Bunny.tsx` / `src/components/scene/SceneFrame.tsx` — 直接复用
 
@@ -96,7 +101,7 @@ describe('Course phases type', () => {
     expect(repeat.type).toBe('repeat-after-me');
   });
 
-  it('accepts a course without phases (backward compatibility)', () => {
+  it('temporarily accepts a course without phases until final cleanup', () => {
     const course: Course = {
       id: 'legacy', title: 'legacy', description: '', targetAge: [3, 6],
       theme: 'transport', cards: [], objectives: { sentences: [] },
@@ -115,7 +120,7 @@ pnpm exec vitest run src/types/course.test.ts
 
 Expected: 失败(Phases/Quiz 不存在,Course.phases 字段不存在)。报错 `Cannot find name 'Phases'` 或类似。
 
-- [ ] **Step 1.3: 给 `src/types/course.ts` 加 Phases / Quiz 类型 + Course.phases optional**
+- [ ] **Step 1.3: 给 `src/types/course.ts` 加 Phases / Quiz 类型 + 过渡期 Course.phases optional**
 
 在 `src/types/course.ts` 末尾追加:
 
@@ -170,7 +175,7 @@ export interface Course {
     sentences: string[];
   };
   teachingHints: TeachingHints;
-  phases?: Phases;  // ← 新增
+  phases?: Phases;  // 过渡期 optional;最终 cleanup 后改为必填
 }
 ```
 
@@ -188,12 +193,12 @@ Expected: 全部 PASS,tsc 无错。
 ```bash
 git add src/types/course.ts src/types/course.test.ts
 git commit -m "$(cat <<'EOF'
-feat(types): extend Course with optional Phases / Quiz schema
+feat(types): extend Course with transitional Phases / Quiz schema
 
 - IntroductionPhase: sceneImage / sceneCaption / narrationHint
 - InteractivePhase: 占位(下个 epic 扩展)
 - ReinforcementPhase.quizzes: pick-word | repeat-after-me discriminated union
-- Course.phases optional → 旧课 0 影响
+- Course.phases 先保持 optional,最终 cleanup 删除旧课后改必填
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -206,7 +211,8 @@ EOF
 
 **Files:**
 - Create: `src/data/courses/food.ts`
-- Modify: `src/data/courses/transportation.ts`(把 `foodCourse` 加到 `allCourses`)
+- Create: `src/data/courses/index.ts`(新标准课程 registry)
+- Modify: registry 调用方,从 `@/data/courses/transportation` 改到 `@/data/courses`
 
 - [ ] **Step 2.1: 新建 `src/data/courses/food.ts`**
 
@@ -257,32 +263,32 @@ export const foodCourse: Course = {
 };
 ```
 
-- [ ] **Step 2.2: 把 foodCourse 注册到 `allCourses`**
+- [ ] **Step 2.2: 新建 `src/data/courses/index.ts`,把 foodCourse 注册为唯一可见课程**
 
-修改 `src/data/courses/transportation.ts`:
-
-旧第 1 行:
 ```ts
 import { Course } from '@/types/course';
-import { timeNumbersCourse } from './timeNumbers';
-```
-
-改为:
-```ts
-import { Course } from '@/types/course';
-import { timeNumbersCourse } from './timeNumbers';
 import { foodCourse } from './food';
+
+export const allCourses: Course[] = [foodCourse];
+
+export function getCourseById(id: string): Course | undefined {
+  return allCourses.find((c) => c.id === id);
+}
 ```
 
-旧 `allCourses`:
-```ts
-export const allCourses: Course[] = [transportationCourse, timeNumbersCourse];
-```
+- [ ] **Step 2.2b: 把 registry 调用方改到 `@/data/courses`**
 
-改为:
-```ts
-export const allCourses: Course[] = [transportationCourse, timeNumbersCourse, foodCourse];
-```
+至少更新:
+- `src/app/api/courses/route.ts`
+- `src/app/api/chat/route.ts`
+- `src/app/api/stats/route.ts`
+- `src/app/api/sessions/route.ts`
+- `src/app/api/progress/route.ts`
+- `src/lib/voice/asr-proxy.ts`
+- `src/data/courses/course-data.test.ts`
+- `src/lib/stats.test.ts`
+
+旧 `transportation.ts` / `timeNumbers.ts` 文件暂时可以留在磁盘上,但不再进入 `allCourses`;最终 cleanup task 删除它们和相关测试依赖。
 
 - [ ] **Step 2.3: 跑通用单测,确认旧 `course-data.test.ts` 仍然通过**
 
@@ -303,14 +309,15 @@ Expected: PASS。
 - [ ] **Step 2.5: Commit**
 
 ```bash
-git add src/data/courses/food.ts src/data/courses/transportation.ts
+git add src/data/courses/food.ts src/data/courses/index.ts src/app/api src/lib/voice/asr-proxy.ts src/data/courses/course-data.test.ts src/lib/stats.test.ts
 git commit -m "$(cat <<'EOF'
 feat(course): add food demo course with phases
 
 - 6 cards: apple / banana / bread / milk / egg / rice
 - phases.introduction.sceneImage → /images/food/scene.svg (asset 下一 task 加)
 - phases.reinforcement.quizzes: 3 pick-word + 2 short-sentence repeat-after-me
-- 注册到 allCourses
+- 新建 src/data/courses/index.ts,food 是唯一可见课程
+- registry 调用方改到 @/data/courses
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -516,19 +523,12 @@ EOF
 ```ts
 import { describe, expect, it } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
-import { transportationCourse } from '@/data/courses/transportation';
 import { createSession, getSession, setSessionPhase, endSession } from './session';
 
 describe('session phase tracking', () => {
   it('phased course session starts at intro', () => {
     const s = createSession(foodCourse);
     expect(s.currentPhase).toBe('intro');
-    endSession(s.id);
-  });
-
-  it('legacy course session has null currentPhase', () => {
-    const s = createSession(transportationCourse);
-    expect(s.currentPhase).toBeNull();
     endSession(s.id);
   });
 
@@ -567,7 +567,7 @@ export interface Session {
   memory: LessonMemory;
   tokenUsage: TokenUsage;
   startTime: Date;
-  currentPhase: PhaseName | null;  // ← 新增,null 表示老课
+  currentPhase: PhaseName;  // ← 新增
 }
 ```
 
@@ -587,7 +587,7 @@ export function createSession(course: Course): Session {
       tts: { requests: 0, characters: 0 },
     },
     startTime: new Date(),
-    currentPhase: course.phases ? 'intro' : null,  // ← 新增
+    currentPhase: 'intro',  // ← 新增
   };
   sessions.set(id, session);
   createLessonLog(id, course.id);
@@ -621,8 +621,8 @@ git add src/lib/agent/session.ts src/lib/agent/session-phase.test.ts
 git commit -m "$(cat <<'EOF'
 feat(session): track currentPhase + setSessionPhase API
 
-- Session.currentPhase: 'intro' | 'interactive' | 'reinforcement' | 'done' | null
-- 有 phases 的课程初始 'intro',老课为 null(0 回归)
+- Session.currentPhase: 'intro' | 'interactive' | 'reinforcement' | 'done'
+- 新标准课程统一初始 'intro'
 - setSessionPhase 给后续 phase-transition API 用
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -645,7 +645,6 @@ EOF
 ```ts
 import { describe, expect, it } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
-import { transportationCourse } from '@/data/courses/transportation';
 import { createMemory, initializeCardProgress } from './memory';
 import { buildSystemPrompt } from './prompt';
 
@@ -675,11 +674,9 @@ describe('phase-aware system prompt', () => {
     expect(prompt).toContain('不再介绍新词');
   });
 
-  it('legacy course (phase=null): 不含 phase-specific 段', () => {
-    const prompt = buildSystemPrompt(transportationCourse, memoryFor(transportationCourse), null);
-    expect(prompt).not.toContain('introduction 阶段');
-    expect(prompt).not.toContain('reinforcement 阶段');
-    // 沿用原 prompt 不变
+  it('defaults to interactive when phase is omitted during transition', () => {
+    const prompt = buildSystemPrompt(foodCourse, memoryFor());
+    expect(prompt).toContain('interactive 阶段');
     expect(prompt).toContain('P0 教学硬约束');
   });
 });
@@ -730,7 +727,7 @@ const PHASE_REINFORCEMENT_PROMPT = `
 export function buildSystemPrompt(
   course: Course,
   memory: LessonMemory,
-  currentPhase: PhaseName | null = null,  // ← 默认 null,兼容老调用
+  currentPhase: PhaseName = 'interactive',  // 过渡期默认 interactive,最终调用方都显式传 session.currentPhase
 ): string {
   const sections = [ROLE_PROMPT, buildCourseInfo(course)];
 
@@ -742,7 +739,6 @@ export function buildSystemPrompt(
   } else if (currentPhase === 'reinforcement') {
     sections.push(PHASE_REINFORCEMENT_PROMPT);
   }
-  // currentPhase === null → 不加 phase 段,完全沿用原有 prompt(老课)
 
   sections.push(buildMemoryContext(memory));
   return sections.join('\n\n---\n\n');
@@ -756,7 +752,7 @@ pnpm exec vitest run src/lib/agent/prompt-phase.test.ts
 pnpm exec vitest run src/lib/agent/prompt.test.ts
 ```
 
-Expected: 两个测试文件都 PASS(老 prompt.test.ts 调 `buildSystemPrompt(course, memory)` 两参版本,因为新增的第三个参数有 default value,不破坏老 caller)。
+Expected: 两个测试文件都 PASS(旧测试两参调用时默认进入 interactive 段;cleanup 阶段可再收紧调用方)。
 
 - [ ] **Step 6.5: 让 session.ts 在调 buildSystemPrompt 时传 phase**
 
@@ -788,7 +784,7 @@ git add src/lib/agent/prompt.ts src/lib/agent/prompt-phase.test.ts src/lib/agent
 git commit -m "$(cat <<'EOF'
 feat(prompt): phase-aware system prompt
 
-- buildSystemPrompt 第三参数 currentPhase(default null = 老课原样)
+- buildSystemPrompt 第三参数 currentPhase(default interactive,过渡兼容两参调用)
 - intro: 逐个指认 + 不问孩子,带 narrationHint
 - interactive: 沿用 v2 完整教学循环
 - reinforcement: 不再介绍新词,按 quiz 列表出题
@@ -856,7 +852,7 @@ export type StreamUserEvent =
   | { type: 'speech-delta'; text: string }
   | { type: 'speech-end' }
   | { type: 'actions'; actions: ToolAction[]; state_update: AgentResponse['state_update'] }
-  | { type: 'progress_snapshot'; clearedCardIds: string[]; totalAttempts: number; currentPhase: PhaseName | null }  // ← 新增
+  | { type: 'progress_snapshot'; clearedCardIds: string[]; totalAttempts: number; currentPhase: PhaseName }  // ← 新增
   | { type: 'done' }
   | { type: 'error'; message: string };
 ```
@@ -1181,7 +1177,7 @@ EOF
 - Modify: `src/lib/voice/lesson-controller.ts`
 - Test: 集成测在 Task 11 一起
 
-为让 PhasedLessonController 能复用 v2 的 SSE+TTS 管线触发"phase 切换的开场白 SSE",给 v2 加一个 public 方法 `sendCustomAction`。**完全 additive,不改任何现有方法签名或行为**,因此 v2 LessonView 的行为 0 变化。
+为让 PhasedLessonController 能复用 LessonController 的 SSE+TTS 管线触发"phase 切换的开场白 SSE",给 LessonController 加一个 public 方法 `sendCustomAction`。这一步仍然不重写底层音频管线。
 
 - [ ] **Step 10.1: 在 `LessonController` 类里 `endLesson` 方法之后追加**
 
@@ -1242,15 +1238,15 @@ EOF
 - Test: `src/lib/voice/phased-lesson-controller.test.ts`
 
 这是本 epic 的核心新类。它:
-1. 拥有一个 v2 LessonController 实例
-2. 监听 v2 的 `actions` / `state` 事件,累计 `introducedCardIds`,从 SSE `progress_snapshot` 读 `clearedCardIds`
+1. 拥有一个 LessonController 实例
+2. 监听 LessonController 的 `actions` / `state` 事件,累计 `introducedCardIds`,从 SSE `progress_snapshot` 读 `clearedCardIds`
 3. 在合适时机调用 `v2.sendCustomAction({ action: 'phase-transition', to: ... })`,然后 emit 'phase-change'
 
-为让 `progress_snapshot` 事件能被 PhasedLessonController 收到,v2 LessonController 的 `consumeSSE` 已经 ignore 这个 event(switch default fall-through)。需要给 v2 加一个新的对外事件 `progress`(或让 PhasedLessonController 拦截 SSE)。
+为让 `progress_snapshot` 事件能被 PhasedLessonController 收到,LessonController 的 `consumeSSE` 已经 ignore 这个 event(switch default fall-through)。需要给 LessonController 加一个新的对外事件 `progress`(或让 PhasedLessonController 拦截 SSE)。
 
-**实施选择**:给 v2 LessonController 的 `handleSseEvent` 加一个 `progress_snapshot` 分支,emit 一个 `'progress'` 事件(新加)。这是另一个 additive 改动。
+**实施选择**:给 LessonController 的 `handleSseEvent` 加一个 `progress_snapshot` 分支,emit 一个 `'progress'` 事件(新加)。
 
-- [ ] **Step 11.1: 给 v2 LessonController 加 progress 事件**
+- [ ] **Step 11.1: 给 LessonController 加 progress 事件**
 
 修改 `src/lib/voice/lesson-controller.ts`:
 
@@ -1275,7 +1271,7 @@ case 'progress_snapshot':
   break;
 ```
 
-- [ ] **Step 11.2: 写 PhasedLessonController 单测(纯逻辑,mock v2 controller)**
+- [ ] **Step 11.2: 写 PhasedLessonController 单测(纯逻辑,mock LessonController)**
 
 新建 `src/lib/voice/phased-lesson-controller.test.ts`:
 
@@ -1284,7 +1280,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
 import { PhasedLessonController, PhaseName } from './phased-lesson-controller';
 
-// 测试用 mock v2 controller,只暴露必要 API
+// 测试用 mock LessonController,只暴露必要 API
 function mockV2() {
   const listeners = new Map<string, Set<Function>>();
   return {
@@ -1628,7 +1624,7 @@ git add src/lib/voice/lesson-controller.ts src/lib/voice/phased-lesson-controlle
 git commit -m "$(cat <<'EOF'
 feat(controller): PhasedLessonController — outer phase state machine
 
-- v2 LessonController 加 'progress' / 'phase-change' 事件 (additive)
+- LessonController 加 'progress' / 'phase-change' 事件
 - v2 SSE handler 把 progress_snapshot 转发到 'progress' 事件
 - PhasedLessonController 监听 actions + progress + state,armed-then-fire transition
 - 切1: introducedCardIds.size === cards.length + TTS done
@@ -1787,13 +1783,13 @@ EOF
 
 ---
 
-## Task 13: InteractivePhase 子组件(复用 v2 LessonView)
+## Task 13: InteractivePhase 子组件(复用课堂元素,不依赖 LessonView)
 
 **Files:**
 - Create: `src/components/lesson/InteractivePhase.tsx`
 - Test: `src/components/lesson/InteractivePhase.test.tsx`
 
-**实现路径**:不修改 v2 LessonView,在 InteractivePhase 内**重新组合**同样的子组件(SceneFrame + WordBook + BloomButton + SubtitleBar + Bunny),但绑定到 PhasedLessonController.v2(传入的 controller)。这避免改 LessonView 内部 useEffect 的 controller 构造逻辑。
+**实现路径**:在 InteractivePhase 内重新组合课堂元素(SceneFrame + WordBook + BloomButton + SubtitleBar + Bunny),并绑定到 PhasedLessonController 持有的 LessonController(通过 prop 注入)。`LessonView.tsx` 后续 cleanup 退役。
 
 - [ ] **Step 13.1: 写测试**
 
@@ -1828,7 +1824,7 @@ pnpm exec vitest run src/components/lesson/InteractivePhase.test.tsx
 
 - [ ] **Step 13.3: 写 `InteractivePhase.tsx`**
 
-读 v2 LessonView 的内容布局,复制相同的 JSX(SceneFrame + WordBook + Bunny + BloomButton + SubtitleBar),但 controller 通过 prop 注入:
+参考现有课堂布局,重新组合 SceneFrame + WordBook + Bunny + BloomButton + SubtitleBar,但 controller 通过 prop 注入:
 
 ```tsx
 'use client';
@@ -1938,9 +1934,9 @@ git add src/components/lesson/InteractivePhase.tsx src/components/lesson/Interac
 git commit -m "$(cat <<'EOF'
 feat(lesson): InteractivePhase — v2 layout driven by injected controller
 
-- 复刻 LessonView 的 SceneFrame + WordBook + Bunny + BloomButton 布局
-- 不修改 LessonView.tsx(v2 0 回归 promise)
-- controller 通过 prop 注入(来自 PhasedLessonController.v2)
+- 复用 SceneFrame + WordBook + Bunny + BloomButton 布局元素
+- 不依赖 LessonView.tsx;旧 LessonView 在 cleanup 阶段退役
+- controller 通过 prop 注入(来自 PhasedLessonController 持有的 LessonController)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -2126,7 +2122,7 @@ describe('QuizRepeatAfterMe', () => {
 });
 ```
 
-> 实施 agent 注:`QuizRepeatAfterMe` 判定的事件来源 — v2 LessonController 的 `subtitle` 事件(`source='user'`)在 ASR final 时 emit。本组件监听这个事件,把它当成"用户说完一句"的信号。判定:`lowercased(text).includes(targetWord)` 即 correct。
+> 实施 agent 注:`QuizRepeatAfterMe` 判定的事件来源 — LessonController 的 `subtitle` 事件(`source='user'`)在 ASR final 时 emit。本组件监听这个事件,把它当成"用户说完一句"的信号。判定:`lowercased(text).includes(targetWord)` 即 correct。
 
 - [ ] **Step 15.2: 跑测试,确认失败**
 
@@ -2498,7 +2494,7 @@ git add src/components/lesson/PhasedLessonView.tsx src/components/lesson/PhasedL
 git commit -m "$(cat <<'EOF'
 feat(lesson): PhasedLessonView — top-level phase router
 
-- 创建 v2 LessonController + 包装成 PhasedLessonController
+- 创建 LessonController + 包装成 PhasedLessonController
 - 按 currentPhase 切子组件:Intro / Interactive / Reinforce / Done
 - intro hotspot click → v2.sendCustomAction message
 - ReinforcePhase 完成 → phased.completeReinforcement → phase=done
@@ -2510,7 +2506,7 @@ EOF
 
 ---
 
-## Task 18: LessonClient 路由 v2 / phased
+## Task 18: LessonClient 直接进入三阶段路径
 
 **Files:**
 - Modify: `src/app/lesson/[id]/LessonClient.tsx`
@@ -2521,7 +2517,6 @@ EOF
 'use client';
 
 import { useEffect, useState } from 'react';
-import { LessonView } from '@/components/lesson/LessonView';
 import { PhasedLessonView } from '@/components/lesson/PhasedLessonView';
 import { Course } from '@/types/course';
 
@@ -2549,11 +2544,7 @@ export function LessonClient({ courseId }: LessonClientProps) {
     );
   }
 
-  // ← 关键路由分支
-  if (course.phases) {
-    return <PhasedLessonView course={course} />;
-  }
-  return <LessonView course={course} />;
+  return <PhasedLessonView course={course} />;
 }
 ```
 
@@ -2571,10 +2562,11 @@ Expected: 全 PASS。
 ```bash
 git add src/app/lesson/[id]/LessonClient.tsx
 git commit -m "$(cat <<'EOF'
-feat(client): route lesson by course.phases
+feat(client): make phased lesson view the only lesson path
 
-- 有 phases → PhasedLessonView(新)
-- 没 phases → LessonView(v2,不变)
+- LessonClient 直接 render PhasedLessonView
+- 不再保留 LessonView v2 fallback
+- 旧课退役由最终 cleanup 删除数据与死引用
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -2596,7 +2588,7 @@ pnpm run dev
 
 打开浏览器:
 - `http://localhost:3000/lesson/food` → 应该看到"开始上课"按钮,点击后进入 IntroPhase(场景图),AI 应该开始介绍 cards
-- `http://localhost:3000/lesson/transportation` → 应该看到 v2 木屋布局(0 回归)
+- `/api/courses` → 应该只返回新标准课程(此时至少 food)
 
 如果 food 走不通(如 LLM prompt 没正确切阶段、phase transition API 出错),回到对应 task 修。
 
@@ -2606,10 +2598,11 @@ pnpm run dev
 
 ```markdown
 | `src/data/courses/food.ts` | food 示范课(三阶段 schema 示例) |
-| `src/lib/voice/phased-lesson-controller.ts` | **外层 phase 状态机**,包 v2 LessonController,规则驱动 phase 切换 |
+| `src/data/courses/index.ts` | 新标准课程 registry,当前只暴露 food |
+| `src/lib/voice/phased-lesson-controller.ts` | **外层 phase 状态机**,包 LessonController 音频管线,规则驱动 phase 切换 |
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 phase 路由,按 currentPhase 切 IntroPhase / InteractivePhase / ReinforcePhase |
 | `src/components/lesson/IntroPhase.tsx` | 主题导入:场景图 + 透明 hotspot 点图触发讲解 |
-| `src/components/lesson/InteractivePhase.tsx` | AI 互动:复刻 v2 木屋布局,接 PhasedLessonController.v2 |
+| `src/components/lesson/InteractivePhase.tsx` | AI 互动:复用课堂元素,接 PhasedLessonController 持有的 LessonController |
 | `src/components/lesson/ReinforcePhase.tsx` | 强化巩固:quiz 编排(pick-word / repeat-after-me),完成后 → done |
 | `src/components/lesson/QuizPickWord.tsx` | quiz:听 prompt 选对的图 |
 | `src/components/lesson/QuizRepeatAfterMe.tsx` | quiz:跟读目标短句,ASR 含目标词判 correct |
@@ -2631,15 +2624,16 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 切3: reinforcement 所有 quizzes 答完
 
 phase 切换由 PhasedLessonController 自己判定,LLM 不输出 phase_transition。
-有 `phases` 字段的课程走 PhasedLessonController + PhasedLessonView;
-无 `phases` 字段的课程(transportation / timeNumbers)走原 v2 LessonController + LessonView,0 回归。
+课程统一走 PhasedLessonController + PhasedLessonView;
+旧课程 transportation / timeNumbers 不迁移,在 cleanup 中退役。
 ```
 
 在 §6 关键决策表格末尾追加:
 
 ```markdown
 | 三阶段 phase 切换 | 规则驱动,PhasedLessonController 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
-| 0 回归 promise | 新课走新 controller / view,旧 LessonController.tsx + LessonView.tsx 一行不改(只加 additive 方法 / 事件) | 旧课跑旧代码,风险隔离 |
+| 新标准唯一化 | food 跑通后退役 transportation / timeNumbers 与 LessonView fallback | 避免长期维护两套课程路径 |
+| LessonController 定位 | 继续复用 ASR/TTS/SSE 管线,不作为独立 lesson UI 入口 | 降低重写音频链路风险 |
 ```
 
 - [ ] **Step 19.3: Commit architecture.md 同步**
@@ -2651,7 +2645,7 @@ docs(arch): sync §2 / §4 / §6 for three-phase lesson refactor
 
 - §2 模块清单新增 PhasedLessonController / PhasedLessonView / 3 phase 子组件 / 2 quiz 组件
 - §4 加 phase 轴状态机(food 课程路径)
-- §6 加 phase 切换 / 0 回归 promise 两条决策
+- §6 加 phase 切换 / 新标准唯一化 / LessonController 定位决策
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -2660,9 +2654,93 @@ EOF
 
 ---
 
-## Task 20: 最终验收
+## Task 20: Cleanup 旧课与 v2-only 入口(最后执行)
 
-- [ ] **Step 20.1: tsc + 全单测**
+**Files:**
+- Delete: `src/data/courses/transportation.ts`
+- Delete: `src/data/courses/timeNumbers.ts`
+- Delete: `src/components/lesson/LessonView.tsx` 和只服务它的测试(若无其它引用)
+- Modify: tests/docs still importing old courses
+- Modify: `src/types/course.ts`(把 `Course.phases?` 收紧为必填 `phases`)
+
+- [ ] **Step 20.1: 删除旧课程数据并清掉死引用**
+
+删除或更新所有仍引用旧课程的测试/模块。用以下命令找引用:
+
+```bash
+rg -n "transportationCourse|timeNumbersCourse|@/data/courses/transportation|@/data/courses/timeNumbers|LessonView" src tests docs
+```
+
+处理原则:
+- 业务入口和 API 只能从 `@/data/courses` 取 `allCourses` / `getCourseById`。
+- 课程相关测试改用 `foodCourse` 或本地最小 fixture。
+- 如果某个测试专门验证 sentence cards,保留一个 test-local fixture,不要依赖已退役 `timeNumbersCourse`。
+- `LessonController` 不删除;它仍是 PhasedLessonController 的底层音频管线。
+
+- [ ] **Step 20.2: 收紧 Course schema**
+
+把 `src/types/course.ts`:
+
+```ts
+phases?: Phases;
+```
+
+改为:
+
+```ts
+phases: Phases;
+```
+
+同步删除 `src/types/course.test.ts` 里的 "temporarily accepts a course without phases" case。
+
+- [ ] **Step 20.3: 删除 LessonClient fallback 残留**
+
+确认不存在:
+
+```bash
+rg -n "course\\.phases\\)|<LessonView|from '@/components/lesson/LessonView'|from './LessonView'" src
+```
+
+- [ ] **Step 20.4: 同步 docs/TODO.md / docs/architecture.md**
+
+更新当前状态:
+- 课程列表从旧两课改成 food 是当前唯一可见课程
+- transportation / timeNumbers 标记为退役,不是待迁移
+- v2 LessonView fallback 已删除;LessonController 仍保留为底层管线
+
+- [ ] **Step 20.5: cleanup 验证**
+
+```bash
+pnpm exec tsc --noEmit
+pnpm test
+git diff --check
+```
+
+Expected: 全绿,且 `rg` 不再找到旧课程/旧 UI 入口死引用。
+
+- [ ] **Step 20.6: Commit**
+
+```bash
+git add -A
+git commit -m "$(cat <<'EOF'
+refactor(course): retire legacy lessons and v2 lesson fallback
+
+- Remove transportation/timeNumbers course data from runtime
+- Make food/new phased course path the only visible lesson path
+- Tighten Course.phases after legacy cleanup
+- Remove LessonView v2 fallback and related dead references
+- Keep LessonController as reusable ASR/TTS/SSE pipeline
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 21: 最终验收
+
+- [ ] **Step 21.1: tsc + 全单测**
 
 ```bash
 pnpm exec tsc --noEmit
@@ -2671,17 +2749,18 @@ pnpm test
 
 Expected: 全绿。
 
-- [ ] **Step 20.2: 验收清单(spec §12)逐项检查**
+- [ ] **Step 21.2: 验收清单(spec §12)逐项检查**
 
 | 项 | 命令 / 操作 | 预期 |
 |----|------|------|
 | typecheck | `pnpm exec tsc --noEmit` | 0 error |
 | 单测 | `pnpm test` | 全绿,含 phased-lesson-controller / quiz / prompt 切换等新加测试 |
 | food 课程走得通 | `pnpm run dev` → `/lesson/food` | 三阶段顺序进入,endLesson 正常 |
-| 0 回归 | `pnpm run dev` → `/lesson/transportation` | 跟今天一样,木屋布局 |
+| 课程列表 | `/api/courses` | 只返回新标准课程,至少包含 food |
+| 旧课退役 | `/lesson/transportation` / `/lesson/timeNumbers` | 不在课程列表;可 404 或显示未找到 |
 | lesson-report | `/lesson-report <session-id>` | 报告生成不报错(quiz 答题作为 interaction 出现在 log 里) |
 
-- [ ] **Step 20.3: 如果全过,无需新 commit;若中途修过 bug,正常 commit**
+- [ ] **Step 21.3: 如果全过,无需新 commit;若中途修过 bug,正常 commit**
 
 ---
 
@@ -2689,5 +2768,5 @@ Expected: 全绿。
 
 - 本 plan 假设 `@testing-library/react` 已可用(项目里 `src/components/lesson/WordBook.test.tsx` 等已经在用)。如果实际跑测试报 `not found`,先 `pnpm add -D @testing-library/react jsdom` 然后在 vitest 配置里设 environment 'jsdom'。
 - 多个 `VOICE_MOCK=true` 单测依赖项目已有 mock 模式;若 mock 没接 streamUserInput 路径,可以把对应测试 case 标 `it.skip` + 注释,留给后续手测覆盖。
-- v2 LessonController 加 `sendCustomAction` / `getSessionId` / `progress` 事件三处是 additive — 现有 lesson-controller.test.ts(若有)应该不破坏。若破坏,先修测试再继续。
+- LessonController 加 `sendCustomAction` / `getSessionId` / `progress` 事件三处是为了复用底层音频管线;不要把它误删。
 - food 示范课的 sceneCaption / narrationHint 在 IntroPhase 不全部呈现(只显示 sceneCaption),narrationHint 通过 server prompt 注入。

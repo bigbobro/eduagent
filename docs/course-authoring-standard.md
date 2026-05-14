@@ -8,7 +8,7 @@ Every regular theme course should teach **words plus short sentences**, not a wo
 
 - Use 6-10 `word` cards for concrete, visual targets.
 - Define 1-2 core sentence patterns in `objectives.sentences`.
-- Default to `word` cards + sentence objectives. Use `kind: 'sentence'` cards only when the sentence itself needs a dedicated visual card, such as abstract relations in `timeNumbers`.
+- Default to `word` cards + sentence objectives. Use `kind: 'sentence'` cards only when the sentence itself needs a dedicated visual card, such as abstract relations in a future time/number course.
 - Keep the sentence load light for 3-6 year olds. A regular theme course should practice one sentence pattern deeply before adding another.
 
 Example sentence goals:
@@ -48,7 +48,7 @@ For each new three-phase course:
 - `src/data/courses/<courseId>.ts`: one exported `Course` object with `cards`, `objectives.sentences`, `teachingHints`, and `phases`.
 - `public/images/<theme>/<cardId>.png`: one generated or curated single-card image per word card.
 - `public/images/<theme>/scene.svg`: structured introduction scene with `<g id="card-...">` hotspots.
-- Registration in `allCourses` currently exported from `src/data/courses/transportation.ts`.
+- Registration in `allCourses` exported from `src/data/courses/index.ts`.
 - `src/data/courses/<courseId>.test.ts`: course-specific integrity checks.
 
 ## 5. Quiz Rules

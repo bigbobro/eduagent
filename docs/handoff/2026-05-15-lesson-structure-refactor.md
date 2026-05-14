@@ -14,7 +14,7 @@
 | Commit | 内容 |
 |---|---|
 | `f40b605` | 三阶段重构 spec(15 节;§13 后续已修订为课程标准入口摘要) |
-| `3e306ae` | 实施 plan(20 task,每 task 含 TDD 步骤 + 可 paste 代码 + commit 模板) |
+| `3e306ae` | 实施 plan(原 20 task,后续已修订为 21 task,末尾加入旧课 cleanup) |
 | `d5510da` | `docs/TODO.md` 顶部加 epic 指针,取代旧 P1 §2 |
 | `5f71357` | 项目 `CLAUDE.md` "添加新课程"速查路径修正(`src/data/courses/`) |
 
@@ -28,6 +28,7 @@
 - food 不再按"单词课 + 字符占位"执行;已改成"6 个 word cards + 2 个核心短句 + ImageGen 单体 PNG + 结构化 scene.svg hotspot"。
 - 长期 Codex 课程产出标准已独立到 `docs/course-authoring-standard.md`;spec §13 现在只做入口摘要。
 - implementation plan Task 2 / 3 / 4 / 6 / 15 已按短句与 ImageGen 资产流更新。
+- 用户已明确决定旧课不迁移、不保留 0 回归;food 跑通后最后执行 cleanup,退役 `transportation` / `timeNumbers` 和旧 `LessonView` fallback。
 
 **新增项目 memory(用户私有,非 repo)**:
 - `~/.claude/projects/-Users-hushaobo-ROOTCLOUD-new-solulu-eduagent/memory/project_three_phase_lesson_structure.md`(MEMORY.md 已加索引)
@@ -36,9 +37,9 @@
 
 1. 单节课显式三阶段:**introduction(看懂)→ interactive(开口)→ reinforcement(检查)**
 2. **工具是 Agent 的能力,不是孩子的按钮** — 本次只搭舞台,工具层(放大/圈出/慢速/换问法)是后续独立 epic
-3. **0 回归 promise**:旧 `LessonController` / `LessonView` 一行不改(只 additive 加 `sendCustomAction` / `getSessionId` / `progress` 事件)。验收命令:`/lesson/transportation` 行为与今日完全一致
+3. **新标准唯一化**:不再保留旧课 0 回归 promise;food 跑通后清掉旧课和旧 UI fallback
 4. phase 切换**规则驱动**,LLM 不输出 phase_transition action
-5. food 课程 = 第 1 个三阶段示范课;transportation / timeNumbers 保持 v2 路径,**不迁移**(下个 epic)
+5. food 课程 = 第 1 个三阶段示范课;transportation / timeNumbers **不迁移,最后退役**
 6. quiz 类型本次只做 2 种:`pick-word`(听懂)+ `repeat-after-me`(说出来);food 的 repeat-after-me 必须练短句,不是只说单词
 
 ## 立即要做的事
@@ -76,7 +77,7 @@ repo 内已 `grep -rl 'tp-coouo'` 0 命中;memory 目录也已清。
 
 - **`@testing-library/react` 可能没装**:plan Final notes 已提到。若 component 测试报 not found,`pnpm add -D @testing-library/react jsdom` 然后 vitest 设 `environment: 'jsdom'`
 - **`VOICE_MOCK=true` 测试 gating**:部分集成测只在 mock 下跑。若 mock 没接 streamUserInput,先 it.skip 留 followup
-- **`allCourses` 注册位置奇特**:在 `src/data/courses/transportation.ts` 底部,不是独立 `index.ts`。plan Task 2 路径已写对
+- **`allCourses` 注册位置要迁出旧课文件**:plan Task 2 要新建 `src/data/courses/index.ts`;旧 `transportation.ts` 不再作为 registry
 - **food.ts 视觉资产**:plan 现在要求 ImageGen 生成单体 PNG,再由 `scene.svg` 通过 `<g id="card-X"><image .../></g>` 结构化组装;不要回退到字符占位或不可交互大图
 
 ## 不重要但留个梗
