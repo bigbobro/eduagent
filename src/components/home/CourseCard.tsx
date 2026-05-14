@@ -1,6 +1,5 @@
 'use client';
 
-import { Card } from '@/components/ui/Card';
 import { Course } from '@/types/course';
 
 interface CourseCardProps {
@@ -19,7 +18,7 @@ export function CourseCard({ course, onClick }: CourseCardProps) {
   const wordCards = course.cards.filter((c) => c.kind === 'word');
 
   return (
-    <Card onClick={onClick} className="w-full max-w-sm">
+    <div onClick={onClick} className="w-full max-w-sm cursor-pointer">
       <div className="h-48 bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center">
         <span className="text-6xl">
           {wordCards.slice(0, 4).map((c) => EMOJI[c.english] || '📚').join(' ')}
@@ -33,6 +32,6 @@ export function CourseCard({ course, onClick }: CourseCardProps) {
           <span>👶 {course.targetAge[0]}-{course.targetAge[1]}岁</span>
         </div>
       </div>
-    </Card>
+    </div>
   );
 }
