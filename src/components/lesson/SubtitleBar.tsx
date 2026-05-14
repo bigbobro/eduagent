@@ -1,5 +1,4 @@
 'use client';
-
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface SubtitleBarProps {
@@ -8,28 +7,37 @@ interface SubtitleBarProps {
   isPlaying: boolean;
 }
 
+const toneCx: Record<SubtitleBarProps['source'], string> = {
+  user: 'bg-bunny-bg-sky text-bunny-ink',
+  ai: 'bg-bunny-bg-cream text-bunny-ink',
+  idle: 'bg-bunny-bg-warmpaper text-bunny-ink-soft',
+};
+
 export function SubtitleBar({ text, source, isPlaying }: SubtitleBarProps) {
   const placeholder = source === 'idle' ? '等待开始...' : '';
   const display = text || placeholder;
-  const tone =
-    source === 'user' ? 'text-blue-700' :
-    source === 'ai'   ? 'text-gray-800' :
-                        'text-gray-400';
   return (
-    <div className="w-full bg-white/90 backdrop-blur-sm rounded-lg px-6 py-4 shadow-md min-h-[60px] flex items-center">
+    <div
+      data-subtitle-source={source}
+      className={`w-full rounded-bunny-lg shadow-soft px-6 py-4 min-h-[64px] flex items-center ${toneCx[source]}`}
+    >
       <AnimatePresence mode="wait">
         <motion.p
           key={`${source}-${display}`}
-          initial={{ opacity: 0, y: 10 }}
+          initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -10 }}
+          exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.2 }}
-          className={`text-lg leading-relaxed ${tone}`}
+          className="font-zh text-lg leading-relaxed"
         >
-          {source === 'user' && <span className="mr-2 text-sm text-blue-400">你:</span>}
+          {source === 'user' && <span className="mr-2 text-bunny-ink-soft">你:</span>}
           {display}
           {isPlaying && source === 'ai' && (
-            <span className="inline-block ml-2 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+            <motion.span
+              className="inline-block ml-2 w-2 h-2 bg-bunny-pink rounded-full align-middle"
+              animate={{ opacity: [0.3, 1, 0.3] }}
+              transition={{ duration: 1, repeat: Infinity }}
+            />
           )}
         </motion.p>
       </AnimatePresence>
