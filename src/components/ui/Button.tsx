@@ -1,47 +1,51 @@
 'use client';
+import type { ReactNode } from 'react';
 
-import { motion } from 'framer-motion';
+type Variant = 'primary' | 'ghost' | 'danger';
+type Size = 'sm' | 'md' | 'lg';
 
 interface ButtonProps {
-  children: React.ReactNode;
+  children: ReactNode;
   onClick?: () => void;
-  variant?: 'primary' | 'secondary' | 'danger';
-  size?: 'sm' | 'md' | 'lg';
+  variant?: Variant;
+  size?: Size;
   disabled?: boolean;
+  type?: 'button' | 'submit';
   className?: string;
+  'aria-label'?: string;
 }
 
-const variants = {
-  primary: 'bg-blue-500 hover:bg-blue-600 text-white',
-  secondary: 'bg-gray-200 hover:bg-gray-300 text-gray-800',
-  danger: 'bg-red-500 hover:bg-red-600 text-white',
+const variantCx: Record<Variant, string> = {
+  primary: 'bg-bunny-pink hover:bg-bunny-pink/90 text-bunny-ink',
+  ghost:   'bg-bunny-bg-warmpaper hover:bg-bunny-pink-soft text-bunny-ink',
+  danger:  'bg-bunny-berry hover:bg-bunny-berry/90 text-white',
 };
-
-const sizes = {
-  sm: 'px-3 py-1.5 text-sm',
-  md: 'px-4 py-2 text-base',
-  lg: 'px-6 py-3 text-lg',
+const sizeCx: Record<Size, string> = {
+  sm: 'px-4 py-2 text-sm rounded-bunny-md',
+  md: 'px-6 py-3 text-base rounded-bunny-md',
+  lg: 'px-8 py-4 text-lg rounded-bunny-lg',
 };
 
 export function Button({
-  children,
-  onClick,
-  variant = 'primary',
-  size = 'md',
-  disabled = false,
-  className = '',
+  children, onClick, variant = 'primary', size = 'md',
+  disabled = false, type = 'button', className = '', ...rest
 }: ButtonProps) {
   return (
-    <motion.button
-      whileHover={{ scale: disabled ? 1 : 1.05 }}
-      whileTap={{ scale: disabled ? 1 : 0.95 }}
-      onClick={onClick}
+    <button
+      type={type}
+      onClick={disabled ? undefined : onClick}
       disabled={disabled}
-      className={`rounded-lg font-medium transition-colors ${variants[variant]} ${sizes[size]} ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
-      } ${className}`}
+      aria-label={rest['aria-label']}
+      className={[
+        'font-medium shadow-soft transition-all duration-150',
+        'hover:scale-[1.03] active:scale-[0.97]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-bunny-pink focus-visible:ring-offset-2',
+        variantCx[variant], sizeCx[size],
+        disabled ? 'opacity-50 cursor-not-allowed hover:scale-100 active:scale-100' : '',
+        className,
+      ].join(' ')}
     >
       {children}
-    </motion.button>
+    </button>
   );
 }
