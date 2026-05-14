@@ -24,12 +24,14 @@ export function attachSpacebarHandlers(opts: {
   onDown: () => void;
   onUp: () => void;
   pressedRef: { current: boolean };
+  enabledRef?: { current: boolean };
 }): () => void {
-  const { onDown, onUp, pressedRef } = opts;
+  const { onDown, onUp, pressedRef, enabledRef } = opts;
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.code !== 'Space') return;
     if (isInputFocused()) return;
+    if (enabledRef && !enabledRef.current) return;
     if (e.repeat) return;
     if (pressedRef.current) return;
     pressedRef.current = true;
@@ -45,19 +47,37 @@ export function attachSpacebarHandlers(opts: {
     onUp();
   };
 
-  document.addEventListener('keydown', onKeyDown);
-  document.addEventListener('keyup', onKeyUp);
+  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('keyup', onKeyUp, true);
   return () => {
-    document.removeEventListener('keydown', onKeyDown);
-    document.removeEventListener('keyup', onKeyUp);
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener('keyup', onKeyUp, true);
   };
 }
 
 export function useSpacebar({ onDown, onUp, enabled = true }: SpacebarOpts): void {
   const downRef = useRef(false);
+  const enabledRef = useRef(enabled);
+  const onDownRef = useRef(onDown);
+  const onUpRef = useRef(onUp);
+
+  enabledRef.current = enabled;
+  onDownRef.current = onDown;
+  onUpRef.current = onUp;
 
   useEffect(() => {
-    if (!enabled) return;
-    return attachSpacebarHandlers({ onDown, onUp, pressedRef: downRef });
-  }, [enabled, onDown, onUp]);
+    const teardown = attachSpacebarHandlers({
+      onDown: () => onDownRef.current(),
+      onUp: () => onUpRef.current(),
+      pressedRef: downRef,
+      enabledRef,
+    });
+    return () => {
+      teardown();
+      if (downRef.current) {
+        downRef.current = false;
+        onUpRef.current();
+      }
+    };
+  }, []);
 }

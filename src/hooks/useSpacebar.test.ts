@@ -10,11 +10,13 @@ describe('attachSpacebarHandlers', () => {
   let onUp: ReturnType<typeof vi.fn>;
   let teardown: (() => void) | null;
   let pressedRef: { current: boolean };
+  let enabledRef: { current: boolean };
 
   beforeEach(() => {
     onDown = vi.fn();
     onUp = vi.fn();
     pressedRef = { current: false };
+    enabledRef = { current: true };
     teardown = null;
   });
 
@@ -27,6 +29,7 @@ describe('attachSpacebarHandlers', () => {
     onDown: onDown as unknown as () => void,
     onUp: onUp as unknown as () => void,
     pressedRef,
+    enabledRef,
   });
 
   it('calls onDown on keydown Space and onUp on keyup', () => {
@@ -95,5 +98,23 @@ describe('attachSpacebarHandlers', () => {
     teardown = attach();
     fireKey('keyup', 'Space');
     expect(onUp).not.toHaveBeenCalled();
+  });
+
+  it('does not start while disabled', () => {
+    enabledRef.current = false;
+    teardown = attach();
+    fireKey('keydown', 'Space');
+    fireKey('keyup', 'Space');
+    expect(onDown).not.toHaveBeenCalled();
+    expect(onUp).not.toHaveBeenCalled();
+  });
+
+  it('still stops an active press if disabled before keyup', () => {
+    teardown = attach();
+    fireKey('keydown', 'Space');
+    enabledRef.current = false;
+    fireKey('keyup', 'Space');
+    expect(onDown).toHaveBeenCalledTimes(1);
+    expect(onUp).toHaveBeenCalledTimes(1);
   });
 });

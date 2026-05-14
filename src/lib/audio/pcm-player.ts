@@ -7,6 +7,7 @@ export class PcmPlayer {
   private ctx: AudioContext | null = null;
   private nextStartTime = 0;
   private active = new Set<AudioBufferSourceNode>();
+  private idleListeners = new Set<() => void>();
   private readonly sampleRate: number;
 
   constructor(sampleRate = 24000) {
@@ -39,7 +40,10 @@ export class PcmPlayer {
     src.start(startAt);
     this.nextStartTime = startAt + buf.duration;
     this.active.add(src);
-    src.onended = () => this.active.delete(src);
+    src.onended = () => {
+      this.active.delete(src);
+      this.emitIdleIfNeeded();
+    };
   }
 
   /** 立即停止所有正在响的 source,清空队列。 */
@@ -51,6 +55,21 @@ export class PcmPlayer {
     if (this.ctx) {
       this.nextStartTime = this.ctx.currentTime;
     }
+    this.emitIdleIfNeeded();
+  }
+
+  isIdle(): boolean {
+    return this.active.size === 0;
+  }
+
+  onIdle(fn: () => void): () => void {
+    this.idleListeners.add(fn);
+    return () => this.idleListeners.delete(fn);
+  }
+
+  private emitIdleIfNeeded(): void {
+    if (this.active.size > 0) return;
+    this.idleListeners.forEach((fn) => fn());
   }
 
   async dispose(): Promise<void> {

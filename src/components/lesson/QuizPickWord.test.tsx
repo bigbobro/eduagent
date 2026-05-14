@@ -16,19 +16,21 @@ describe('QuizPickWord', () => {
     render(<QuizPickWord quiz={quiz} course={foodCourse} onAnswer={() => {}} />);
     expect(screen.getByText(/Where is the apple/)).toBeTruthy();
     expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.getByText('苹果')).toBeTruthy();
+    expect(screen.getByText('apple')).toBeTruthy();
   });
 
   it('calls onAnswer(correct=true) when correct card tapped', () => {
     const onAnswer = vi.fn();
     render(<QuizPickWord quiz={quiz} course={foodCourse} onAnswer={onAnswer} />);
-    fireEvent.click(screen.getByRole('button', { name: /apple/i }));
+    fireEvent.click(screen.getByRole('button', { name: /苹果 apple/i }));
     expect(onAnswer).toHaveBeenCalledWith({ correct: true, picked: 'apple' });
   });
 
   it('calls onAnswer(correct=false) when distractor tapped', () => {
     const onAnswer = vi.fn();
     render(<QuizPickWord quiz={quiz} course={foodCourse} onAnswer={onAnswer} />);
-    fireEvent.click(screen.getByRole('button', { name: /milk/i }));
+    fireEvent.click(screen.getByRole('button', { name: /牛奶 milk/i }));
     expect(onAnswer).toHaveBeenCalledWith({ correct: false, picked: 'milk' });
   });
 });

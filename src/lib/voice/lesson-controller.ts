@@ -33,8 +33,15 @@ export class LessonController {
   private recorder: RecorderHandle | null = null;
   private chatAbort: AbortController | null = null;
   private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
+  private speechFinishFallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private listenStartedAt = 0;
   private listenStoppedAt = 0;
+  private speechStreamFinished = false;
+  private static readonly SPEECH_FINISH_FALLBACK_MS = 1500;
+
+  constructor() {
+    this.player.onIdle(() => this.maybeReturnToAwaiting());
+  }
 
   on(event: EventName, fn: Listener): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
@@ -63,7 +70,10 @@ export class LessonController {
     // 1) 并行启动:TTS 长连 + mic 预热(权限框、AudioContext、Worklet、MediaStream 全提前就绪)
     //    开场白播完用户按住空格那一刻,worklet node 只需 connect 一下,几乎瞬间就能出 PCM。
     await Promise.all([
-      this.tts.open(),
+      this.tts.open().catch((e) => {
+        console.warn('[lesson] tts open failed (continuing text-only):', e);
+        this.emit('error', { message: '语音暂时连不上,先继续文字流程' });
+      }),
       prewarmRecorder().catch((e) => {
         console.warn('[lesson] mic prewarm failed (will retry on first press):', e);
       }),
@@ -95,8 +105,13 @@ export class LessonController {
       clearTimeout(this.asrFinalTimer);
       this.asrFinalTimer = null;
     }
+    if (this.speechFinishFallbackTimer) {
+      clearTimeout(this.speechFinishFallbackTimer);
+      this.speechFinishFallbackTimer = null;
+    }
     await this.stopRecording();
     this.player.stop();
+    this.speechStreamFinished = false;
     this.tts.close();
     if (this.sessionId) {
       try {
@@ -297,9 +312,12 @@ export class LessonController {
       this.player.enqueue(pcm);
     });
     this.tts.on('session-finished', () => {
-      if (this.state === 'speaking' || this.state === 'greeting') {
-        this.setState('awaiting');
+      if (this.speechFinishFallbackTimer) {
+        clearTimeout(this.speechFinishFallbackTimer);
+        this.speechFinishFallbackTimer = null;
       }
+      this.speechStreamFinished = true;
+      this.maybeReturnToAwaiting();
     });
     this.tts.on('error', (err: { message: string }) => {
       this.emit('error', err);
@@ -318,6 +336,7 @@ export class LessonController {
     const ensureTtsSession = () => {
       if (!ttsStarted) {
         const sid = uuidv4();
+        this.speechStreamFinished = false;
         this.tts.startSession(sid);
         ttsStarted = true;
       }
@@ -380,10 +399,28 @@ export class LessonController {
         break;
       case 'done':
         this.tts.finishSession();
+        this.armSpeechFinishFallback();
         break;
       case 'error':
         this.emit('error', { message: payload.message || 'unknown' });
         break;
     }
+  }
+
+  private maybeReturnToAwaiting(): void {
+    if (!this.speechStreamFinished) return;
+    if (!this.player.isIdle()) return;
+    if (this.state === 'speaking' || this.state === 'greeting') {
+      this.setState('awaiting');
+    }
+  }
+
+  private armSpeechFinishFallback(): void {
+    if (this.speechFinishFallbackTimer) clearTimeout(this.speechFinishFallbackTimer);
+    this.speechFinishFallbackTimer = setTimeout(() => {
+      this.speechFinishFallbackTimer = null;
+      this.speechStreamFinished = true;
+      this.maybeReturnToAwaiting();
+    }, LessonController.SPEECH_FINISH_FALLBACK_MS);
   }
 }

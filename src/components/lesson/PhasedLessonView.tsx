@@ -20,16 +20,24 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const phasedRef = useRef<PhasedLessonController | null>(null);
   const [phase, setPhase] = useState<PhaseName>('intro');
   const [started, setStarted] = useState(false);
+  const [introBusy, setIntroBusy] = useState(false);
+  const [introActiveCardId, setIntroActiveCardId] = useState<string | null>(null);
 
   useEffect(() => {
     const v2 = new LessonController();
     const phased = new PhasedLessonController(v2, course);
     const onPhaseChange = (next: PhaseName) => setPhase(next);
+    const onIntroBusyChange = (busy: boolean) => setIntroBusy(busy);
+    const onIntroActiveCardChange = (cardId: string | null) => setIntroActiveCardId(cardId);
     v2Ref.current = v2;
     phasedRef.current = phased;
     phased.on('phase-change', onPhaseChange);
+    phased.on('intro-busy-change', onIntroBusyChange);
+    phased.on('intro-active-card-change', onIntroActiveCardChange);
     return () => {
       phased.off('phase-change', onPhaseChange);
+      phased.off('intro-busy-change', onIntroBusyChange);
+      phased.off('intro-active-card-change', onIntroActiveCardChange);
       phased.endLesson().catch(() => {});
     };
   }, [course]);
@@ -41,10 +49,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
 
   const handleHotspotClick = (cardId: string) => {
     if (!started) return;
-    void v2Ref.current?.sendCustomAction({
-      action: 'message',
-      text: `(请介绍 ${cardId})`,
-    });
+    void phasedRef.current?.requestIntroCard(cardId);
   };
 
   const handleDone = () => router.push(`/lesson/${course.id}/done`);
@@ -69,13 +74,20 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
       <div className="absolute inset-0 top-14">
         {!started && (
           <>
-            <IntroPhase course={course} onHotspotClick={() => {}} />
+            <IntroPhase course={course} locked activeCardId={introActiveCardId} onHotspotClick={() => {}} />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <Button size="lg" onClick={handleStart} className="pointer-events-auto">开始上课</Button>
             </div>
           </>
         )}
-        {started && phase === 'intro' && <IntroPhase course={course} onHotspotClick={handleHotspotClick} />}
+        {started && phase === 'intro' && (
+          <IntroPhase
+            course={course}
+            locked={introBusy}
+            activeCardId={introActiveCardId}
+            onHotspotClick={handleHotspotClick}
+          />
+        )}
         {started && phase === 'interactive' && v2 && <InteractivePhase course={course} controller={v2} />}
         {started && phase === 'reinforcement' && v2 && (
           <ReinforcePhase
