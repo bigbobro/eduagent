@@ -12,6 +12,20 @@
 - [x] `/lesson-report` 已兼容 v2 课程结构。
 - [x] timeNumbers 跑过一节实测 → 报告 `docs/lesson-reports/2026-05-05-eb25ad66.md`。
 
+## 进行中(2026-05-15)
+
+**lesson-structure-refactor epic — 三阶段课程结构 + food 示范课**
+
+- Spec: `docs/superpowers/specs/2026-05-15-lesson-structure-refactor-design.md`
+- Plan: `docs/superpowers/plans/2026-05-15-lesson-structure-refactor.md`(20 tasks,未开始实施)
+- 决策:把"一种交互模式贯穿一节课"重构为显式三阶段(导入 → 互动 → 巩固),food 作为第一个三阶段示范课
+- 0 回归 promise:旧 `LessonController` / `LessonView` 一行不改,transportation / timeNumbers 继续走 v2 路径
+- 工具层(放大 / 圈出 / 慢速 / 换问法)是后续独立 epic,本次只搭三阶段骨架
+- 本 epic 包含并取代下方 P1 §2 "写第 3 节课"(food = 第 3 课 + 示范课)
+- 下游 Codex 产新课:照 spec §13 课程产出 checklist 走
+
+---
+
 ## 当前阶段次序(2026-05-10 v1.1 后)
 
 按"内容驱动 + 最小止损 + LLM 容错替代规则纠正"思路。ASR 注入路径已打通,过拟合字典 fallback 已撤,教学循环 v1.1 已落地。下一步写第 3 节课并用真人实测 + lesson-report 验证 v1.1。
