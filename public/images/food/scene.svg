@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 768" role="img" aria-label="餐桌上摆着 apple, banana, bread, milk, egg, rice">
+  <defs>
+    <linearGradient id="wall" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fff8ec" />
+      <stop offset="100%" stop-color="#f4dfc3" />
+    </linearGradient>
+    <linearGradient id="table" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="#f1c17d" />
+      <stop offset="100%" stop-color="#d9934f" />
+    </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#8f5d32" flood-opacity="0.22" />
+    </filter>
+  </defs>
+
+  <rect width="1024" height="768" fill="url(#wall)" />
+  <ellipse cx="512" cy="425" rx="420" ry="245" fill="#efd29d" opacity="0.55" />
+  <rect x="92" y="215" width="840" height="420" rx="80" fill="url(#table)" filter="url(#soft-shadow)" />
+  <path d="M128 295 C260 235 740 235 896 300" fill="none" stroke="#fff3d8" stroke-width="10" opacity="0.6" />
+  <path d="M142 520 C315 590 700 590 882 518" fill="none" stroke="#a76635" stroke-width="8" opacity="0.2" />
+
+  <g id="card-apple" style="cursor:pointer">
+    <rect x="137" y="260" width="170" height="170" rx="28" fill="transparent" />
+    <image href="/images/food/apple.png" x="142" y="250" width="160" height="160" preserveAspectRatio="xMidYMid meet" />
+  </g>
+  <g id="card-banana" style="cursor:pointer">
+    <rect x="424" y="246" width="180" height="170" rx="28" fill="transparent" />
+    <image href="/images/food/banana.png" x="420" y="236" width="188" height="188" preserveAspectRatio="xMidYMid meet" />
+  </g>
+  <g id="card-bread" style="cursor:pointer">
+    <rect x="707" y="250" width="188" height="176" rx="28" fill="transparent" />
+    <image href="/images/food/bread.png" x="704" y="240" width="194" height="194" preserveAspectRatio="xMidYMid meet" />
+  </g>
+  <g id="card-milk" style="cursor:pointer">
+    <rect x="140" y="455" width="180" height="176" rx="28" fill="transparent" />
+    <image href="/images/food/milk.png" x="136" y="440" width="192" height="192" preserveAspectRatio="xMidYMid meet" />
+  </g>
+  <g id="card-egg" style="cursor:pointer">
+    <rect x="438" y="456" width="156" height="172" rx="28" fill="transparent" />
+    <image href="/images/food/egg.png" x="430" y="442" width="176" height="176" preserveAspectRatio="xMidYMid meet" />
+  </g>
+  <g id="card-rice" style="cursor:pointer">
+    <rect x="701" y="445" width="198" height="188" rx="28" fill="transparent" />
+    <image href="/images/food/rice.png" x="700" y="432" width="200" height="200" preserveAspectRatio="xMidYMid meet" />
+  </g>
+</svg>

@@ -18,7 +18,7 @@ describe('/api/sessions', () => {
   it('default limit=10, DESC sort', async () => {
     for (let i = 0; i < 12; i++) {
       const dt = `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`;
-      memDb.prepare(`INSERT INTO lesson_logs VALUES (?, 'transportation', ?, ?, 3, '{}')`).run(`s${i}`, dt, dt);
+      memDb.prepare(`INSERT INTO lesson_logs VALUES (?, 'food', ?, ?, 3, '{}')`).run(`s${i}`, dt, dt);
     }
     const req = new Request('http://x/api/sessions');
     const res = await GET(req);
@@ -30,7 +30,7 @@ describe('/api/sessions', () => {
   it('?limit=3 takes effect', async () => {
     for (let i = 0; i < 5; i++) {
       const dt = `2026-05-0${i + 1}T10:00:00Z`;
-      memDb.prepare(`INSERT INTO lesson_logs VALUES (?, 'transportation', ?, ?, 1, '{}')`).run(`s${i}`, dt, dt);
+      memDb.prepare(`INSERT INTO lesson_logs VALUES (?, 'food', ?, ?, 1, '{}')`).run(`s${i}`, dt, dt);
     }
     const req = new Request('http://x/api/sessions?limit=3');
     const res = await GET(req);

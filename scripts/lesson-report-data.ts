@@ -2,7 +2,8 @@
 import path from 'path';
 import fs from 'fs';
 import type { Database } from 'better-sqlite3';
-import { getCourseById } from '../src/data/courses/transportation';
+import { getCourseById } from '../src/data/courses';
+import type { WordCard } from '../src/types/course';
 
 export interface ReportData {
   session: {
@@ -170,7 +171,7 @@ export const defaultCourseLoader: CourseLoader = async (courseId) => {
   if (!course) return null;
   return {
     title: course.title,
-    words: course.cards.filter((card) => card.kind === 'word').map((card) => card.english),
+    words: course.cards.filter((card: WordCard) => card.kind === 'word').map((card: WordCard) => card.english),
   };
 };
 

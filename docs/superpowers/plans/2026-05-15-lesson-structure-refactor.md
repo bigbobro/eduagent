@@ -1,5 +1,7 @@
 # Lesson Structure Refactor — Three-Phase Implementation Plan
 
+**Implementation status (2026-05-15):** 已按本 plan 实施到 runtime。当前 master 上 food 是唯一可见课程,旧 `transportation` / `timeNumbers` 数据与旧 `LessonView` fallback 已删除,`Course.phases` 已收紧为必填。本文保留为实施记录和后续排查参考。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Spec:** `docs/superpowers/specs/2026-05-15-lesson-structure-refactor-design.md`(必读,本 plan 是它的 actionable 落地)

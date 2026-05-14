@@ -5,20 +5,20 @@ import type { WordCard } from '@/types/course';
 
 const cards: WordCard[] = [
   {
-    id: 'car',
-    english: 'car',
-    chinese: '小汽车',
-    imageUrl: '/images/transportation/car.svg',
+    id: 'apple',
+    english: 'apple',
+    chinese: '苹果',
+    imageUrl: '/images/food/apple.png',
     kind: 'word',
-    drillParts: ['car'],
+    drillParts: ['app', 'le'],
   },
   {
-    id: 'bus',
-    english: 'bus',
-    chinese: '公交车',
-    imageUrl: '/images/transportation/bus.svg',
+    id: 'milk',
+    english: 'milk',
+    chinese: '牛奶',
+    imageUrl: '/images/food/milk.png',
     kind: 'word',
-    drillParts: ['bus'],
+    drillParts: ['milk'],
   },
 ];
 
@@ -28,12 +28,12 @@ describe('WordBook', () => {
     expect(screen.getByLabelText('no card')).toBeTruthy();
   });
   it('renders english + chinese when matched', () => {
-    render(<WordBook cards={cards} currentCardId="car" />);
-    expect(screen.getByText('car')).toBeTruthy();
-    expect(screen.getByText('小汽车')).toBeTruthy();
+    render(<WordBook cards={cards} currentCardId="apple" />);
+    expect(screen.getByText('apple')).toBeTruthy();
+    expect(screen.getByText('苹果')).toBeTruthy();
   });
   it('exposes aria-label containing both languages', () => {
-    render(<WordBook cards={cards} currentCardId="car" />);
-    expect(screen.getByLabelText(/car.*小汽车/)).toBeTruthy();
+    render(<WordBook cards={cards} currentCardId="apple" />);
+    expect(screen.getByLabelText(/apple.*苹果/)).toBeTruthy();
   });
 });

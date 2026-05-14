@@ -7,21 +7,22 @@
 - [x] 语音链路可用:流式 ASR / LLM / TTS 已接通。
 - [x] 课堂交互可用:按住说话、Bunny 状态、字幕栏、开始/结束课堂已接通。
 - [x] 教学循环 P0 已处理:ASR/TTS usage、词汇表现追踪、连续失败换策略、复习不幻觉。
-- [x] 画布 v2 已落地:`cards[]` + `show_card` + `WordCardCanvas` 图文分层。
-- [x] 旧 v2 课程:`transportation`、`timeNumbers` 已作为历史基线;本轮三阶段 epic 结束时退役。
-- [x] `/lesson-report` 已兼容 v2 课程结构。
+- [x] 三阶段课程结构已落地:导入 → 互动 → 巩固,当前唯一可见课程是 `food`。
+- [x] food 课程资产已落地:ImageGen 单体 PNG + 结构化 `scene.svg` hotspot。
+- [x] 旧 v2 课程:`transportation`、`timeNumbers` 已退役;旧 `LessonView` fallback 已删除。
+- [x] `/lesson-report` 已兼容当前 food / phased course registry。
 - [x] timeNumbers 跑过一节实测 → 报告 `docs/lesson-reports/2026-05-05-eb25ad66.md`。
 
-## 进行中(2026-05-15)
+## 已完成(2026-05-15)
 
 **lesson-structure-refactor epic — 三阶段课程结构 + food 示范课**
 
 - Spec: `docs/superpowers/specs/2026-05-15-lesson-structure-refactor-design.md`
-- Plan: `docs/superpowers/plans/2026-05-15-lesson-structure-refactor.md`(21 tasks,未开始实施;最后 task 组包含旧课 cleanup)
-- 决策:把"一种交互模式贯穿一节课"重构为显式三阶段(导入 → 互动 → 巩固),food 作为第一个三阶段示范课
-- 新标准唯一化:food 跑通后,最后 cleanup 退役 transportation / timeNumbers 与旧 `LessonView` fallback
-- 工具层(放大 / 圈出 / 慢速 / 换问法)是后续独立 epic,本次只搭三阶段骨架
-- 本 epic 包含并取代下方 P1 §2 "写第 3 节课"(food = 第 3 课 + 示范课)
+- Plan: `docs/superpowers/plans/2026-05-15-lesson-structure-refactor.md`(21 tasks,已实施)
+- 已交付:food 三阶段课程、课程 registry、ImageGen PNG 资产、结构化 `scene.svg` hotspot、phase-aware prompt、progress snapshot SSE、`phase-transition` / `quiz-answer` API、`PhasedLessonController`、Intro / Interactive / Reinforce / Quiz UI。
+- 新标准唯一化:当前只暴露 food;transportation / timeNumbers 与旧 `LessonView` fallback 已 cleanup。
+- 工具层(放大 / 圈出 / 慢速 / 换问法)是后续独立 epic。
+- 本 epic 已包含并取代下方 P1 §2 "写第 3 节课"(food = 第 3 课 + 示范课)。
 - 下游 Codex 产新课:照 `docs/course-authoring-standard.md` 走;spec §13 只保留入口摘要
 
 ---
@@ -32,8 +33,8 @@
 
 1. **(止损·完成)P1 §1 ASR hot_words 注入** — 已落地;真实回归证明协议层 hot_words 对短英文词与数字归一化无救命效果,字典纠正 fallback 已撤;ASR 容错路径转交 P1 §3 LLM 容错判定承担
 2. **(工程·完成)P1 §3 教学循环 v1.1** — 已落地:drillParts、cardProgress、clearedCardIds、LLM attempt_assessment、history 6 轮窗口
-3. **(内容)P1 §2 写第 3 节课** — 走通 v1.1 后的现有架构产出新内容
-4. **(实测)用第 3 节课跑实测 + lesson-report** — 验证 §3 LLM 容错是否真的解决"轮 14 已说对仍要求复读"和"提前结课"
+3. **(内容·完成)P1 §2 写第 3 节课** — food 已作为新三阶段示范课落地
+4. **(实测)用 food 跑实测 + lesson-report** — 验证 §3 LLM 容错与三阶段切换是否稳定
 5. **(决策)** 看真人实测报告再决定:启动 P1 §4 Hybrid 重构?或继续内容?
 
 ## P1 队列
@@ -47,10 +48,10 @@
    - **2026-05-06 真实回归基线结论**:协议层 hot_words 对 `hour -> Our.`、`One thousand is ten hundreds -> 1000 is 10.` 未生效——豆包 ASR 在英文短词与数字归一化上 weak,不是 hot_words 能调的。
    - **2026-05-06 撤销字典化 fallback**:此前 Codex 加的 `correctAsrTextWithSessionContext`(把 `Our.` 强改 `hour` / `1000 is 10.` 强改 `One thousand is ten hundreds`)已删除。原因:(1) 字典基于 timeNumbers 一节的具体误识结果枚举,过拟合,新课会重新写一遍;(2) 让 ASR 文本被覆写,下游 LLM 看不到学生实际说了什么,反而损害"基于 raw ASR 自行容错判定 mastery"的路径。容错改由 P1 §3 LLM 容错判定承担。
 
-2. **写第 3 节课**
-   - 主题待定(候选:animals / colors / family / food / body parts)。
-   - 目标:走通现有架构产出更多教学内容,暴露架构痛点是否普遍;不开发新功能,只用现有 `cards[]` + `show_card` 接口。
-   - 完成后跑 /lesson-report,与 timeNumbers 报告对比。
+2. **写第 3 节课** *(完成:food 三阶段示范课)*
+   - 当前主题:food。
+   - 已按新标准完成:`cards[]` + `objectives.sentences` + quizzes + ImageGen PNG + `scene.svg` hotspot。
+   - 下一步:用 food 跑 /lesson-report,看三阶段切换、LLM 容错、quiz 记录是否稳定。
 
 3. **教学循环 v1.1 — 状态感知 + LLM 容错(进度 / 收敛 / 总结 / ASR 容错)** *(2026-05-06 ungate)*
    - timeNumbers 实测里 LLM 不基于"已掌握"信号收敛:学生轮 14 已说对 thousand,轮 15 仍要求复读;课末总结说"已掌握 thousand"但句子层完全失败(报告 §2)。
@@ -139,3 +140,4 @@
 - 画布 v2:`docs/superpowers/specs/2026-05-05-canvas-v2-wordcard-design.md`
 - 课后报告:`docs/superpowers/specs/2026-05-02-lesson-report-generator-design.md`
 - 2026-05-05 timeNumbers 实测 + 报告 → `docs/lesson-reports/2026-05-05-eb25ad66.md`
+- 2026-05-15 lesson-structure-refactor 实施 → food 三阶段课程成为唯一可见课程;旧课与旧 `LessonView` fallback 退役

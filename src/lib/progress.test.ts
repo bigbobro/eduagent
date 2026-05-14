@@ -5,17 +5,22 @@ import type { Course } from '@/types/course';
 
 const fixtureCourses: Course[] = [
   {
-    id: 'transportation',
-    title: '交通',
+    id: 'food',
+    title: '食物',
     description: '',
     targetAge: [3, 6],
-    theme: 'transport',
+    theme: 'food',
     cards: [
-      { id: 'car', english: 'car', chinese: '小汽车', imageUrl: '', kind: 'word', drillParts: ['car'] },
-      { id: 'bus', english: 'bus', chinese: '公交车', imageUrl: '', kind: 'word', drillParts: ['bus'] },
+      { id: 'apple', english: 'apple', chinese: '苹果', imageUrl: '', kind: 'word', drillParts: ['app', 'le'] },
+      { id: 'milk', english: 'milk', chinese: '牛奶', imageUrl: '', kind: 'word', drillParts: ['milk'] },
     ],
     objectives: { sentences: [] },
     teachingHints: { opening: '', reviewCardIds: [], newCardIds: [], quizQuestions: [], closing: '' },
+    phases: {
+      introduction: { sceneImage: '/images/food/scene.svg' },
+      interactive: {},
+      reinforcement: { quizzes: [] },
+    },
   },
 ];
 
@@ -56,27 +61,27 @@ describe('buildProgressSnapshot', () => {
   });
 
   it('single lesson with partial correct → stars derived', () => {
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','transportation','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
-    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','car',10,9,1)`).run();
-    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','bus',5,3,2)`).run();
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
+    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','apple',10,9,1)`).run();
+    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','milk',5,3,2)`).run();
     const snap = buildProgressSnapshot(db, fixtureCourses);
-    const car = snap.courses[0].words.find((w) => w.word === 'car')!;
-    const bus = snap.courses[0].words.find((w) => w.word === 'bus')!;
-    expect(car.masteryStars).toBe(3);
-    expect(bus.masteryStars).toBe(2);
+    const apple = snap.courses[0].words.find((w) => w.word === 'apple')!;
+    const milk = snap.courses[0].words.find((w) => w.word === 'milk')!;
+    expect(apple.masteryStars).toBe(3);
+    expect(milk.masteryStars).toBe(2);
     expect(snap.courses[0].masteredWords).toBe(1);
     expect(snap.totalWordsMastered).toBe(1);
   });
 
   it('multi lesson same word → attempts/correct summed, lastPracticed=latest', () => {
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','transportation','2026-05-09T10:00:00Z','2026-05-09T10:15:00Z',5,'{}')`).run();
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l2','transportation','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
-    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','car',5,3,2)`).run();
-    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l2','car',5,4,1)`).run();
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-09T10:00:00Z','2026-05-09T10:15:00Z',5,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l2','food','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
+    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','apple',5,3,2)`).run();
+    db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l2','apple',5,4,1)`).run();
     const snap = buildProgressSnapshot(db, fixtureCourses);
-    const car = snap.courses[0].words.find((w) => w.word === 'car')!;
-    expect(car.attempts).toBe(10);
-    expect(car.correct).toBe(7);
-    expect(car.lastPracticed).toBe('2026-05-10T10:00:00Z');
+    const apple = snap.courses[0].words.find((w) => w.word === 'apple')!;
+    expect(apple.attempts).toBe(10);
+    expect(apple.correct).toBe(7);
+    expect(apple.lastPracticed).toBe('2026-05-10T10:00:00Z');
   });
 });

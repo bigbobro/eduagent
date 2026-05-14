@@ -29,8 +29,11 @@ AI 驱动的多模态教学系统:豆包流式 ASR / TTS + MiMo LLM 大脑 + 画
 | `src/lib/voice/asr-proxy.ts` | 服务端 ASR WebSocket 代理 |
 | `src/lib/voice/tts-proxy.ts` | 服务端 TTS WebSocket 代理(长连复用) |
 | `src/lib/voice/lesson-controller.ts` | 浏览器侧调度器,统一编排 ASR + SSE + TTS |
+| `src/lib/voice/phased-lesson-controller.ts` | 三阶段外层状态机,复用 LessonController 音频管线 |
 | `src/lib/agent/speech-extractor.ts` | 流式 JSON `speech` 字段提取器 |
 | `src/lib/agent/orchestrator.ts` | 把 streamUserInput 包成 SSE ReadableStream |
+| `src/data/courses/food.ts` | 当前唯一可见 food 三阶段课程 |
+| `src/components/lesson/PhasedLessonView.tsx` | 导入 / 互动 / 巩固三阶段课堂入口 |
 | `src/lib/audio/recorder.ts` | getUserMedia + AudioWorklet PCM 录音器 |
 | `src/lib/audio/pcm-player.ts` | Web Audio 流式 PCM 播放队列 |
 | `public/worklets/pcm-recorder.worklet.js` | AudioWorklet 处理脚本 |

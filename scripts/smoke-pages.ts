@@ -51,6 +51,29 @@ async function waitForServer(): Promise<boolean> {
   return false;
 }
 
+async function fetchCoursesOnlyFood(): Promise<boolean> {
+  try {
+    const res = await fetch(`${BASE}/api/courses`);
+    if (!res.ok) {
+      console.error(`❌ ${BASE}/api/courses → ${res.status}`);
+      return false;
+    }
+    const courses = await res.json();
+    const ok = Array.isArray(courses)
+      && courses.length === 1
+      && courses[0]?.id === 'food';
+    if (!ok) {
+      console.error(`❌ ${BASE}/api/courses expected only food, got:`, courses);
+      return false;
+    }
+    console.log(`✓ ${BASE}/api/courses only food`);
+    return true;
+  } catch (e) {
+    console.error(`❌ ${BASE}/api/courses exception:`, e);
+    return false;
+  }
+}
+
 async function main() {
   let server: ChildProcess | null = null;
   try {
@@ -68,11 +91,11 @@ async function main() {
 
     const checks = [
       await fetchOk(`${BASE}/`),
-      await fetchOk(`${BASE}/lesson/transportation`),
-      await fetchOk(`${BASE}/lesson/transportation/done`),
+      await fetchOk(`${BASE}/lesson/food`),
+      await fetchOk(`${BASE}/lesson/food/done`),
       await fetchOk(`${BASE}/journal`),
       await fetchOk(`${BASE}/parents`),
-      await fetchOk(`${BASE}/api/courses`, { jsonHas: [] }),
+      await fetchCoursesOnlyFood(),
       await fetchOk(`${BASE}/api/progress`, { jsonHas: ['courses', 'totalWordsMastered'] }),
       await fetchOk(`${BASE}/api/sessions`),
       await fetchOk(`${BASE}/api/stats`, { jsonHas: ['totalMinutes', 'last7Days'] }),

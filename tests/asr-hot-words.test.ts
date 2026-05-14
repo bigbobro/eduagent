@@ -9,31 +9,31 @@ import {
 describe('ASR hot words', () => {
   it('injects target words as Doubao corpus context hotwords', () => {
     const payload = buildAsrRequestPayload({
-      courseId: 'timeNumbers',
-      targetWords: ['hour', 'thousand', 'hour'],
-      cardId: 'sentence_thousand_hundred',
+      courseId: 'food',
+      targetWords: ['apple', 'milk', 'apple'],
+      cardId: 'rice',
     });
 
     expect(payload.request.corpus).toBeDefined();
     const context = JSON.parse(payload.request.corpus!.context);
     expect(context.hotwords).toEqual([
-      { word: 'hour' },
-      { word: 'thousand' },
-      { word: 'One thousand is ten hundreds.' },
+      { word: 'apple' },
+      { word: 'milk' },
+      { word: 'rice' },
     ]);
   });
 
   it('derives course target words and current card from the websocket query', () => {
     const session = parseAsrSessionInfoFromUrl(
-      '/api/voice/asr?courseId=timeNumbers&targetWords=hour,thousand&cardId=minute'
+      '/api/voice/asr?courseId=food&targetWords=apple,milk&cardId=banana'
     );
     const payload = buildAsrRequestPayload(session);
     const context = JSON.parse(payload.request.corpus!.context);
 
     expect(context.hotwords).toEqual([
-      { word: 'hour' },
-      { word: 'thousand' },
-      { word: 'minute' },
+      { word: 'apple' },
+      { word: 'milk' },
+      { word: 'banana' },
     ]);
   });
 

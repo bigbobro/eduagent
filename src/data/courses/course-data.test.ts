@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allCourses } from './transportation';
+import { allCourses } from '.';
 
 describe('course drill data', () => {
   it('defines non-empty drillParts for every card', () => {

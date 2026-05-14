@@ -10,10 +10,15 @@ const course: Course = {
   title: '测试',
   description: '',
   targetAge: [3, 6],
-  theme: 'transport',
+  theme: 'food',
   cards: [],
   objectives: { sentences: [] },
   teachingHints: { opening: '', reviewCardIds: [], newCardIds: [], quizQuestions: [], closing: '' },
+  phases: {
+    introduction: { sceneImage: '/images/food/scene.svg' },
+    interactive: {},
+    reinforcement: { quizzes: [] },
+  },
 };
 
 describe('a11y basics', () => {

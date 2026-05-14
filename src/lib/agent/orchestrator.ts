@@ -38,6 +38,12 @@ function mapEventToSSE(ev: StreamUserEvent): string {
     case 'speech-delta': return sseFrame('speech-delta', { text: ev.text });
     case 'speech-end':   return sseFrame('speech-end', {});
     case 'actions':      return sseFrame('actions', { actions: ev.actions, state_update: ev.state_update });
+    case 'progress_snapshot':
+      return sseFrame('progress_snapshot', {
+        clearedCardIds: ev.clearedCardIds,
+        totalAttempts: ev.totalAttempts,
+        currentPhase: ev.currentPhase,
+      });
     case 'done':         return sseFrame('done', {});
     case 'error':        return sseFrame('error', { message: ev.message });
   }

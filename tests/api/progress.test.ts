@@ -25,13 +25,13 @@ describe('/api/progress', () => {
   });
 
   it('derives mastery correctly when data present', async () => {
-    memDb.prepare(`INSERT INTO lesson_logs VALUES ('l1','transportation','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
-    memDb.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','car',10,10,0)`).run();
+    memDb.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
+    memDb.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','apple',10,10,0)`).run();
     const res = await GET();
     const json = await res.json();
-    const transport = json.courses.find((c: any) => c.courseId === 'transportation');
-    const car = transport.words.find((w: any) => w.word === 'car');
-    expect(car.masteryStars).toBe(3);
+    const food = json.courses.find((c: any) => c.courseId === 'food');
+    const apple = food.words.find((w: any) => w.word === 'apple');
+    expect(apple.masteryStars).toBe(3);
     expect(json.totalWordsMastered).toBeGreaterThanOrEqual(1);
   });
 });

@@ -2,7 +2,7 @@ import type { IncomingMessage } from 'http';
 import type { Socket } from 'net';
 import { WebSocket as WsClient, WebSocketServer } from 'ws';
 import { randomUUID } from 'crypto';
-import { getCourseById } from '../../data/courses/transportation';
+import { getCourseById } from '../../data/courses';
 import {
   encodeFullClientRequest,
   encodeAudioOnlyRequest,

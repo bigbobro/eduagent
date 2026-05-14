@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { LessonView } from '@/components/lesson/LessonView';
+import { PhasedLessonView } from '@/components/lesson/PhasedLessonView';
 import { Course } from '@/types/course';
 
 interface LessonClientProps {
@@ -28,5 +28,5 @@ export function LessonClient({ courseId }: LessonClientProps) {
     );
   }
 
-  return <LessonView course={course} />;
+  return <PhasedLessonView course={course} />;
 }

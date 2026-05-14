@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { transportationCourse } from '@/data/courses/transportation';
-import { timeNumbersCourse } from '@/data/courses/timeNumbers';
+import { foodCourse } from '@/data/courses/food';
+import { Course } from '@/types/course';
 import { LessonMemory } from '@/types/session';
 import { createMemory, markWordIncorrect } from './memory';
 import { buildSystemPrompt } from './prompt';
+
+const sentenceFixtureCourse: Course = {
+  ...foodCourse,
+  id: 'sentence-fixture',
+  cards: [
+    ...foodCourse.cards,
+    {
+      id: 'sentence_like_milk',
+      english: 'I like milk.',
+      chinese: '我喜欢牛奶。',
+      imageUrl: '/images/food/milk.png',
+      kind: 'sentence',
+      drillParts: ['I like', 'milk'],
+    },
+  ],
+  objectives: {
+    sentences: ['I like milk.'],
+  },
+  phases: {
+    ...foodCourse.phases,
+    reinforcement: { quizzes: [] },
+  },
+};
 
 describe('buildSystemPrompt P0 guardrails', () => {
   it('tells the model to summarize only learned words', () => {
@@ -13,7 +36,7 @@ describe('buildSystemPrompt P0 guardrails', () => {
       wordsLearned: ['car', 'bus'],
     };
 
-    const prompt = buildSystemPrompt(transportationCourse, memory);
+    const prompt = buildSystemPrompt(foodCourse, memory);
 
     expect(prompt).toContain('只能总结本节已通过词汇');
     expect(prompt).toContain('car, bus');
@@ -22,14 +45,14 @@ describe('buildSystemPrompt P0 guardrails', () => {
   it('tells the model to switch strategy after three misses', () => {
     let memory: LessonMemory = {
       ...createMemory(),
-      currentWord: 'airplane',
+      currentWord: 'apple',
       phase: 'learning' as const,
     };
-    memory = markWordIncorrect(memory, 'airplane');
-    memory = markWordIncorrect(memory, 'airplane');
-    memory = markWordIncorrect(memory, 'airplane');
+    memory = markWordIncorrect(memory, 'apple');
+    memory = markWordIncorrect(memory, 'apple');
+    memory = markWordIncorrect(memory, 'apple');
 
-    const prompt = buildSystemPrompt(transportationCourse, memory);
+    const prompt = buildSystemPrompt(foodCourse, memory);
 
     expect(prompt).toContain('连续 3 次错误');
     expect(prompt).toContain('必须切换策略');
@@ -39,7 +62,7 @@ describe('buildSystemPrompt P0 guardrails', () => {
 describe('buildSystemPrompt v2 wordcard protocol', () => {
   it('only declares show_card, not the legacy show/focus/annotate tools', () => {
     const memory = createMemory();
-    const prompt = buildSystemPrompt(transportationCourse, memory);
+    const prompt = buildSystemPrompt(foodCourse, memory);
 
     expect(prompt).toContain('show_card');
     expect(prompt).not.toMatch(/\btool":\s*"show"/);
@@ -51,19 +74,19 @@ describe('buildSystemPrompt v2 wordcard protocol', () => {
 
   it('lists every card with id / english / chinese / kind', () => {
     const memory = createMemory();
-    const prompt = buildSystemPrompt(timeNumbersCourse, memory);
+    const prompt = buildSystemPrompt(sentenceFixtureCourse, memory);
 
     expect(prompt).toContain('## 可用卡片');
-    expect(prompt).toContain('hour: hour / 小时 (word); drillParts=hour');
-    expect(prompt).toContain('sentence_hour_minute: One hour has sixty minutes. / 一小时有 60 分钟。 (sentence); drillParts=One hour | has sixty | minutes');
+    expect(prompt).toContain('apple: apple / 苹果 (word); drillParts=app | le');
+    expect(prompt).toContain('sentence_like_milk: I like milk. / 我喜欢牛奶。 (sentence); drillParts=I like | milk');
   });
 
   it('exposes review/new card id lists', () => {
     const memory = createMemory();
-    const prompt = buildSystemPrompt(transportationCourse, memory);
+    const prompt = buildSystemPrompt(foodCourse, memory);
 
-    expect(prompt).toContain('建议先复习: car, bus');
-    expect(prompt).toContain('新教卡顺序: train, airplane, bicycle, boat');
+    expect(prompt).toContain('建议先复习: ');
+    expect(prompt).toContain('新教卡顺序: apple, banana, bread, milk, egg, rice');
   });
 });
 
@@ -81,7 +104,7 @@ describe('buildSystemPrompt v1.1 progress and drill contract', () => {
       },
     };
 
-    const prompt = buildSystemPrompt(timeNumbersCourse, memory);
+    const prompt = buildSystemPrompt(foodCourse, memory);
 
     expect(prompt).toContain('cleared 只表示');
     expect(prompt).toContain('当前卡片: hour');
@@ -91,7 +114,7 @@ describe('buildSystemPrompt v1.1 progress and drill contract', () => {
   });
 
   it('describes ASR assessment and drill rules', () => {
-    const prompt = buildSystemPrompt(timeNumbersCourse, createMemory());
+    const prompt = buildSystemPrompt(foodCourse, createMemory());
 
     expect(prompt).toContain('attempt_assessment');
     expect(prompt).toContain('raw ASR "Our." 对当前卡 hour 可以判 correct');

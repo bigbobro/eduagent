@@ -62,9 +62,9 @@ function seedSession(db: Database.Database, s: SeedSession): void {
 
 const noopCourseLoader: CourseLoader = async () => null;
 
-const stubTransportationLoader: CourseLoader = async (id) =>
-  id === 'transportation'
-    ? { title: '交通工具 Transportation', words: ['car', 'bus', 'train', 'airplane', 'bicycle', 'boat'] }
+const stubFoodLoader: CourseLoader = async (id) =>
+  id === 'food'
+    ? { title: '食物 Food', words: ['apple', 'banana', 'bread', 'milk', 'egg', 'rice'] }
     : null;
 
 describe('buildReport — basic aggregation', () => {
@@ -72,7 +72,7 @@ describe('buildReport — basic aggregation', () => {
     const db = createMemDb();
     seedSession(db, {
       id: 'sess-1',
-      courseId: 'transportation',
+      courseId: 'food',
       startTime: '2026-05-02T04:17:35.000Z',
       endTime: '2026-05-02T04:27:28.000Z',
       tokenUsage: {
@@ -81,9 +81,9 @@ describe('buildReport — basic aggregation', () => {
         tts: { requests: 0, characters: 0 },
       },
       interactions: [
-        { user: '(开始)', ai: 'hello', actions: [{ tool: 'show', params: { image_id: 'car' } }],
+        { user: '(开始)', ai: 'hello', actions: [{ tool: 'show_card', params: { card_id: 'apple' } }],
           modelCalls: { llm: { inputTokens: 1200 } } },
-        { user: 'car', ai: 'great', actions: [],
+        { user: 'apple', ai: 'great', actions: [],
           modelCalls: { llm: { inputTokens: 1200 } } },
       ],
     });
@@ -91,7 +91,7 @@ describe('buildReport — basic aggregation', () => {
     const r = await buildReport(db, 'sess-1', noopCourseLoader);
 
     expect(r.session.id).toBe('sess-1');
-    expect(r.session.courseId).toBe('transportation');
+    expect(r.session.courseId).toBe('food');
     expect(r.session.startTime).toBe('2026-05-02T04:17:35.000Z');
     expect(r.session.endTime).toBe('2026-05-02T04:27:28.000Z');
     expect(r.session.durationSec).toBe(593);
@@ -105,13 +105,13 @@ describe('buildReport — basic aggregation', () => {
     expect(r.interactions).toHaveLength(2);
     expect(r.interactions[0].n).toBe(1);
     expect(r.interactions[0].user).toBe('(开始)');
-    expect(r.interactions[0].actions).toEqual([{ tool: 'show', params: { image_id: 'car' } }]);
+    expect(r.interactions[0].actions).toEqual([{ tool: 'show_card', params: { card_id: 'apple' } }]);
   });
 
   it('returns the latest session when no id provided', async () => {
     const db = createMemDb();
-    seedSession(db, { id: 'old', courseId: 'transportation', startTime: '2026-04-01T00:00:00.000Z' });
-    seedSession(db, { id: 'new', courseId: 'transportation', startTime: '2026-05-02T00:00:00.000Z' });
+    seedSession(db, { id: 'old', courseId: 'food', startTime: '2026-04-01T00:00:00.000Z' });
+    seedSession(db, { id: 'new', courseId: 'food', startTime: '2026-05-02T00:00:00.000Z' });
 
     const r = await buildReport(db, null, noopCourseLoader);
     expect(r.session.id).toBe('new');
@@ -184,11 +184,11 @@ describe('buildReport — anomaly flags', () => {
 describe('buildReport — course definition', () => {
   it('populates courseTitle and targetWords from courseLoader', async () => {
     const db = createMemDb();
-    seedSession(db, { id: 's', courseId: 'transportation', startTime: '2026-01-01T00:00:00.000Z' });
+    seedSession(db, { id: 's', courseId: 'food', startTime: '2026-01-01T00:00:00.000Z' });
 
-    const r = await buildReport(db, 's', stubTransportationLoader);
-    expect(r.session.courseTitle).toBe('交通工具 Transportation');
-    expect(r.session.targetWords).toEqual(['car', 'bus', 'train', 'airplane', 'bicycle', 'boat']);
+    const r = await buildReport(db, 's', stubFoodLoader);
+    expect(r.session.courseTitle).toBe('食物 Food');
+    expect(r.session.targetWords).toEqual(['apple', 'banana', 'bread', 'milk', 'egg', 'rice']);
   });
 
   it('lowercases all targetWords', async () => {
@@ -209,11 +209,11 @@ describe('buildReport — course definition', () => {
     expect(r.session.targetWords).toEqual([]);
   });
 
-  it('defaultCourseLoader reads v2 word cards', async () => {
-    const course = await defaultCourseLoader('timeNumbers');
+  it('defaultCourseLoader reads phased word cards', async () => {
+    const course = await defaultCourseLoader('food');
 
-    expect(course?.title).toBe('时间和大数字 Time & Big Numbers');
-    expect(course?.words).toEqual(['hour', 'minute', 'second', 'hundred', 'thousand', 'million', 'billion']);
+    expect(course?.title).toBe('食物 Food');
+    expect(course?.words).toEqual(['apple', 'banana', 'bread', 'milk', 'egg', 'rice']);
   });
 });
 

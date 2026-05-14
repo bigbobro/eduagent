@@ -1,13 +1,13 @@
 # Handoff — EduAgent / 三阶段课程结构重构 epic
 
 **会话日期**:2026-05-15
-**前置背景**:本会话完成 brainstorm → spec → plan 全套设计文档,**代码未动**。用户在 5% context 限额时主动暂停。
+**当前状态更新**:本 epic 已实施到 runtime。food 是唯一可见课程;旧 `transportation` / `timeNumbers` course data、旧 public assets 与旧 `LessonView` fallback 已删除。
 
 ---
 
 ## 当前位置
 
-刚走完 `superpowers:brainstorming` → `superpowers:writing-plans`。下一步应该开始执行 plan。
+implementation plan 已执行完。下一步不是重跑 Task 1-21,而是用 food 做真实 smoke / lesson-report 验收,再基于报告决定下一轮课程或工具层 epic。
 
 ## 已交付(全部已 commit 到 main)
 
@@ -28,7 +28,15 @@
 - food 不再按"单词课 + 字符占位"执行;已改成"6 个 word cards + 2 个核心短句 + ImageGen 单体 PNG + 结构化 scene.svg hotspot"。
 - 长期 Codex 课程产出标准已独立到 `docs/course-authoring-standard.md`;spec §13 现在只做入口摘要。
 - implementation plan Task 2 / 3 / 4 / 6 / 15 已按短句与 ImageGen 资产流更新。
-- 用户已明确决定旧课不迁移、不保留 0 回归;food 跑通后最后执行 cleanup,退役 `transportation` / `timeNumbers` 和旧 `LessonView` fallback。
+- 用户已明确决定旧课不迁移、不保留 0 回归;当前 cleanup 已执行,`transportation` / `timeNumbers` 和旧 `LessonView` fallback 已退役。
+
+**2026-05-15 实施完成说明**:
+- 新增 `src/data/courses/food.ts` + `src/data/courses/index.ts`;`/api/courses` 当前只暴露 food。
+- 新增 `public/images/food/{apple,banana,bread,milk,egg,rice}.png`(ImageGen 母图裁切)与结构化 `public/images/food/scene.svg`。
+- 新增 `PhasedLessonController`、phase-aware prompt、`progress_snapshot` SSE、`phase-transition` / `quiz-answer` API。
+- 新增 `PhasedLessonView`、`IntroPhase`、`InteractivePhase`、`ReinforcePhase`、`QuizPickWord`、`QuizRepeatAfterMe`。
+- 删除旧 `src/data/courses/transportation.ts`、`src/data/courses/timeNumbers.ts`、`src/components/lesson/LessonView.tsx` 以及旧 public course asset directories。
+- `Course.phases` 已从 optional 收紧为必填。
 
 **新增项目 memory(用户私有,非 repo)**:
 - `~/.claude/projects/-Users-hushaobo-ROOTCLOUD-new-solulu-eduagent/memory/project_three_phase_lesson_structure.md`(MEMORY.md 已加索引)
@@ -44,13 +52,14 @@
 
 ## 立即要做的事
 
-### 1. 选执行模式 + 跑 plan(主线)
+### 1. food 真实验收
 
-向用户问一次,二选一:
-- **Subagent-Driven(推荐)** — 每 task 派一个 fresh subagent,主会话 review 推进
-- **Inline Execution** — 当前会话顺序跑 task,每 checkpoint 停给用户看
-
-然后从 Plan **Task 1**(扩展 Course 类型加 Phases / Quiz)开始,严格按 TDD 步骤跑。
+运行 dev server,打开 `/lesson/food`,用 `VOICE_MOCK=true` 或真实凭据做 smoke。重点看:
+- intro 是否能展示 scene 并切到 interactive
+- interactive 是否继续复用 ASR/TTS/SSE 管线
+- reinforcement 两类 quiz 是否能完成并进入 done
+- `/api/courses` 是否只返回 food
+- `/lesson/transportation` / `/lesson/timeNumbers` 不再在课程列表出现
 
 ### 2. ⚠ 安全行动(用户唯一)
 
@@ -67,18 +76,16 @@ repo 内已 `grep -rl 'tp-coouo'` 0 命中;memory 目录也已清。
 
 | 场景 | Skill |
 |---|---|
-| 选 subagent-driven 模式开始跑 plan | `superpowers:subagent-driven-development`(plan header 已点名) |
-| 选 inline 模式开始跑 plan | `superpowers:executing-plans` |
-| 跑到任何 task 写测试 / 实现代码 | `superpowers:test-driven-development`(plan 步骤已内置 TDD) |
-| 跑完所有 task 后准备 PR | `superpowers:finishing-a-development-branch` + `superpowers:requesting-code-review` |
+| food 真实 smoke / debug | `superpowers:systematic-debugging` |
+| 后续写新课 | `docs/course-authoring-standard.md`(不是 skill,先按标准文档执行) |
+| 后续做课程产出 skill | `skill-creator` |
 | 中途遇 bug | `superpowers:systematic-debugging` |
 
 ## 风险 / 易踩坑
 
-- **`@testing-library/react` 可能没装**:plan Final notes 已提到。若 component 测试报 not found,`pnpm add -D @testing-library/react jsdom` 然后 vitest 设 `environment: 'jsdom'`
-- **`VOICE_MOCK=true` 测试 gating**:部分集成测只在 mock 下跑。若 mock 没接 streamUserInput,先 it.skip 留 followup
-- **`allCourses` 注册位置要迁出旧课文件**:plan Task 2 要新建 `src/data/courses/index.ts`;旧 `transportation.ts` 不再作为 registry
-- **food.ts 视觉资产**:plan 现在要求 ImageGen 生成单体 PNG,再由 `scene.svg` 通过 `<g id="card-X"><image .../></g>` 结构化组装;不要回退到字符占位或不可交互大图
+- **不要重建旧课 registry**:`src/data/courses/index.ts` 是唯一 registry;不要再从 `transportation.ts` 导出 `allCourses`。
+- **不要恢复旧 LessonView fallback**:`LessonController` 仅作为底层音频管线,上层入口是 `PhasedLessonView`。
+- **food 视觉资产**:ImageGen PNG 已落在 `public/images/food/`;`scene.svg` 通过 `<g id="card-X"><image .../></g>` 结构化组装。不要回退到字符占位或不可交互大图。
 
 ## 不重要但留个梗
 

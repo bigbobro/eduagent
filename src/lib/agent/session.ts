@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Course } from '@/types/course';
+import { Course, PhaseName } from '@/types/course';
 import { LessonMemory, TokenUsage, InteractionLog } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
 import {
@@ -21,6 +21,7 @@ export interface Session {
   memory: LessonMemory;
   tokenUsage: TokenUsage;
   startTime: Date;
+  currentPhase: PhaseName;
 }
 
 const sessions = new Map<string, Session>();
@@ -38,6 +39,7 @@ export function createSession(course: Course): Session {
       tts: { requests: 0, characters: 0 },
     },
     startTime: new Date(),
+    currentPhase: 'intro',
   };
   sessions.set(id, session);
   createLessonLog(id, course.id);
@@ -55,10 +57,38 @@ export function endSession(sessionId: string): void {
   sessions.delete(sessionId);
 }
 
+export function setSessionPhase(sessionId: string, phase: PhaseName): void {
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  session.currentPhase = phase;
+}
+
+export function recordQuizAnswer(
+  sessionId: string,
+  quizId: string,
+  answer: string,
+  correct: boolean,
+): boolean {
+  const session = sessions.get(sessionId);
+  if (!session) return false;
+  session.memory.totalInteractions += 1;
+  insertInteraction(session.id, {
+    timestamp: new Date(),
+    userInput: `[quiz:${quizId} ${correct ? 'correct' : 'wrong'}] ${answer}`,
+    aiResponse: '',
+    actions: [],
+    modelCalls: {
+      llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
+    },
+  });
+  return true;
+}
+
 export type StreamUserEvent =
   | { type: 'speech-delta'; text: string }
   | { type: 'speech-end' }
   | { type: 'actions'; actions: ToolAction[]; state_update: AgentResponse['state_update'] }
+  | { type: 'progress_snapshot'; clearedCardIds: string[]; totalAttempts: number; currentPhase: PhaseName }
   | { type: 'done' }
   | { type: 'error'; message: string };
 
@@ -76,7 +106,7 @@ export async function* streamUserInput(
 
   session.memory = addUserMessage(session.memory, userText);
 
-  const systemPrompt = buildSystemPrompt(session.course, session.memory);
+  const systemPrompt = buildSystemPrompt(session.course, session.memory, session.currentPhase);
   const messages = getMessagesForLLM(session.memory);
 
   const extractor = new StreamingSpeechExtractor();
@@ -157,6 +187,15 @@ export async function* streamUserInput(
     },
   };
   insertInteraction(session.id, interactionLog);
+
+  let totalAttempts = 0;
+  session.memory.wordPerformance.forEach((p) => { totalAttempts += p.attempts; });
+  yield {
+    type: 'progress_snapshot',
+    clearedCardIds: [...session.memory.clearedCardIds],
+    totalAttempts,
+    currentPhase: session.currentPhase,
+  };
 
   yield { type: 'done' };
 }

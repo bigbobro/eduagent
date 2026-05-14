@@ -15,6 +15,9 @@ type EventName =
   | 'subtitle'           // { text: string, source: 'user' | 'ai' }
   | 'subtitle-clear'
   | 'actions'            // ToolAction[]
+  | 'progress'
+  | 'phase-change'
+  | 'asr-final'
   | 'error';             // { message: string }
 
 type Listener<T = any> = (data: T) => void;
@@ -108,6 +111,27 @@ export class LessonController {
     await this.player.dispose();
     await disposeRecorder();
     this.setState('idle');
+  }
+
+  /**
+   * Send a custom chat action and consume the returned SSE through the existing TTS/action path.
+   */
+  async sendCustomAction(body: Record<string, any>): Promise<void> {
+    if (!this.sessionId) throw new Error('Session not started');
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, sessionId: this.sessionId }),
+    });
+    if (!res.ok || !res.body) {
+      this.emit('error', { message: `Action ${body.action} failed: ${res.status}` });
+      return;
+    }
+    await this.consumeSSE(res.body, () => {});
+  }
+
+  getSessionId(): string | null {
+    return this.sessionId;
   }
 
   // ─── 录音流程(空格键 / 长按按钮 调用)────────────────────────────
@@ -220,6 +244,7 @@ export class LessonController {
       return;
     }
     this.emit('subtitle', { text, source: 'user' });
+    this.emit('asr-final', { text });
     const asrLatency = this.listenStoppedAt > 0
       ? Math.round(performance.now() - this.listenStoppedAt)
       : 0;
@@ -349,6 +374,9 @@ export class LessonController {
         break;
       case 'actions':
         this.emit('actions', payload.actions || []);
+        break;
+      case 'progress_snapshot':
+        this.emit('progress', payload);
         break;
       case 'done':
         this.tts.finishSession();

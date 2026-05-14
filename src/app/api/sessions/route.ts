@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { buildSessionList } from '@/lib/stats';
-import { allCourses } from '@/data/courses/transportation';
+import { allCourses } from '@/data/courses';
 
 export const dynamic = 'force-dynamic';
 

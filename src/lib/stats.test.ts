@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { buildStatsSnapshot, buildSessionList } from './stats';
-import { allCourses } from '@/data/courses/transportation';
+import { allCourses } from '@/data/courses';
 
 function makeDb() {
   const db = new Database(':memory:');
@@ -28,8 +28,8 @@ describe('buildStatsSnapshot', () => {
 
   it('distributes minutes across 7 days by startTime local date', () => {
     const db = makeDb();
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','transportation','2026-05-13T11:50:00','2026-05-13T12:05:00',5,'{}')`).run();
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l2','transportation','2026-05-10T09:00:00','2026-05-10T10:00:00',10,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-13T11:50:00','2026-05-13T12:05:00',5,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l2','food','2026-05-10T09:00:00','2026-05-10T10:00:00',10,'{}')`).run();
     const s = buildStatsSnapshot(db);
     expect(s.totalSessions).toBe(2);
     expect(s.totalMinutes).toBe(75);
@@ -46,7 +46,7 @@ describe('buildSessionList', () => {
     for (let i = 0; i < 15; i++) {
       const start = new Date(2026, 4, 1 + i, 10, 0, 0).toISOString();
       const end = new Date(2026, 4, 1 + i, 10, 30, 0).toISOString();
-      db.prepare(`INSERT INTO lesson_logs VALUES (?,?,?,?,?,?)`).run(`l${i}`, 'transportation', start, end, 3, '{}');
+      db.prepare(`INSERT INTO lesson_logs VALUES (?,?,?,?,?,?)`).run(`l${i}`, 'food', start, end, 3, '{}');
     }
     const list = buildSessionList(db, allCourses);
     expect(list).toHaveLength(10);
@@ -56,7 +56,7 @@ describe('buildSessionList', () => {
 
   it('counts mastered words (ratio ≥ 0.6)', () => {
     const db = makeDb();
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','transportation','2026-05-12T10:00:00','2026-05-12T10:15:00',5,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-12T10:00:00','2026-05-12T10:15:00',5,'{}')`).run();
     db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','car',10,9,1)`).run();
     db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','bus',5,2,3)`).run();
     db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','train',5,3,2)`).run();

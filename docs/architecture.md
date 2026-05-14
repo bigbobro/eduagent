@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:E2E 验收期间多处集成 bug 修复 + 体验优化(2026-05-01)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:三阶段课程结构落地 + food 成为唯一可见课程(2026-05-15)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -54,7 +54,15 @@
 | `src/lib/audio/recorder.ts` | **mic + AudioContext + worklet 模块单例**,`prewarmRecorder` 在 startLesson 提前就绪 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
-| `src/components/lesson/LessonView.tsx` | v2 木屋布局:SceneFrame variant=cabin,Bunny 全身居左,WordBook 居中,底部 SubtitleBar + BloomButton;state==ending 自动跳总结页 |
+| `src/data/courses/food.ts` | 当前唯一可见课程:food 三阶段示范课 |
+| `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById` |
+| `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
+| `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Interactive / Reinforce / Done |
+| `src/components/lesson/IntroPhase.tsx` | 主题导入:结构化场景图 + hotspot 点击讲解 |
+| `src/components/lesson/InteractivePhase.tsx` | AI 互动:复用 WordBook / Bunny / SubtitleBar / BloomButton,接入底层 LessonController |
+| `src/components/lesson/ReinforcePhase.tsx` | 强化巩固:串联 pick-word / repeat-after-me quizzes |
+| `src/components/lesson/QuizPickWord.tsx` | quiz:听 prompt 选正确图片 |
+| `src/components/lesson/QuizRepeatAfterMe.tsx` | quiz:跟读短句,ASR final 含目标词判 correct |
 | `src/components/lesson/BloomButton.tsx` | pointerdown/up + setPointerCapture,5 瓣花朵 SVG(active 时绽放,idle 收拢) |
 | `src/components/bunny/Bunny.tsx` | **单一全身 Bunny**,pose × mood 矩阵(5 pose: sit/stand/point/hold-flower/read,4 mood: idle/listening/thinking/speaking) |
 | `src/components/lesson/WordBook.tsx` | 桌上图画书:warmpaper 底 + 框架投影,AnimatePresence 切卡片 |
@@ -69,8 +77,9 @@
 ### 3.1 进入课程(开场白)
 
 ```
-LessonView mount → new LessonController
-  ├─ controller.startLesson(courseId)
+PhasedLessonView mount → new LessonController → new PhasedLessonController
+  ├─ phased.startLesson()
+  │    └─ controller.startLesson(courseId)
   │    ├─ Promise.all:
   │    │   ├─ tts.open() → WS /api/voice/tts → 豆包 StartConnection (event=1)
   │    │   │     ◀── ConnectionStarted (event=50, ~3.7s 首次握手)
@@ -129,7 +138,7 @@ ASR final 到达 client
                                               (state guard:listening/thinking 时丢弃)
               ◀── TTSSentenceStart (event=350) → tts.on('subtitle') → emit subtitle
             actions:
-              emit('actions') → LessonView 从最后一条 show_card 提取 card_id → WordCardCanvas 切换当前卡片
+              emit('actions') → PhasedLessonController 累计 introducedCardIds;InteractivePhase 从最后一条 show_card 提取 card_id → WordBook 切换当前卡片
               server 同步使用 show_card 作为 currentCardId 的事实来源
             done → tts.finishSession (event=102)
               ◀── SessionFinished (event=152) → setState('awaiting')
@@ -186,6 +195,20 @@ controller.endLesson:
 - `speaking → awaiting`:TTS session-finished
 - 任意 → ending → idle:用户点"结束课堂"
 
+### 4b. PhasedLessonController phase 轴(food 课程)
+
+```
+idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ reinforcement ─[切3]─▶ done
+  ▲                                                                              │
+  └────── endLesson(任意 phase 都能立刻退出)──────────────────────────────────────┘
+```
+
+- 切1:`introducedCardIds.size === cards.length` 且底层 `LessonController` 回到 `awaiting`。
+- 切2:`clearedCardIds.size === cards.length` 或 `totalAttempts >= 3 × cards.length`,且底层回到 `awaiting`。
+- 切3:reinforcement 所有 quizzes 答完。
+- phase 切换由 `PhasedLessonController` 判定,LLM 不输出 phase transition。
+- `LessonController` 仍是唯一 ASR/TTS/SSE 管线;旧 `LessonView` fallback 已删除。
+
 ---
 
 ## 5. 协议踩坑摘要(详情指向其它文档)
@@ -238,6 +261,9 @@ controller.endLesson:
 | 词汇正确性判定 | 当前目标英文词精确 token 命中 | 保守优先,`train` 算对、`tree` 不算;不做发音相似度猜测 |
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
+| 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
+| 新标准唯一化 | 当前只暴露 food;旧 `transportation` / `timeNumbers` 数据与 `LessonView` fallback 已退役 | 避免长期维护两套课程路径 |
+| LessonController 定位 | 继续复用 ASR/TTS/SSE 管线,不作为独立 lesson UI 入口 | 降低重写音频链路风险 |
 
 ---
 
@@ -281,6 +307,7 @@ controller.endLesson:
 - 2026-05-05 — **画布 v2:WordCardCanvas 替换 ImageCanvas** — 协议从 show/focus/annotate 统一为 `show_card`;课程数据从 `images[]` 迁移到 `cards[]`(`kind: 'word'|'sentence'`);画布层从图叠层改为图+中英文独立 DOM;删除 ShowTool/FocusTool/AnnotateTool 组件
 - 2026-05-10 — **教学循环 v1.1:课堂内进度引擎 + drillParts** — 每张 card 必填 `drillParts`;服务端用 `show_card` 同步 currentCardId;LLM 输出 `attempt_assessment`;memory 维护 `cardProgress` / `clearedCardIds`;history 裁到最近 12 条
 - 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};客户端 PIN 门控;详见 §11
+- 2026-05-15 — **三阶段 lesson structure refactor** — 新增 food 三阶段课程、ImageGen PNG 单卡资产 + 结构化 `scene.svg`;新增 phase-aware prompt / SSE progress_snapshot / `phase-transition` / `quiz-answer`;新增 `PhasedLessonController` + Intro / Interactive / Reinforce / Quiz 组件;删除旧课程数据与旧 `LessonView` fallback;`Course.phases` 收紧为必填
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 
@@ -326,7 +353,8 @@ controller.endLesson:
 | `src/components/scene/SceneFrame.tsx` | 5 variant 场景外壳 + 进退场动画(`enterFrom` 决定 fromYard/fromCabin/默认) |
 | `src/components/scene/{Yard,Cabin,Grass,Storage,Attic}Scene.tsx` | 5 个 SVG 背景(1280×800 viewBox,preserveAspectRatio slice) |
 | `src/components/bunny/Bunny.tsx` | 单一全身组件,pose(5) × mood(4) 矩阵,styled-jsx mood 动画 |
-| `src/components/lesson/{WordBook,SubtitleBar,BloomButton,LessonView}.tsx` | 木屋内上课 UI |
+| `src/components/lesson/{PhasedLessonView,IntroPhase,InteractivePhase,ReinforcePhase,QuizPickWord,QuizRepeatAfterMe}.tsx` | 三阶段上课 UI |
+| `src/components/lesson/{WordBook,SubtitleBar,BloomButton}.tsx` | 互动阶段复用的课堂元素 |
 | `src/components/home/LetterCard.tsx` | 信件造型课程卡(layoutId 转场到木屋) |
 | `src/components/done/StickerWord.tsx` | 草地贴纸(spring 飘落 + ✦ 闪光) |
 | `src/components/journal/{WordEntry,BookShelf}.tsx` | 储物间词条卡 + 书架分组 |
@@ -352,11 +380,11 @@ controller.endLesson:
 ### 数据流
 
 ```
-fetch /api/courses    → 首页 LetterCard 列表
+fetch /api/courses    → 首页 LetterCard 列表(当前只返回 food)
 fetch /api/progress   → 储物间 / 总结页(WordMastery + 3 星掌握筛选)
 fetch /api/sessions   → 阁楼 SessionRow 列表(默认 limit=10)
 fetch /api/stats      → 阁楼 StatsCard(7 天柱状图 + 总分钟 + 掌握词数)
-voice WS / SSE        → 上课页(沿用 LessonController,完全不变)
+voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonController)
 ```
 
 ### Mastery 派生
