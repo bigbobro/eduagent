@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Fredoka } from 'next/font/google';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import './globals.css';
 
 const fredoka = Fredoka({
@@ -20,7 +21,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body className={`${fredoka.variable} font-zh antialiased bg-bunny-bg-cream text-bunny-ink`}>
-        {children}
+        <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>
   );
