@@ -22,7 +22,7 @@
 - 0 回归 promise:旧 `LessonController` / `LessonView` 一行不改,transportation / timeNumbers 继续走 v2 路径
 - 工具层(放大 / 圈出 / 慢速 / 换问法)是后续独立 epic,本次只搭三阶段骨架
 - 本 epic 包含并取代下方 P1 §2 "写第 3 节课"(food = 第 3 课 + 示范课)
-- 下游 Codex 产新课:照 spec §13 课程产出 checklist 走
+- 下游 Codex 产新课:照 `docs/course-authoring-standard.md` 走;spec §13 只保留入口摘要
 
 ---
 
@@ -113,11 +113,10 @@
    - timeNumbers 实测后基本可用,字体没明显问题。
    - 图片 loading 态、卡片切换动画属于打磨。
 
-5. **课程产出 SOP / Codex skill** *(gated:等课程数 ≥ 3 再启动)*
-   - 目标:把新课产出标准化,不做 app 内动态生图。
-   - 流程:课程设计 -> ImageGen 物料 -> `cards[]` 数据 -> 图片引用检查 -> 测试。
-   - 图片规范:4:3 横版、主体清晰居中、不把文字烧进图片。
-   - **gating 理由**:先手写第 3 节看流程啥样,再决定要不要 SOP。SOP 是产品化思路,提前做容易固化错误。
+5. **课程产出 SOP / Codex skill**
+   - 标准文档已提前建立:`docs/course-authoring-standard.md`。
+   - 课程产出 v1:课程设计 -> ImageGen 单体图 -> 结构化 `scene.svg` hotspot -> `cards[]` / `objectives.sentences` / quizzes -> 图片引用检查 -> 测试。
+   - Codex skill 仍 gated:等课程数 ≥ 3,看标准是否稳定后再产品化。
 
 6. **兴趣 / 困惑记忆**
    - 在词汇表现之外,再识别 confusion / engagement。

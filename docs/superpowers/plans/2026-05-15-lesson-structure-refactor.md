@@ -17,8 +17,8 @@
 **新建**(纯新增):
 - `src/data/courses/food.ts` — food 示范课数据
 - `src/data/courses/food.test.ts` — food 课程专属校验单测
-- `public/images/food/scene.svg` — 食物餐桌场景图(每张 card 一个 `<g id="card-X">` hotspot)
-- `public/images/food/{apple,banana,bread,milk,egg,rice}.svg` — 单卡图
+- `public/images/food/scene.svg` — 食物餐桌场景图(每张 card 一个 `<g id="card-X">` hotspot,嵌入单体 PNG)
+- `public/images/food/{apple,banana,bread,milk,egg,rice}.png` — ImageGen 生成的单卡图
 - `src/lib/voice/phased-lesson-controller.ts` — 新外层 controller
 - `src/lib/voice/phased-lesson-controller.test.ts`
 - `src/components/lesson/PhasedLessonView.tsx` — 顶层 phase 路由
@@ -90,7 +90,7 @@ describe('Course phases type', () => {
       correctCardId: 'apple', distractorCardIds: ['banana', 'bread'],
     };
     const repeat: Quiz = {
-      id: 'q2', type: 'repeat-after-me', cardId: 'apple', targetText: 'Say apple.',
+      id: 'q2', type: 'repeat-after-me', cardId: 'apple', targetText: 'This is an apple.',
     };
     expect(pick.type).toBe('pick-word');
     expect(repeat.type).toBe('repeat-after-me');
@@ -220,15 +220,15 @@ export const foodCourse: Course = {
   targetAge: [3, 6],
   theme: 'food',
   cards: [
-    { id: 'apple',  english: 'apple',  chinese: '苹果',  imageUrl: '/images/food/apple.svg',  kind: 'word', drillParts: ['app', 'le'],     difficulty: 1, tags: ['food'] },
-    { id: 'banana', english: 'banana', chinese: '香蕉',  imageUrl: '/images/food/banana.svg', kind: 'word', drillParts: ['ba', 'na', 'na'], difficulty: 1, tags: ['food'] },
-    { id: 'bread',  english: 'bread',  chinese: '面包',  imageUrl: '/images/food/bread.svg',  kind: 'word', drillParts: ['bread'],          difficulty: 1, tags: ['food'] },
-    { id: 'milk',   english: 'milk',   chinese: '牛奶',  imageUrl: '/images/food/milk.svg',   kind: 'word', drillParts: ['milk'],           difficulty: 1, tags: ['food'] },
-    { id: 'egg',    english: 'egg',    chinese: '鸡蛋',  imageUrl: '/images/food/egg.svg',    kind: 'word', drillParts: ['egg'],            difficulty: 1, tags: ['food'] },
-    { id: 'rice',   english: 'rice',   chinese: '米饭',  imageUrl: '/images/food/rice.svg',   kind: 'word', drillParts: ['rice'],           difficulty: 2, tags: ['food'] },
+    { id: 'apple',  english: 'apple',  chinese: '苹果',  imageUrl: '/images/food/apple.png',  kind: 'word', drillParts: ['app', 'le'],     difficulty: 1, tags: ['food'] },
+    { id: 'banana', english: 'banana', chinese: '香蕉',  imageUrl: '/images/food/banana.png', kind: 'word', drillParts: ['ba', 'na', 'na'], difficulty: 1, tags: ['food'] },
+    { id: 'bread',  english: 'bread',  chinese: '面包',  imageUrl: '/images/food/bread.png',  kind: 'word', drillParts: ['bread'],          difficulty: 1, tags: ['food'] },
+    { id: 'milk',   english: 'milk',   chinese: '牛奶',  imageUrl: '/images/food/milk.png',   kind: 'word', drillParts: ['milk'],           difficulty: 1, tags: ['food'] },
+    { id: 'egg',    english: 'egg',    chinese: '鸡蛋',  imageUrl: '/images/food/egg.png',    kind: 'word', drillParts: ['egg'],            difficulty: 1, tags: ['food'] },
+    { id: 'rice',   english: 'rice',   chinese: '米饭',  imageUrl: '/images/food/rice.png',   kind: 'word', drillParts: ['rice'],           difficulty: 2, tags: ['food'] },
   ],
   objectives: {
-    sentences: ['What is this?', 'This is a ___.', 'I like ___.', 'Can you say ___?'],
+    sentences: ['This is a ___.', 'I like ___.'],
   },
   teachingHints: {
     opening: '今天我们看看餐桌上有什么食物!',
@@ -249,8 +249,8 @@ export const foodCourse: Course = {
         { id: 'q1', type: 'pick-word',       prompt: 'Where is the apple?',  correctCardId: 'apple',  distractorCardIds: ['milk', 'bread'] },
         { id: 'q2', type: 'pick-word',       prompt: 'Find the milk.',        correctCardId: 'milk',   distractorCardIds: ['rice', 'egg'] },
         { id: 'q3', type: 'pick-word',       prompt: 'Which one is bread?',   correctCardId: 'bread',  distractorCardIds: ['banana', 'apple'] },
-        { id: 'q4', type: 'repeat-after-me', cardId: 'apple',                 targetText: 'Say apple.' },
-        { id: 'q5', type: 'repeat-after-me', cardId: 'egg',                   targetText: 'Say egg.' },
+        { id: 'q4', type: 'repeat-after-me', cardId: 'apple',                 targetText: 'This is an apple.' },
+        { id: 'q5', type: 'repeat-after-me', cardId: 'milk',                  targetText: 'I like milk.' },
       ],
     },
   },
@@ -309,7 +309,7 @@ feat(course): add food demo course with phases
 
 - 6 cards: apple / banana / bread / milk / egg / rice
 - phases.introduction.sceneImage → /images/food/scene.svg (asset 下一 task 加)
-- phases.reinforcement.quizzes: 3 pick-word + 2 repeat-after-me
+- phases.reinforcement.quizzes: 3 pick-word + 2 short-sentence repeat-after-me
 - 注册到 allCourses
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -324,7 +324,7 @@ EOF
 **Files:**
 - Create: `src/data/courses/food.test.ts`
 
-校验 spec §13.5 的所有 schema 完整性约束。
+校验 `docs/course-authoring-standard.md` 的课程完整性约束。
 
 - [ ] **Step 3.1: 写测试,先让 quiz 引用 / 资产存在校验失败**
 
@@ -343,6 +343,11 @@ describe('food course schema integrity', () => {
 
   it('all card ids are unique', () => {
     expect(cardIds.size).toBe(foodCourse.cards.length);
+  });
+
+  it('defines short sentence objectives', () => {
+    expect(foodCourse.objectives.sentences.length).toBeGreaterThanOrEqual(1);
+    expect(foodCourse.objectives.sentences).toContain('This is a ___.');
   });
 
   it('quiz pick-word references only valid card ids', () => {
@@ -365,6 +370,8 @@ describe('food course schema integrity', () => {
       if (q.type !== 'repeat-after-me') continue;
       expect(cardIds.has(q.cardId), `cardId ${q.cardId}`).toBe(true);
       expect(q.targetText.trim().length).toBeGreaterThan(0);
+      expect(q.targetText).toMatch(/[.?!]$/);
+      expect(q.targetText.toLowerCase()).not.toMatch(/^say\s+\w+\.?$/);
     }
   });
 
@@ -380,11 +387,13 @@ describe('food course schema integrity', () => {
     const content = fs.readFileSync(filePath, 'utf-8');
     for (const card of foodCourse.cards) {
       expect(content, `scene 缺少 hotspot card-${card.id}`).toContain(`id="card-${card.id}"`);
+      expect(content, `scene 未嵌入 ${card.imageUrl}`).toContain(`href="${card.imageUrl}"`);
     }
   });
 
   it('every card has its own image file', () => {
     for (const card of foodCourse.cards) {
+      expect(card.imageUrl.endsWith('.png'), `${card.id} should use ImageGen PNG`).toBe(true);
       const filePath = path.join(process.cwd(), 'public', card.imageUrl);
       expect(fs.existsSync(filePath), `card image ${filePath}`).toBe(true);
     }
@@ -404,64 +413,68 @@ Expected: schema 部分 PASS,资产部分 FAIL(`scene file ... false`)。
 
 ---
 
-## Task 4: 创建 food 资产(场景 SVG + 6 张单卡 SVG)
+## Task 4: 创建 food 资产(ImageGen 单卡 PNG + 场景 SVG)
 
 **Files:**
 - Create: `public/images/food/scene.svg`
-- Create: `public/images/food/{apple,banana,bread,milk,egg,rice}.svg`(每张一个文件)
+- Create: `public/images/food/{apple,banana,bread,milk,egg,rice}.png`(每张一个文件)
 
-按 spec §13.4 MVP 妥协:用 `<text>` emoji 占位,但 `<g id="card-X">` 包裹结构必须正确。
+按 `docs/course-authoring-standard.md` 走:Codex 用 ImageGen 生成单体 PNG,再由 `scene.svg` 结构化嵌入。不要只交一张不可交互的大图。
 
-- [ ] **Step 4.1: 创建 scene.svg**
+- [ ] **Step 4.1: 用 ImageGen 生成 6 张单卡 PNG**
+
+对每个 card 各生成一张儿童友好、扁平插画风格的单体图,保存为:
+
+```text
+public/images/food/apple.png
+public/images/food/banana.png
+public/images/food/bread.png
+public/images/food/milk.png
+public/images/food/egg.png
+public/images/food/rice.png
+```
+
+统一 prompt 约束:
+- single subject only, centered, no text, no label, no watermark
+- warm child-friendly flat illustration, thick soft outline, simple shapes
+- plain light background or transparent-looking clean background
+- consistent style across all six assets
+
+实施注意:
+- 使用内置 ImageGen 生成后,把最终选中的图片复制/移动进 `public/images/food/`。
+- 不要把项目引用指向 `$CODEX_HOME/generated_images/...`。
+- 不要覆盖已有正式资产;若目录已有旧图,先确认是否为本 task 产物。
+
+- [ ] **Step 4.2: 创建 scene.svg**
 
 `public/images/food/scene.svg`:
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 768" width="1024" height="768">
-  <!-- 餐桌背景 -->
   <rect x="0" y="0" width="1024" height="768" fill="#fef6e4"/>
-  <rect x="40" y="280" width="944" height="380" fill="#e8c896" rx="20"/>
-  <text x="512" y="80" font-size="36" text-anchor="middle" fill="#7a5a30" font-family="sans-serif">🍽️ 餐桌</text>
+  <rect x="64" y="286" width="896" height="360" fill="#e8c896" rx="28"/>
+  <ellipse cx="512" cy="468" rx="410" ry="170" fill="#f0d2a2" opacity="0.55"/>
 
   <g id="card-apple" style="cursor: pointer;">
-    <circle cx="180" cy="450" r="60" fill="#ffd5d0" opacity="0.3"/>
-    <text x="180" y="475" font-size="80" text-anchor="middle">🍎</text>
+    <image href="/images/food/apple.png" x="118" y="365" width="124" height="124"/>
   </g>
   <g id="card-banana" style="cursor: pointer;">
-    <circle cx="340" cy="450" r="60" fill="#fff4c4" opacity="0.3"/>
-    <text x="340" y="475" font-size="80" text-anchor="middle">🍌</text>
+    <image href="/images/food/banana.png" x="278" y="365" width="124" height="124"/>
   </g>
   <g id="card-bread" style="cursor: pointer;">
-    <circle cx="500" cy="450" r="60" fill="#f4dcb0" opacity="0.3"/>
-    <text x="500" y="475" font-size="80" text-anchor="middle">🥖</text>
+    <image href="/images/food/bread.png" x="438" y="365" width="124" height="124"/>
   </g>
   <g id="card-milk" style="cursor: pointer;">
-    <circle cx="660" cy="450" r="60" fill="#ffffff" opacity="0.5"/>
-    <text x="660" y="475" font-size="80" text-anchor="middle">🥛</text>
+    <image href="/images/food/milk.png" x="598" y="365" width="124" height="124"/>
   </g>
   <g id="card-egg" style="cursor: pointer;">
-    <circle cx="820" cy="450" r="60" fill="#fff8e0" opacity="0.3"/>
-    <text x="820" y="475" font-size="80" text-anchor="middle">🥚</text>
+    <image href="/images/food/egg.png" x="758" y="365" width="124" height="124"/>
   </g>
   <g id="card-rice" style="cursor: pointer;">
-    <circle cx="500" cy="600" r="60" fill="#f0f0f0" opacity="0.3"/>
-    <text x="500" y="625" font-size="80" text-anchor="middle">🍚</text>
+    <image href="/images/food/rice.png" x="450" y="515" width="124" height="124"/>
   </g>
 </svg>
 ```
-
-- [ ] **Step 4.2: 创建 6 张单卡 SVG**
-
-每张文件用同样模板,只改 emoji 和颜色。`apple.svg` 示例:
-
-```svg
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <rect width="256" height="256" fill="#fff" rx="20"/>
-  <text x="128" y="170" font-size="160" text-anchor="middle">🍎</text>
-</svg>
-```
-
-其余 5 张:`banana.svg` → 🍌 / `bread.svg` → 🥖 / `milk.svg` → 🥛 / `egg.svg` → 🥚 / `rice.svg` → 🍚。
 
 - [ ] **Step 4.3: 跑 food.test.ts,确认全部通过**
 
@@ -469,19 +482,19 @@ Expected: schema 部分 PASS,资产部分 FAIL(`scene file ... false`)。
 pnpm exec vitest run src/data/courses/food.test.ts
 ```
 
-Expected: 全部 PASS(7 个 case 全绿)。
+Expected: 全部 PASS(含短句目标、quiz 引用、PNG 文件、scene hotspot 校验)。
 
 - [ ] **Step 4.4: Commit**
 
 ```bash
 git add src/data/courses/food.test.ts public/images/food/
 git commit -m "$(cat <<'EOF'
-feat(course-food): demo scene + card SVGs (emoji placeholders)
+feat(course-food): demo scene + ImageGen card assets
 
-- public/images/food/scene.svg: 6 个 <g id="card-X"> hotspot,emoji 占位
-- public/images/food/{apple,banana,bread,milk,egg,rice}.svg: 单卡图占位
-- food.test.ts: 7 项 schema + 资产完整性校验,全绿
-- 视觉精修留下个 epic(本 epic 不阻塞结构验证)
+- public/images/food/{apple,banana,bread,milk,egg,rice}.png: ImageGen 单体图
+- public/images/food/scene.svg: 6 个 <g id="card-X"> hotspot,嵌入 PNG
+- food.test.ts: schema + 短句 + 资产完整性校验,全绿
+- 正式插画精修留下个 epic(本 epic 不阻塞结构验证)
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -653,6 +666,7 @@ describe('phase-aware system prompt', () => {
     const prompt = buildSystemPrompt(foodCourse, memoryFor(), 'interactive');
     expect(prompt).toContain('interactive 阶段');
     expect(prompt).toContain('P0 教学硬约束');
+    expect(prompt).toContain('先练目标词');
   });
 
   it('reinforcement phase: 含"不再介绍新词"', () => {
@@ -698,6 +712,7 @@ const PHASE_INTRO_PROMPT = `
 const PHASE_INTERACTIVE_PROMPT = `
 ## 当前阶段:interactive 阶段
 - 你正在做"AI 互动",目标是让孩子开口尝试目标词
+- 先练目标词,再自然带一个 objectives.sentences 里的核心短句
 - 完整使用本课程默认教学循环(P0 教学硬约束 + ASR 容错判定)
 `;
 
@@ -1761,7 +1776,7 @@ git commit -m "$(cat <<'EOF'
 feat(lesson): IntroPhase component — scene image + hotspot click
 
 - 展示 phases.introduction.sceneImage
-- 透明覆盖层 hotspot(MVP: grid 布局对齐 SVG 6 个 emoji 位置)
+- 透明覆盖层 hotspot(MVP: grid 布局对齐 scene.svg 中 6 个 food item 位置)
 - 灰 BloomButton 占位,保留布局
 - onHotspotClick(cardId) 给上层 PhasedLessonView 用
 
@@ -2091,11 +2106,11 @@ function mockController(): any {
 }
 
 describe('QuizRepeatAfterMe', () => {
-  const quiz = { id: 'q4', type: 'repeat-after-me' as const, cardId: 'apple', targetText: 'Say apple.' };
+  const quiz = { id: 'q4', type: 'repeat-after-me' as const, cardId: 'apple', targetText: 'This is an apple.' };
 
   it('renders targetText + BloomButton', () => {
     render(<QuizRepeatAfterMe quiz={quiz} course={foodCourse} controller={mockController()} onAnswer={() => {}} />);
-    expect(screen.getByText(/Say apple/)).toBeTruthy();
+    expect(screen.getByText(/This is an apple/)).toBeTruthy();
   });
 
   it('judges correct when ASR final contains target word (case-insensitive)', () => {

@@ -24,7 +24,7 @@
 - 新建 `PhasedLessonView` + 三个 phase 子组件(`IntroPhase` / `InteractivePhase` / `ReinforcePhase`)
 - `LessonClient` 根据 `course.phases` 存在与否,路由到 v2 或 phased 实现
 - 实现 `pick-word` 和 `repeat-after-me` 两种 quiz 类型
-- 新建 food 示范课走通三阶段
+- 新建 food 示范课走通三阶段,并体现"单词 + 短句"的常规课程目标
 - 服务端 LLM prompt 增加 phase context,每个 phase 不同的提示词
 
 ### 非目标(out of scope)
@@ -40,8 +40,8 @@
 | Phase | 目标 | 孩子的状态 | AI 的角色 | UI 主视觉 | 切换条件 |
 |-------|------|----------|----------|---------|---------|
 | **introduction**(主题导入) | 让孩子先看懂 | 看、点、听,**不强制开口** | 旁白讲解,逐个点出 cards | 大场景图(餐桌/马路/动物园) | 所有 cards 都被 narrated 过 |
-| **interactive**(AI 互动) | 让孩子开口 | 按住空格说,试着说目标词 | 引导、判定、纠错(v2 完整能力) | 木屋 + WordBook + Bunny + BloomButton | 所有 cards 都 cleared(说对过 ≥ 1 次),或重试 ≥ 3 × cards.length 次兜底 |
-| **reinforcement**(强化巩固) | 检查孩子会不会 | 答题(点图 / 跟读) | 出题、判定、给反馈 | quiz 关卡(2-4 选 1 题板 / 跟读题) | 所有 quizzes 答完 |
+| **interactive**(AI 互动) | 让孩子开口 | 按住空格说,先试目标词,再跟一个短句 | 引导、判定、纠错(v2 完整能力) | 木屋 + WordBook + Bunny + BloomButton | 所有 cards 都 cleared(说对过 ≥ 1 次),或重试 ≥ 3 × cards.length 次兜底 |
+| **reinforcement**(强化巩固) | 检查孩子会不会 | 答题(点图 / 短句跟读) | 出题、判定、给反馈 | quiz 关卡(2-4 选 1 题板 / 跟读题) | 所有 quizzes 答完 |
 
 切换由 **PhasedLessonController 规则判定**,LLM 不输出 phase 切换信号。这保证了「孩子不会被 LLM 不可预测地卡在某个阶段」。
 
@@ -125,6 +125,8 @@ export type Quiz =
 |------|--------|------|
 | `pick-word` | 听懂(comprehension) | AI 读 prompt(如 "Where is the apple?"),屏幕展示 1 张目标 + 2-3 张干扰图,孩子 tap 选对的 |
 | `repeat-after-me` | 说出来(production) | AI 说 targetText,孩子跟读,沿用现有 ASR + LLM `attempt_assessment` 通路判定 |
+
+常规主题课默认用 `word` cards 承载可视化目标,用 `objectives.sentences` 和 `repeat-after-me.targetText` 承载 1-2 个核心短句。`kind='sentence'` cards 保留给 timeNumbers 这类抽象关系课,不作为每节新课的必填项。
 
 ## 6. 状态机
 
@@ -215,14 +217,16 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 
 `src/data/courses/food.ts`(新建):
 
-- **cards (6 张)**:apple / banana / bread / milk / egg / rice
-- **场景图**:`public/images/food/scene.svg` — 一张餐桌上摆着这 6 样食物 (SVG)
+- **cards (6 张 word cards)**:apple / banana / bread / milk / egg / rice;本课不新增 sentence cards
+- **目标短句**:`This is a ___.` / `I like ___.`
+- **单卡图**:`public/images/food/{apple,banana,bread,milk,egg,rice}.png` — Codex 用 ImageGen 生成儿童友好单体图
+- **场景图**:`public/images/food/scene.svg` — 一张餐桌上摆着这 6 样食物;用 SVG `<g id="card-X">` 包裹并嵌入单卡 PNG
 - **quizzes (5 道)**:
   - `pick-word × 3`:"Where is the apple?" / "Find the milk." / "Which one is bread?"
-  - `repeat-after-me × 2`:"Say apple." / "Say egg."
+  - `repeat-after-me × 2`:"This is an apple." / "I like milk."
 - 在 `src/data/courses/index.ts`(或现有 `allCourses` 导出)注册 foodCourse
 
-每张 card 的 svg 资源,本 epic 范围:用 emoji 暂代(或借用现有 transportation 风格的 SVG)→ 不阻塞结构验证。视觉资源精修是下个 epic。
+视觉资源精修不阻塞本 epic,但 food 示范课不再使用字符占位作为最终计划。ImageGen 产出的单体图需要落到 `public/images/food/`,再由 `scene.svg` 结构化组装。
 
 ## 9. 服务端改动
 
@@ -236,7 +240,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 `src/lib/agent/prompt.ts` 根据 `session.currentPhase` 注入不同的 system prompt 段:
 
 - `intro`:"你是 introduction 阶段。逐个指认 cards,每张说一句温和的引入,**不要问孩子能不能说**。每张 card 输出 `show_card` action。讲完最后一张主动停下来。"
-- `interactive`:沿用当前 prompt(完整 v2 模式)
+- `interactive`:沿用当前 prompt(完整 v2 模式),但要求先练目标词,再自然带一个 `objectives.sentences` 里的核心短句
 - `reinforcement`:"你是 reinforcement 阶段。**不再介绍新词**。按 quiz 列表逐题出题,等待客户端答案信号(server 通过 `action=quiz-answer` 传)。"
 - 老课(无 phase):沿用当前 prompt 不变(向后兼容)
 
@@ -300,116 +304,15 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - pick-word 题板布局合不合理
 - 整节课 5-15 分钟跑下来体感
 
-## 13. 课程产出 checklist(for Codex / 内容生成 agent)
+## 13. Codex 课程产出标准
 
-> 本节定义**单节课程的完整产出物**。后续让 Codex(或其它内容生成 agent)产新课时,这是它要走完的清单。本 spec 实施完成后,新课程必须按此规范产出。
+长期课程生产标准已经独立到 `docs/course-authoring-standard.md`。本 spec 只保留与本 epic 直接相关的摘要:
 
-### 13.1 文件清单(每节课必交付)
-
-| 文件 / 资源 | 路径 | 必填? | 说明 |
-|---|---|---|---|
-| 课程数据 | `src/data/courses/<courseId>.ts` | ✅ | 一个 `Course` 对象 export,含 cards / objectives / teachingHints / phases |
-| 注册到 allCourses | `src/data/courses/transportation.ts` 底部的 `allCourses` 数组 | ✅ | append 新 course(当前注册中心在此文件,**后续若拆分独立 index.ts 需迁移**) |
-| 课程单测 | `src/data/courses/course-data.test.ts` 已有的通用断言会自动覆盖 | ✅ | 不用单独写,确保新 course 数据满足公共校验 |
-| 单卡图 | `public/images/<theme>/<cardId>.svg` (或 `.png`) | ✅ | 每张 card 一张。优先 SVG。`imageUrl` 字段必须指向真实文件 |
-| 场景图 | `public/images/<theme>/scene.svg` | ✅ | introduction phase 主视觉。**必须是 SVG**(原因见 13.4) |
-| 场景图引用 | `phases.introduction.sceneImage = '/images/<theme>/scene.svg'` | ✅ | |
-
-### 13.2 Schema 必填字段(完整清单)
-
-**Course 顶层**:`id`(唯一)/ `title` / `description` / `targetAge` / `theme` / `cards` / `objectives` / `teachingHints` / `phases`(本次新增,必填)
-
-**Card**:`id`(课内唯一)/ `english` / `chinese` / `imageUrl` / `kind`('word' | 'sentence')/ `drillParts`(非空,见 13.3)/ `difficulty`(1-3)/ `tags`
-
-**phases.introduction**:`sceneImage`(必填)/ `sceneCaption`(可选,中文描述)/ `narrationHint`(可选,给 LLM 的旁白指南)
-
-**phases.interactive**:空对象 `{}`(占位,等下个 epic 扩展)
-
-**phases.reinforcement**:`quizzes`(非空数组)
-
-**Quiz (`pick-word`)**:`id` / `type: 'pick-word'` / `prompt`(英文问句)/ `correctCardId`(必须 ∈ cards)/ `distractorCardIds`(长度 2-3,⊂ cards,不含 correctCardId)
-
-**Quiz (`repeat-after-me`)**:`id` / `type: 'repeat-after-me'` / `cardId`(∈ cards)/ `targetText`(孩子要跟读的文本)
-
-### 13.3 内容指南
-
-**单词选择**
-- 目标 3-6 岁高频词,**6-10 个 cards**(太少不够输入量,太多孩子记不住)
-- 至少一半 `difficulty=1`,其余 1-2
-- 主题内一致:全名词 / 全动作 / 全形容词,不混类
-
-**drillParts(发音分段,用于 LLM 拆音节)**
-- 单音节词:`['apple']` 一个就够
-- 多音节词:按音节拆,如 `['ba', 'na', 'na']`、`['air', 'plane']`
-- 句子卡:按短语拆,如 `['One hour', 'has sixty', 'minutes']`
-
-**翻译(chinese 字段)**
-- 儿童友好,**不超过 4 个汉字**最佳;复杂词允许 5-6 字
-- 不要直译机器味,优先口语化
-
-**phases.introduction.narrationHint**
-- 1-2 句中文,告诉 LLM 在 intro 阶段的语气和节奏
-- 例:"逐个指认餐桌上的食物,语气温和不催促,每张说完停 2 秒让孩子看图"
-
-**Quiz prompts(pick-word)**
-- 简单英文问句,3-6 个词
-- 推荐句式:`Where is the <word>?` / `Find the <word>.` / `Which one is <word>?`
-- **不要长解释**:×"Please look at the screen and tell me which one is the apple" ✓"Where is the apple?"
-
-**Quiz targetText(repeat-after-me)**
-- 1-3 词短句:`Say apple.` / `An egg.` / `I like milk.`
-- **不要嵌套指令**:× "Repeat after me: apple, the red round fruit"
-
-**quizzes 数量**
-- 建议 `cards.length` 左右(6 个 cards → 5-7 题)
-- `pick-word` : `repeat-after-me` ≈ 2:1 (听懂权重高于产出,孩子先理解再尝试输出)
-
-### 13.4 视觉资产规范
-
-**风格**
-- 暖色调,儿童友好,**矢量 SVG 优先**
-- 避免照片级真实(分散注意力);卡通 + 扁平 + 厚轮廓更易识别
-
-**单卡图(`<cardId>.svg`)**
-- 比例:正方形或 4:3,**建议 1024×1024**
-- 白底 或 透明背景
-- 单一主体居中,**不要场景化**(场景在 scene.svg)
-
-**场景图(`scene.svg`)— 关键约束**
-- 比例:**横版 4:3,1024×768**
-- 包含**所有 cards 的可视元素**(餐桌上能看到全部食物 / 马路上能看到全部交通工具)
-- **每个 card 元素必须包成一个 SVG `<g>` 组,id 严格匹配 `card-<cardId>`**:
-  ```xml
-  <svg viewBox="0 0 1024 768">
-    <g id="card-apple"> <!-- 苹果的所有 path/circle/rect 都在这里 --> </g>
-    <g id="card-banana"> ... </g>
-    <g id="card-bread"> ... </g>
-    ...
-  </svg>
-  ```
-- 原因:IntroPhase 通过 DOM querySelector `#card-<cardId>` 绑定点击事件,触发 narration。**不用 SVG `<g id>` 这条 hotspot 约定就无法点图触发讲解**。
-- 元素重叠不要太严重(孩子手指点不准)
-
-**MVP 妥协(本 spec 的 food 示范课)**:允许先用 emoji 字符占位(`<text>🍎</text>`)作为单卡图和场景图,前提是 scene.svg 仍然有正确的 `<g id="card-apple">` 包裹结构。视觉资产精修留下个 epic。
-
-### 13.5 验证步骤(产出前必跑)
-
-新课 PR 提交前,Codex 必须确认以下全部通过:
-
-1. **类型检查**:`pnpm exec tsc --noEmit` 无错(schema 完整性)
-2. **课程通用单测**:`pnpm test src/data/courses` 通过(drillParts 非空、cards.id 唯一等)
-3. **本课专属单测**(新建 `src/data/courses/<courseId>.test.ts`,本 spec 实施 agent 提供模板):
-   - 所有 `quiz.correctCardId` / `distractorCardIds` / `cardId` ∈ cards
-   - `distractorCardIds` 不含 `correctCardId`、长度 2-3
-   - `phases.introduction.sceneImage` 引用的 SVG 文件存在(`fs.existsSync`)
-   - scene SVG 文本里包含每张 card 的 `<g id="card-<cardId>"`(简单 string 搜索即可)
-   - 每张 `card.imageUrl` 文件存在
-4. **课程列表**:`/api/courses` 返回新课程(说明已注册成功)
-5. **手测开课**:`pnpm run dev` → 访问 `/lesson/<courseId>` → 至少能进入 intro 阶段,看到场景图
-
-### 13.6 产出工件示例(food 示范课作为参考)
-
-本 spec §8 已经定义了 food 示范课的全部产出。Codex 后续产新课(colors / animals / weather 等)可对照 §8 + 本 §13 走清单。
+- 常规主题课必须体现 **words + short sentences**,不是只做单词图鉴。
+- 默认结构是 `word` cards + `objectives.sentences` + 短句 `repeat-after-me`;不要为了每节常规课强制新增 `kind='sentence'` cards。
+- Codex 可以用 ImageGen 生产单卡 PNG,但 `scene.svg` 必须结构化组装,每张 card 保留 `<g id="card-<cardId>">` hotspot。
+- 新课必须有课程专属校验:quiz 引用合法、card 图片存在、scene 存在、scene 包含所有 hotspot。
+- food 示范课的具体产出以 §8 为准;后续新课以 `docs/course-authoring-standard.md` 为入口。
 
 ---
 
@@ -419,11 +322,12 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - **迁移老课**:把 transportation / timeNumbers 加上 phases 字段,删 v2 controller
 - **更多 quiz 类型**:拖拽匹配 / 找一找(在大图里点) / 错题回放 / 复述长句
 - **跨 session 进度**:phase 完成情况持久化,断网/刷新可 resume
-- **场景图精修**:replace emoji 占位为真正的 SVG/插画
+- **场景图精修**:把 ImageGen 单体图进一步统一成正式插画风格
 
 ## 15. 相关文档
 
 - `docs/architecture.md`:living doc,本 spec 实施完成后需同步更新 §2 模块清单、§4 状态机、§6 关键决策
+- `docs/course-authoring-standard.md`:Codex 产新课的长期标准入口
 - `docs/superpowers/specs/2026-05-12-frontend-redesign-design.md`:Bunny 的小院子前端架构(本 spec 在它之上扩 phase 维度)
 - `docs/superpowers/specs/2026-05-05-canvas-v2-wordcard-design.md`:v2 cards 数据结构(本 spec 复用)
 - `docs/TODO.md`:本 spec 完成后从中划掉相关项,补充后续 epic 链接
