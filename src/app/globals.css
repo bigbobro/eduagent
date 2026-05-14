@@ -2,13 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@import url('https://chinese-fonts-cdn.deno.dev/packages/lxgwwenkaitc/dist/LXGWWenKaiTC-Regular/result.css');
+
+:root {
+  --font-lxgw: 'LXGW WenKai TC';
 }
 
-html, body {
-  height: 100%;
-  overflow: hidden;
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
