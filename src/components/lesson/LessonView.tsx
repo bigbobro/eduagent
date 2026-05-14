@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { WordCardCanvas } from './WordCardCanvas';
 import { SubtitleBar } from './SubtitleBar';
 import { HoldToTalkButton } from './HoldToTalkButton';
-import { Bunny, BunnyMood } from './Bunny';
+import { Bunny, type BunnyMood } from '@/components/bunny/Bunny';
 import { Button } from '@/components/ui/Button';
 import { Course } from '@/types/course';
 import { ToolAction } from '@/types/tools';
@@ -132,7 +132,7 @@ export function LessonView({ course }: LessonViewProps) {
                 onPressStart={onPressStart}
                 onPressEnd={onPressEnd}
               />
-              <Bunny mood={mood} size={80} />
+              <Bunny pose="stand" mood={mood} size={80} />
             </div>
           )}
         </div>
@@ -141,7 +141,7 @@ export function LessonView({ course }: LessonViewProps) {
           {state === 'idle' ? (
             <>
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
-                <Bunny mood="idle" size={80} />
+                <Bunny pose="sit" mood="idle" size={80} />
                 <Button size="lg" onClick={handleStart}>开始上课</Button>
               </div>
             </>
