@@ -146,27 +146,23 @@ export function LessonView({ course }: LessonViewProps) {
           </div>
         )}
 
-        <div className="absolute inset-0 top-14 bottom-32 flex items-center justify-center gap-8 px-12">
-          <div className="flex-shrink-0">
-            <Bunny pose={STATE_TO_POSE[state]} mood={STATE_TO_MOOD[state]} size={240} />
-          </div>
-          <div className="flex-1 max-w-3xl h-full flex items-center justify-center">
+        <div className="absolute inset-0 top-14 bottom-28 flex items-center justify-center px-4">
+          <div className="relative" style={{ width: 'min(90vw, calc((100vh - 200px) * 4 / 3))', maxWidth: '1600px' }}>
             <WordBook cards={course.cards} currentCardId={currentCardId} />
+            <div className="absolute left-6 bottom-6 z-20">
+              <Bunny pose={STATE_TO_POSE[state]} mood={STATE_TO_MOOD[state]} size={120} />
+            </div>
           </div>
         </div>
 
-        <footer className="absolute bottom-0 left-0 right-0 px-8 pb-6 z-20 flex items-end gap-6">
+        <footer className="absolute bottom-0 left-0 right-0 h-28 z-20 flex items-center justify-center px-8 gap-4">
           {state === 'idle' ? (
-            <div className="flex-1 flex items-center justify-center gap-6">
-              <Button size="lg" onClick={handleStart}>
-                开始上课
-              </Button>
-            </div>
+            <Button size="lg" onClick={handleStart}>开始上课</Button>
           ) : (
             <>
-              <div className="flex-1">
+              <div className="flex-1 max-w-4xl">
                 <SubtitleBar text={subtitle.text} source={subtitle.source} isPlaying={isPlaying} />
-                <div className="mt-2 text-center font-zh text-sm text-bunny-ink-soft">{helpText}</div>
+                <div className="mt-1 text-center font-zh text-sm text-bunny-ink-soft">{helpText}</div>
               </div>
               <BloomButton
                 disabled={!canHold}
