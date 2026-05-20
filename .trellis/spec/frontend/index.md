@@ -1,9 +1,10 @@
 # Frontend Development Guidelines
 
 The EduAgent frontend is a full-screen children's learning app built with
-Next.js App Router, React client components, Tailwind bunny design tokens, and
-Framer Motion. The main lesson UI is driven by browser-side controller classes
-that emit state, subtitle, action, and progress events.
+Next.js App Router, React client components, Tailwind CC magic-academy design
+tokens, and controller-driven lesson views. The main lesson UI is driven by
+browser-side controller classes that emit state, subtitle, action, and progress
+events.
 
 ## Pre-Development Checklist
 
@@ -11,7 +12,7 @@ that emit state, subtitle, action, and progress events.
   surfaces, shared UI, course data, or audio interaction.
 - Read `docs/architecture.md` before changing lesson state, ASR/TTS playback,
   or phase transitions.
-- Reuse existing bunny palette, radii, shadows, and font tokens from
+- Reuse the current CC palette, paper radii, paper shadows, and font tokens from
   `tailwind.config.ts`.
 - Keep the experience as the actual app screen. Do not replace app views with
   marketing or explanatory pages.
@@ -42,8 +43,8 @@ that emit state, subtitle, action, and progress events.
 Components should type props locally and clean up controller subscriptions:
 
 ```tsx
-// src/components/lesson/InteractivePhase.tsx
-interface InteractivePhaseProps {
+// src/components/lesson/LessonMandalaV2.tsx
+interface LessonMandalaV2Props {
   course: Course;
   controller: LessonController;
 }
@@ -54,13 +55,13 @@ useEffect(() => {
 }, [controller]);
 ```
 
-Shared UI should use typed variants and bunny design tokens:
+Shared UI should use typed variants and CC magic design tokens:
 
 ```tsx
-// src/components/ui/Button.tsx
-const variantCx: Record<Variant, string> = {
-  primary: 'bg-bunny-pink hover:bg-bunny-pink/90 text-bunny-ink',
-  ghost: 'bg-bunny-bg-warmpaper hover:bg-bunny-pink-soft text-bunny-ink',
-  danger: 'bg-bunny-berry hover:bg-bunny-berry/90 text-white',
+// src/components/magic/PaperButton.tsx
+const sizeCx: Record<PaperButtonSize, string> = {
+  sm: 'rounded-paper-md px-[18px] py-2 text-base',
+  md: 'rounded-[22px] px-[26px] py-3 text-xl',
+  lg: 'rounded-paper-lg px-9 py-4 text-[26px]',
 };
 ```

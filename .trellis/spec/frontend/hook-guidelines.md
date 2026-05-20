@@ -55,5 +55,5 @@ justify a dedicated data fetching abstraction.
 - Do not include changing callbacks in a global-listener effect dependency array
   unless reattaching is intentional. Use refs for latest callbacks instead.
 - Do not start push-to-talk while `LessonController` is not in `awaiting` or
-  `listening`; `InteractivePhase` computes `canHold` before enabling
-  `useSpacebar`.
+  `listening`; lesson views such as `LessonMandalaV2` compute `canHold` before
+  enabling `useSpacebar`.

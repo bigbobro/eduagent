@@ -8,7 +8,7 @@ uses App Router pages as thin route shells and keeps substantial UI in
 
 ```text
 src/app/
-  page.tsx                         home yard, course letters
+  page.tsx                         magic study home, course books
   lesson/[id]/page.tsx             server route shell
   lesson/[id]/LessonClient.tsx     client course fetch + PhasedLessonView
   lesson/[id]/done/                lesson completion page
@@ -16,16 +16,15 @@ src/app/
   journal/                         word journal route/client
   api/                             backend routes, not UI code
 src/components/
-  lesson/                          lesson phases, quizzes, word book, subtitles
-  scene/                           full-screen scene backgrounds/frames
-  bunny/                           Bunny character SVG
-  home/                            course letter card
-  parents/                         PIN, stats, settings, session rows
-  journal/                         word shelf/entry
-  ui/                              shared button/surface/stars/pin/icons
+  magic/                           CC design atoms: Cat, PaperBg, PaperButton, PictureCard
+  lesson/                          lesson frames, mandala, quizzes, reinforcement, done
+  home/                            HomeStudy
+  parents/                         PINGateFrame and ParentsPage
+  journal/                         JournalPage
+  ui/                              root ErrorBoundary and SVGDefs only
 src/hooks/
   useSpacebar.ts                   push-to-talk keyboard hook
-public/images/<course>/            course card PNGs and structured scene.svg
+public/images/<course>/            course card PNGs
 public/worklets/                   browser AudioWorklet scripts
 ```
 
@@ -42,27 +41,29 @@ public/worklets/                   browser AudioWorklet scripts
 ## Component Organization
 
 - Put lesson-flow UI in `src/components/lesson/**`.
-  `PhasedLessonView` composes `IntroPhase`, `InteractivePhase`, and
-  `ReinforcePhase`.
-- Put reusable scene shells in `src/components/scene/**`; use `SceneFrame` to
-  select the background variant and entry motion.
+  `PhasedLessonView` composes `IntroFrame`, `LessonMandalaV2`,
+  `ReinforcementFlow`, and `DoneCelebrateFrame`.
+- Put reusable CC visual atoms in `src/components/magic/**`; use `PaperBg` for
+  full-screen paper surfaces and `PictureCard` for word/sentence cards.
 - Put domain-specific UI near its screen (`parents`, `journal`, `home`) rather
   than expanding `components/ui`.
-- Keep `components/ui` for small shared primitives such as `Button`, `Surface`,
-  `Stars`, `PinPad`, and icons.
+- Keep `components/ui` narrow. Current shared primitives live in
+  `src/components/magic/**`; `components/ui` owns root shell utilities such as
+  `ErrorBoundary` and `SVGDefs`.
 
 ## Assets
 
 - Course card art lives under `public/images/<theme>/<cardId>.png`.
-- Introduction scene assets use `public/images/<theme>/scene.svg` and stable
-  `card-<id>` hotspot ids, per `docs/course-authoring-standard.md`.
+- Introduction phases do not require `scene.svg`; `IntroFrame` renders
+  `sceneCaption` / `narrationHint` plus card chips, per
+  `docs/course-authoring-standard.md`.
 - Audio worklets live in `public/worklets/` because `AudioWorklet.addModule()`
   loads them by URL.
 
 ## Naming Conventions
 
 - React component files use PascalCase (`PhasedLessonView.tsx`,
-  `BloomButton.tsx`).
+  `PaperButton.tsx`).
 - Hook files use `use*` naming (`useSpacebar.ts`).
 - Route-local client wrappers use `*Client.tsx`.
 - Tests sit next to components/libs or under `tests/**` for route/API coverage.
@@ -70,8 +71,8 @@ public/worklets/                   browser AudioWorklet scripts
 ## Examples To Follow
 
 - `src/app/lesson/[id]/LessonClient.tsx`: route-local client data fetcher.
-- `src/components/lesson/InteractivePhase.tsx`: subscribes to controller events
+- `src/components/lesson/LessonMandalaV2.tsx`: subscribes to controller events
   and maps lesson state to UI.
-- `src/components/scene/SceneFrame.tsx`: shared shell with typed variants.
-- `src/components/home/LetterCard.tsx`: typed props, a11y label, theme mapping,
-  and Framer Motion button.
+- `src/components/magic/PictureCard.tsx`: canonical typed visual card.
+- `src/components/home/HomeStudy.tsx`: typed props, a11y labels, and course tone
+  mapping.

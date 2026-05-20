@@ -1,21 +1,22 @@
 # Quality Guidelines
 
 Frontend quality depends on preserving the lesson state machine, push-to-talk
-ergonomics, accessibility labels, and the bunny visual system.
+ergonomics, accessibility labels, and the CC magic-academy visual system.
 
 ## Required Patterns
 
-- Use React Testing Library for component behavior tests. Existing examples:
-  `BloomButton.test.tsx`, `IntroPhase.test.tsx`, `QuizPickWord.test.tsx`,
-  `ReinforcePhase.test.tsx`, and `PhasedLessonView.test.tsx`.
+- Use React Testing Library for component behavior tests. Current examples:
+  `magic-atoms.test.tsx`, `PictureCard.test.tsx`,
+  `ReinforcementFlow.test.tsx`, `PINGateFrame.test.tsx`, and
+  `PhasedLessonView.test.tsx`.
 - Test pure browser-event helpers directly when possible. `useSpacebar.test.ts`
   validates the global keyboard behavior through `attachSpacebarHandlers`.
 - Keep focus-visible styles and accessible labels on interactive controls.
-- Preserve reduced-motion behavior in `src/app/globals.css`: most animations are
-  reduced, but `.bunny-motion` remains because Bunny mood animation is semantic
-  feedback.
+- Preserve reduced-motion behavior in `src/app/globals.css`: global animation
+  durations are reduced, and `.magic-sparkle` is explicitly disabled.
 - Use design tokens from `tailwind.config.ts`; tests in
-  `tests/design-tokens.test.ts` guard the bunny palette, radii, and shadows.
+  `tests/design-tokens.test.ts` guard the CC palette, radii, shadows, fonts, and
+  SVG defs.
 
 ## Forbidden Patterns
 
@@ -25,7 +26,7 @@ ergonomics, accessibility labels, and the bunny visual system.
   from lesson components; go through `LessonController`.
 - Do not remove pointer-cancel/leave handling from press controls.
 - Do not add unlabelled icon-only buttons.
-- Do not introduce generic visual palettes that bypass the bunny design tokens.
+- Do not introduce generic visual palettes that bypass the CC design tokens.
 
 ## Testing Requirements
 

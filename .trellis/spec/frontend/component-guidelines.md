@@ -7,8 +7,8 @@ interaction state.
 
 ## Component Structure
 
-Follow the local shape used by `BloomButton`, `InteractivePhase`, and
-`SceneFrame`:
+Follow the local shape used by `PaperButton`, `LessonMandalaV2`, and
+`PictureCard`:
 
 - `'use client'` first when the file uses hooks, browser APIs, Framer Motion, or
   event handlers.
@@ -17,9 +17,9 @@ Follow the local shape used by `BloomButton`, `InteractivePhase`, and
 - Local constants and small helper functions.
 - Exported component.
 - Private subcomponents only when they are tightly coupled to the file, as in
-  `Bunny.tsx`.
+  `ParentsPage.tsx` or `JournalPage.tsx`.
 
-Keep heavy orchestration out of JSX. `InteractivePhase` subscribes to
+Keep heavy orchestration out of JSX. `LessonMandalaV2` subscribes to
 `LessonController` events in an effect, derives simple render state, and leaves
 ASR/TTS details inside the controller.
 
@@ -36,14 +36,14 @@ ASR/TTS details inside the controller.
 ## Styling Patterns
 
 - Use Tailwind utility classes and project tokens from `tailwind.config.ts`:
-  `bunny-*` colors, `rounded-bunny-*`, `shadow-*`, `font-zh`, and `font-en`.
-- Use `SceneFrame` for full-screen scene backgrounds instead of adding unrelated
-  page wrappers.
-- Use Framer Motion for scene/card transitions where it already exists
-  (`SceneFrame`, `LetterCard`, `WordBook`). Do not introduce another animation
-  system for similar UI.
-- Inline styles are acceptable for dynamic geometry such as scene hotspot
-  percentages in `IntroPhase` or computed letter positions in `HomePage`.
+  `paper`, `ink`, `butter`, `mint`, `peach`, `rounded-paper-*`,
+  `shadow-paper`, `font-zh`, `font-display`, and `font-en`.
+- Use `PaperBg` for full-screen paper backgrounds and keep app views as the
+  actual first screen, not explanatory or marketing pages.
+- Use `PictureCard` for word/sentence cards. It is the canonical card primitive
+  for hero, tile, and chip presentations.
+- Inline styles are acceptable for token-driven dynamic values, such as
+  `palette[course.tone]` backgrounds.
 
 ## Accessibility
 
@@ -51,19 +51,19 @@ ASR/TTS details inside the controller.
 - Icon or visual-only navigation buttons need `aria-label`, as in the home page
   ladder/door buttons and journal/parents back buttons.
 - Decorative images should use `alt=""` and `aria-hidden="true"`, while semantic
-  images need labels. `Bunny` exposes `role="img"` and `aria-label="Bunny 老师"`.
+  images need labels. `Cat` exposes `role="img"` and `aria-label="Mochi 麻吉"`.
 - Focus-visible ring classes are part of the UI contract. Tests check this for
-  `Button` and `BloomButton`.
-- Pointer controls should handle cancellation. `BloomButton` uses pointer
-  capture and handles `onPointerCancel` / `onPointerLeave`.
+  `PaperButton`.
+- Pointer controls should handle cancellation. Push-to-talk controls handle
+  `onPointerCancel` and `onPointerLeave`.
 
 ## Common Mistakes
 
-- Do not create a second Bunny or separate partial mascot system; current code
-  uses one full-body `Bunny` with `pose` and `mood`.
+- Do not create a second mascot system; current code uses one storybook `Cat`
+  with `mood`.
 - Do not bypass `LessonController` by calling ASR/TTS clients directly from
   lesson components.
 - Do not add card UI that assumes long-term mastery from session-local
   `clearedCardIds`.
-- Do not hard-code course ids in generic components unless the current component
-  is explicitly food-only, like `IntroPhase` scene slot geometry.
+- Do not reintroduce structured scene hotspots or hard-coded course geometry for
+  introductions; `IntroFrame` renders course cards from the current course data.

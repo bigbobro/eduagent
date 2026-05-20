@@ -23,7 +23,7 @@ objectives: {
 
 Three phases are about learning flow, not three unrelated activities.
 
-- `introduction`: show the scene, name the objects, and provide light sentence input. Do not require the child to speak.
+- `introduction`: introduce the lesson through `sceneCaption` + `narrationHint`; `<IntroFrame>` renders Mochi and a locked PictureCard chip grid. Do not require the child to speak.
 - `interactive`: first practice the target word, then naturally expand into one core short sentence.
 - `reinforcement`: check word comprehension with `pick-word`, and check spoken production with short-sentence `repeat-after-me`.
 
@@ -36,10 +36,8 @@ Codex may use ImageGen for course artwork, but generated images are assets, not 
 - Generate one clean single-subject image per word card, saved under `public/images/<theme>/<cardId>.png`.
 - Do not burn English or Chinese text into generated images.
 - Keep single-card art centered, simple, child-friendly, and visually consistent.
-- The introduction scene must remain `public/images/<theme>/scene.svg`.
-- Build `scene.svg` structurally by embedding the generated card PNGs with `<image href="/images/<theme>/<cardId>.png">`.
-- Wrap every clickable object in a stable hotspot group: `<g id="card-<cardId>">...</g>`.
-- Do not use one non-structured raster scene as the only introduction asset. It is not testable enough for card-level interaction.
+- The introduction phase does not require a scene asset. It uses course text plus card metadata; word-card PNGs are enough.
+- Do not add hotspot-only scene contracts to new courses unless a future task reintroduces structured scene interaction.
 
 ## 4. Required Files
 
@@ -47,7 +45,6 @@ For each new three-phase course:
 
 - `src/data/courses/<courseId>.ts`: one exported `Course` object with `cards`, `objectives.sentences`, `teachingHints`, and `phases`.
 - `public/images/<theme>/<cardId>.png`: one generated or curated single-card image per word card.
-- `public/images/<theme>/scene.svg`: structured introduction scene with `<g id="card-...">` hotspots.
 - Registration in `allCourses` exported from `src/data/courses/index.ts`.
 - `src/data/courses/<courseId>.test.ts`: course-specific integrity checks.
 
@@ -67,8 +64,8 @@ Before a course is considered ready:
 
 - `pnpm exec tsc --noEmit`
 - `pnpm test src/data/courses`
-- Course-specific tests confirm card ids are unique, quiz references are valid, PNG card images exist, `scene.svg` exists, and every card has a `card-<id>` hotspot.
+- Course-specific tests confirm card ids are unique, quiz references are valid, PNG card images exist, and the introduction phase has usable `sceneCaption` / `narrationHint` content.
 - `/api/courses` returns the new course.
-- `/lesson/<courseId>` can enter `introduction` and render the structured scene.
+- `/lesson/<courseId>` can enter `introduction` and render `<IntroFrame>` with Mochi plus the locked card chip grid.
 
 Full lesson-flow smoke testing belongs to the implementation plan for the relevant runtime change.

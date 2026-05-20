@@ -38,14 +38,14 @@ runtime schema library such as Zod.
 Because there is no schema library, runtime validation is explicit:
 
 - API route actions validate required session/course existence and phase values.
-- Course tests validate ids, image files, quiz references, and scene hotspots.
+- Course tests validate ids, image files, quiz references, and introduction text.
 - ASR/TTS proxy message parsing uses guarded JSON parsing and ignores malformed
   non-critical frames.
 
 ## Common Patterns
 
-- Use `Record<Union, Value>` for complete maps such as Bunny mood/pose mappings
-  and Tailwind class maps.
+- Use `Record<Union, Value>` for complete maps such as Cat mood mappings,
+  PictureCard state mappings, and Tailwind class maps.
 - Use explicit return types for exported helpers and public controller methods.
 - Use type-only imports (`import type`) for contracts used only at compile time.
 
