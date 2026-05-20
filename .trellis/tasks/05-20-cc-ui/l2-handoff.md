@@ -31,7 +31,7 @@ Branch: `feature/cc-ui-refresh`
 ## L1 Machine Checks
 
 - `pnpm exec tsc --noEmit`: pass
-- `pnpm test`: pass, 32 files / 153 tests
+- `pnpm test`: pass, 32 files / 154 tests
 - After the Journal artwork fix:
   - `pnpm test src/components/journal/JournalPage.test.tsx src/lib/progress.test.ts tests/api/progress.test.ts`: pass, 3 files / 14 tests
   - `pnpm exec tsc --noEmit`: pass
@@ -39,11 +39,11 @@ Branch: `feature/cc-ui-refresh`
   - `pnpm build`: pass
   - `git diff --check`: pass
 - After the PIN remaining-attempts fix:
-  - `pnpm test src/components/parents/PINGateFrame.test.tsx src/lib/pin.test.ts`: pass, 2 files / 9 tests
+  - `pnpm test src/components/parents/PINGateFrame.test.tsx src/lib/pin.test.ts tests/design-tokens.test.ts`: pass, 3 files / 15 tests
   - `pnpm exec tsc --noEmit`: pass
-  - `pnpm test`: pass, 32 files / 153 tests
+  - `pnpm test`: pass, 32 files / 154 tests
   - `pnpm build`: pass
-  - `pnpm run smoke` with `SMOKE_PORT=59424`: pass
+  - `pnpm run smoke` with `SMOKE_PORT=59425`: pass
   - `git diff --check`: pass
 - `pnpm build`: pass
 - `pnpm run lint`: not a configured lint check yet; it opens Next's ESLint initializer because the repo has no ESLint config or ESLint dependencies.

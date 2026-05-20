@@ -70,5 +70,8 @@ describe('PINGateFrame', () => {
 
     for (const digit of ['0', '0', '0', '0']) fireEvent.click(screen.getByRole('button', { name: `数字${digit}` }));
     expect(await screen.findByText('不对哦,还剩 1 次')).toBeTruthy();
+
+    for (const digit of ['0', '0', '0', '0']) fireEvent.click(screen.getByRole('button', { name: `数字${digit}` }));
+    expect(await screen.findByText(/稍等 \d+ 秒/)).toBeTruthy();
   });
 });

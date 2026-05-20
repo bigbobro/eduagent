@@ -72,6 +72,14 @@ describe('design tokens', () => {
     expect(globals).toContain('--font-mono:');
   });
 
+  it('disables sparkle motion for reduced-motion users', () => {
+    const globals = readFileSync(join(process.cwd(), 'src/app/globals.css'), 'utf8');
+    expect(globals).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(globals).toContain('.magic-sparkle');
+    expect(globals).toContain('animation: none !important');
+    expect(globals).toContain('transform: none !important');
+  });
+
   it('renders and mounts shared SVG defs', () => {
     const markup = renderToStaticMarkup(createElement(SVGDefs));
     const layout = readFileSync(join(process.cwd(), 'src/app/layout.tsx'), 'utf8');

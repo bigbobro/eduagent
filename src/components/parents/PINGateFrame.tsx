@@ -78,8 +78,12 @@ export function PINGateFrame({ onUnlock }: PINGateFrameProps) {
     } else {
       const failCount = recordFail();
       const next = isLockedOut();
-      if (next.locked) setLock(next);
-      else setError(`不对哦,还剩 ${Math.max(0, MAX_FAIL - failCount)} 次`);
+      if (next.locked) {
+        setLock(next);
+        setError(null);
+      } else {
+        setError(`不对哦,还剩 ${Math.max(0, MAX_FAIL - failCount)} 次`);
+      }
     }
   };
 
