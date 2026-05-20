@@ -59,4 +59,16 @@ describe('PINGateFrame', () => {
 
     await waitFor(() => expect(onUnlock).toHaveBeenCalledOnce());
   });
+
+  it('shows remaining attempts before lockout', async () => {
+    await setPin('1234');
+    render(<PINGateFrame onUnlock={() => {}} />);
+
+    expect(await screen.findByText('家长阁楼')).toBeTruthy();
+    for (const digit of ['0', '0', '0', '0']) fireEvent.click(screen.getByRole('button', { name: `数字${digit}` }));
+    expect(await screen.findByText('不对哦,还剩 2 次')).toBeTruthy();
+
+    for (const digit of ['0', '0', '0', '0']) fireEvent.click(screen.getByRole('button', { name: `数字${digit}` }));
+    expect(await screen.findByText('不对哦,还剩 1 次')).toBeTruthy();
+  });
 });

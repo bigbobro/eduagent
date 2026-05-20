@@ -31,12 +31,19 @@ Branch: `feature/cc-ui-refresh`
 ## L1 Machine Checks
 
 - `pnpm exec tsc --noEmit`: pass
-- `pnpm test`: pass, 32 files / 152 tests
+- `pnpm test`: pass, 32 files / 153 tests
 - After the Journal artwork fix:
   - `pnpm test src/components/journal/JournalPage.test.tsx src/lib/progress.test.ts tests/api/progress.test.ts`: pass, 3 files / 14 tests
   - `pnpm exec tsc --noEmit`: pass
   - `pnpm test`: pass, 32 files / 152 tests
   - `pnpm build`: pass
+  - `git diff --check`: pass
+- After the PIN remaining-attempts fix:
+  - `pnpm test src/components/parents/PINGateFrame.test.tsx src/lib/pin.test.ts`: pass, 2 files / 9 tests
+  - `pnpm exec tsc --noEmit`: pass
+  - `pnpm test`: pass, 32 files / 153 tests
+  - `pnpm build`: pass
+  - `pnpm run smoke` with `SMOKE_PORT=59424`: pass
   - `git diff --check`: pass
 - `pnpm build`: pass
 - `pnpm run lint`: not a configured lint check yet; it opens Next's ESLint initializer because the repo has no ESLint config or ESLint dependencies.
@@ -48,7 +55,7 @@ Branch: `feature/cc-ui-refresh`
 - `git grep -l "CourseTheme\|courseTheme\|sceneImage" src/`: no matches
 - `git ls-files src/components/bunny src/components/scene`: no output.
 
-`pnpm run smoke` was not run because it requires starting a second tsx dev server and the sandbox escalation request was rejected by the current usage-limit policy. The required PRD L1 route/API checks above were run against the live dev server on port 3000.
+`pnpm run smoke` now passes when run on an available port (`SMOKE_PORT=59424`). A previous run on `3002` failed because that port was already occupied by an unrelated local `hyperframes preview` process, so it was a false negative.
 
 ## Visual Evidence
 
@@ -56,6 +63,8 @@ Branch: `feature/cc-ui-refresh`
 - `/journal`: `/private/tmp/eduagent-journal-fixed2.png`
 
 During visual review, `/journal` initially showed striped placeholders because `WordMastery` did not carry `imageUrl` from course cards. This is fixed by passing course card artwork through `/api/progress` and into `PictureCard`. A follow-up screenshot also confirmed the decorative Mochi no longer overlaps the rice card.
+
+During HANDOFF §12 audit, the parent PIN gate initially showed a generic wrong-PIN message but not the required remaining-attempt count. This is fixed: the first two wrong attempts now show `不对哦,还剩 2 次` and `不对哦,还剩 1 次`; the third attempt still enters the existing lockout flow.
 
 ## L2 Manual Checklist
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Cat, PaperBg } from '@/components/magic';
-import { hasPin, setPin, verifyPin, recordFail, isLockedOut } from '@/lib/pin';
+import { MAX_FAIL, hasPin, setPin, verifyPin, recordFail, isLockedOut } from '@/lib/pin';
 
 interface PINGateFrameProps {
   onUnlock: () => void;
@@ -76,10 +76,10 @@ export function PINGateFrame({ onUnlock }: PINGateFrameProps) {
     if (ok) {
       onUnlock();
     } else {
-      recordFail();
+      const failCount = recordFail();
       const next = isLockedOut();
       if (next.locked) setLock(next);
-      else setError('不对哦,再试一次');
+      else setError(`不对哦,还剩 ${Math.max(0, MAX_FAIL - failCount)} 次`);
     }
   };
 
@@ -136,4 +136,3 @@ function KeyButton({
     </button>
   );
 }
-
