@@ -77,6 +77,12 @@ During HANDOFF §12 audit, the parent PIN gate initially showed a generic wrong-
 - [ ] `/parents` first-time 4-digit PIN setup unlocks the stats panel.
 - [ ] `prefers-reduced-motion` disables sparkle motion.
 
+## Remaining Definition of Done
+
+- Human L2 acceptance still needs explicit confirmation from the reviewer.
+- After L2 passes, merge `feature/cc-ui-refresh` into `main`.
+- After merge, archive the Trellis task and record the session journal.
+
 ## Notes For Reviewer
 
 - The rice asset was regenerated once because the first image looked like a single grain and was weak for child recognition; the installed version is a small bowl of cooked rice.
