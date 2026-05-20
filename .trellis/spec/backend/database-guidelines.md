@@ -40,8 +40,69 @@ TypeScript result objects, as `src/lib/stats.ts` does with aliases such as
 - Keep aggregation functions pure and injectable. `buildProgressSnapshot(db,
   courses)` and `buildSessionList(db, courses, limit)` accept the DB and course
   registry as parameters, which lets tests pass an in-memory database.
+- Preserve course-card presentation fields in progress aggregators. Journal and
+  done-page UI render `WordMastery` through `PictureCard`, so
+  `buildProgressSnapshot(db, courses)` must copy `imageUrl` from each course
+  word card instead of returning only mastery counters.
 - Clamp user-controlled query params in the route before calling aggregators.
   `src/app/api/sessions/route.ts` clamps `limit` to `1..50`.
+
+## Progress Snapshot Artwork Contract
+
+### 1. Scope / Trigger
+
+- Trigger: changes to `/api/progress`, `src/lib/progress.ts`, or
+  `src/types/progress.ts` that alter `WordMastery`.
+- Reason: `/journal` depends on the progress response for both mastery data and
+  artwork; dropping `imageUrl` makes collected cards render placeholder stripes.
+
+### 2. Signatures
+
+- `buildProgressSnapshot(db: Database, courses: Course[]): ProgressSnapshot`
+- `GET /api/progress -> ProgressSnapshot`
+
+### 3. Contracts
+
+- `WordMastery.word`: `WordCard.english`
+- `WordMastery.zh`: `WordCard.chinese`
+- `WordMastery.imageUrl`: `WordCard.imageUrl`
+- `attempts`, `correct`, `masteryStars`, and `lastPracticed` remain derived
+  from `word_performance` joined through `lesson_logs`.
+
+### 4. Validation & Error Matrix
+
+- Empty DB -> every course word still appears with `imageUrl`, `attempts=0`,
+  `correct=0`, `masteryStars=0`, and `lastPracticed=null`.
+- Unknown DB word -> ignored unless it exists in the course registry.
+- Missing course card artwork -> caught by course data tests, not by the
+  progress aggregator.
+
+### 5. Good/Base/Bad Cases
+
+- Good: mastered `banana` returns counters plus `/images/food/banana.png`.
+- Base: unattempted `apple` returns zero counters plus `/images/food/apple.png`.
+- Bad: returning only `word` and `zh` forces Journal cards into placeholder art.
+
+### 6. Tests Required
+
+- `src/lib/progress.test.ts` must assert that `imageUrl` survives from course
+  cards into `ProgressSnapshot.words`.
+- Component tests that render journal word cards should assert an accessible
+  image slot exists for at least one collected word.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+return { word: c.english, zh: c.chinese, attempts, correct };
+```
+
+#### Correct
+
+```ts
+return { word: c.english, zh: c.chinese, imageUrl: c.imageUrl, attempts, correct };
+```
 
 ## Migrations
 
