@@ -31,7 +31,7 @@ Branch: `feature/cc-ui-refresh`
 ## L1 Machine Checks
 
 - `pnpm exec tsc --noEmit`: pass
-- `pnpm test`: pass, 32 files / 154 tests
+- `pnpm test`: pass, 35 files / 159 tests
 - After the Journal artwork fix:
   - `pnpm test src/components/journal/JournalPage.test.tsx src/lib/progress.test.ts tests/api/progress.test.ts`: pass, 3 files / 14 tests
   - `pnpm exec tsc --noEmit`: pass
@@ -45,6 +45,13 @@ Branch: `feature/cc-ui-refresh`
   - `pnpm build`: pass
   - `pnpm run smoke` with `SMOKE_PORT=59425`: pass
   - `git diff --check`: pass
+- After the L2 regression coverage pass:
+  - `pnpm test src/components/lesson/QuizPickWordFrame.test.tsx src/components/lesson/ReinforceFrame.test.tsx src/components/lesson/DoneCelebrateFrame.test.tsx src/app/parents/ParentsClient.test.tsx`: pass, 4 files / 7 tests
+  - `pnpm exec tsc --noEmit`: pass
+  - `pnpm test`: pass, 35 files / 159 tests
+  - `pnpm build`: pass
+  - `pnpm run smoke` with `SMOKE_PORT=59426`: pass
+  - `git diff --check`: pass
 - `pnpm build`: pass
 - `pnpm run lint`: not a configured lint check yet; it opens Next's ESLint initializer because the repo has no ESLint config or ESLint dependencies.
 - `pnpm run dev`: pass on `http://localhost:3000`
@@ -55,7 +62,7 @@ Branch: `feature/cc-ui-refresh`
 - `git grep -l "CourseTheme\|courseTheme\|sceneImage" src/`: no matches
 - `git ls-files src/components/bunny src/components/scene`: no output.
 
-`pnpm run smoke` now passes when run on an available port (`SMOKE_PORT=59424`). A previous run on `3002` failed because that port was already occupied by an unrelated local `hyperframes preview` process, so it was a false negative.
+`pnpm run smoke` now passes when run on an available port (`SMOKE_PORT=59426`). A previous run on `3002` failed because that port was already occupied by an unrelated local `hyperframes preview` process, so it was a false negative.
 
 ## Visual Evidence
 
@@ -65,6 +72,8 @@ Branch: `feature/cc-ui-refresh`
 During visual review, `/journal` initially showed striped placeholders because `WordMastery` did not carry `imageUrl` from course cards. This is fixed by passing course card artwork through `/api/progress` and into `PictureCard`. A follow-up screenshot also confirmed the decorative Mochi no longer overlaps the rice card.
 
 During HANDOFF §12 audit, the parent PIN gate initially showed a generic wrong-PIN message but not the required remaining-attempt count. This is fixed: the first two wrong attempts now show `不对哦,还剩 2 次` and `不对哦,还剩 1 次`; the third attempt still enters the existing lockout flow.
+
+Additional L2 regression tests now cover quiz correct/wrong visual states, Reinforce empty-vs-filled color state, Done page 5-star/data/two-CTA rendering, and first-time `/parents` PIN setup flowing into the stats panel.
 
 ## L2 Manual Checklist
 
