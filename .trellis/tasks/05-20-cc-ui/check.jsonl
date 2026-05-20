@@ -1,0 +1,8 @@
+{"file": "design/2026-05-redesign/HANDOFF.md", "reason": "§5 PictureCard props 表、§5.3 状态视觉差异表、§6 各屏数据形状、§12 视觉验收清单 12 条 —— 检查阶段对照此文档逐项核对。"}
+{"file": ".trellis/tasks/05-20-cc-ui/prd.md", "reason": "本任务 PRD：7 项 brainstorm 决策 + Acceptance Criteria L1/L2 + Definition of Done + Out of Scope。检查阶段比对实现是否覆盖所有 Requirements、是否越界做了 Out of Scope 的事。"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "L1 自检前对照：lint / typecheck / 测试 / 命名 / 复用基线。"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "验证 theme → tone、CourseTheme 删除、sceneImage 删除是否干净（git grep 命中清零）。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "PictureCard / Cat / Frame 组件实现是否符合规范（props 设计、可访问性、reduced-motion 行为）。"}
+{"file": "docs/course-authoring-standard.md", "reason": "检查本次任务是否同步更新了 §3 / §4 / §5 / §6 中关于 scene.svg / hotspot 的描述。"}
+{"file": "docs/architecture.md", "reason": "检查前端架构 living doc 是否同步更新（CLAUDE.md 强制要求）。"}
+{"file": "CLAUDE.md", "reason": "终检：文档同步、凭据规则、自验证、提交风格、删除旧组件物理彻底。"}
