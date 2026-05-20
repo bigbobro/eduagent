@@ -44,7 +44,7 @@ describe('pin', () => {
 
   it('hash is not plaintext', async () => {
     await setPin('1234');
-    const raw = localStorage.getItem('bunny.parents.pin')!;
+    const raw = localStorage.getItem('mochi.parents.pin')!;
     expect(raw).not.toContain('1234');
     expect(raw.length).toBeGreaterThan(20);
   });

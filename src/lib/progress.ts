@@ -61,7 +61,7 @@ export function buildProgressSnapshot(db: Database, courses: Course[]): Progress
     return {
       courseId: course.id,
       courseTitle: course.title,
-      courseTheme: course.theme,
+      courseTone: course.tone,
       totalWords: words.length,
       masteredWords: words.filter((w) => w.masteryStars === 3).length,
       words,

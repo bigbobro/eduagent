@@ -1,7 +1,7 @@
-const KEY_PIN = 'bunny.parents.pin';
-const KEY_FAIL = 'bunny.parents.failcount';
-const KEY_LOCK = 'bunny.parents.lockedUntil';
-const SALT = 'bunny-attic-2026';
+const KEY_PIN = 'mochi.parents.pin';
+const KEY_FAIL = 'mochi.parents.failcount';
+const KEY_LOCK = 'mochi.parents.lockedUntil';
+const SALT = 'mochi-loft-2026';
 const MAX_FAIL = 3;
 const LOCKOUT_MS = 30_000;
 

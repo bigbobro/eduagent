@@ -1,4 +1,4 @@
-import type { CourseTheme } from './course';
+import type { PaletteKey } from './course';
 
 export interface WordMastery {
   word: string;
@@ -13,7 +13,7 @@ export interface WordMastery {
 export interface CourseProgress {
   courseId: string;
   courseTitle: string;
-  courseTheme: CourseTheme;
+  courseTone: PaletteKey;
   totalWords: number;
   masteredWords: number;
   words: WordMastery[];

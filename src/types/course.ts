@@ -17,12 +17,11 @@ export interface TeachingHints {
   closing: string;
 }
 
-export type CourseTheme = 'transport' | 'time-numbers' | 'animals' | 'food' | 'colors';
+export type PaletteKey = 'peach' | 'butter' | 'mint' | 'sky' | 'lilac';
 
 export type PhaseName = 'intro' | 'interactive' | 'reinforcement' | 'done';
 
 export interface IntroductionPhase {
-  sceneImage: string;
   sceneCaption?: string;
   narrationHint?: string;
 }
@@ -61,7 +60,7 @@ export interface Course {
   title: string;
   description: string;
   targetAge: [number, number];
-  theme: CourseTheme;
+  tone: PaletteKey;
   cards: WordCard[];
   objectives: {
     sentences: string[];

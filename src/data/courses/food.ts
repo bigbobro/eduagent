@@ -5,7 +5,7 @@ export const foodCourse: Course = {
   title: '食物 Food',
   description: '学习常见食物的英文名称',
   targetAge: [3, 6],
-  theme: 'food',
+  tone: 'peach',
   cards: [
     { id: 'apple', english: 'apple', chinese: '苹果', imageUrl: '/images/food/apple.png', kind: 'word', drillParts: ['app', 'le'], difficulty: 1, tags: ['food'] },
     { id: 'banana', english: 'banana', chinese: '香蕉', imageUrl: '/images/food/banana.png', kind: 'word', drillParts: ['ba', 'na', 'na'], difficulty: 1, tags: ['food'] },
@@ -26,7 +26,6 @@ export const foodCourse: Course = {
   },
   phases: {
     introduction: {
-      sceneImage: '/images/food/scene.svg',
       sceneCaption: '餐桌上摆着各种食物',
       narrationHint: '逐个指认餐桌上的食物,语气温和不催促,每张说完停 1-2 秒让孩子看图。不要问孩子能不能说出来。',
     },

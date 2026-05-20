@@ -10,7 +10,8 @@ describe('food course authoring standard', () => {
 
   it('defines a complete phased lesson', () => {
     expect(foodCourse.phases).toBeDefined();
-    expect(foodCourse.phases.introduction.sceneImage).toBe('/images/food/scene.svg');
+    expect(foodCourse.tone).toBe('peach');
+    expect(foodCourse.phases.introduction.sceneCaption).toContain('食物');
     expect(foodCourse.phases.reinforcement.quizzes.length).toBe(5);
   });
 
@@ -45,13 +46,8 @@ describe('food course authoring standard', () => {
     }
   });
 
-  it('keeps a structured scene.svg with one hotspot per card', () => {
-    const scene = foodCourse.phases.introduction.sceneImage;
-    expect(scene).toBe('/images/food/scene.svg');
-    const svg = fs.readFileSync(path.join(publicDir, scene!), 'utf8');
-    for (const id of Array.from(cardIds)) {
-      expect(svg).toContain(`id="card-${id}"`);
-      expect(svg).toContain(`/images/food/${id}.png`);
-    }
+  it('does not require an introduction scene asset field', () => {
+    const removedField = ['scene', 'Image'].join('');
+    expect(removedField in foodCourse.phases.introduction).toBe(false);
   });
 });

@@ -8,7 +8,7 @@ describe('Course phase schema', () => {
       title: 'Food',
       description: '',
       targetAge: [3, 6],
-      theme: 'food',
+      tone: 'peach',
       cards: [],
       objectives: { sentences: ['This is a ___.'] },
       teachingHints: {
@@ -19,13 +19,14 @@ describe('Course phase schema', () => {
         closing: '',
       },
       phases: {
-        introduction: { sceneImage: '/images/food/scene.svg' },
+        introduction: { sceneCaption: '今天要认识食物' },
         interactive: {},
         reinforcement: { quizzes: [] },
       },
     };
 
-    expect(course.phases.introduction.sceneImage).toBe('/images/food/scene.svg');
+    expect(course.tone).toBe('peach');
+    expect(course.phases.introduction.sceneCaption).toBe('今天要认识食物');
   });
 
   it('discriminates quiz variants', () => {
