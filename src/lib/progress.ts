@@ -52,6 +52,7 @@ export function buildProgressSnapshot(db: Database, courses: Course[]): Progress
         return {
           word: c.english,
           zh: c.chinese,
+          imageUrl: c.imageUrl,
           attempts,
           correct,
           masteryStars: masteryStarsFromRatio(correct, attempts),

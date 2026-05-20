@@ -11,8 +11,8 @@ const fixtureCourses: Course[] = [
     targetAge: [3, 6],
     tone: 'peach',
     cards: [
-      { id: 'apple', english: 'apple', chinese: '苹果', imageUrl: '', kind: 'word', drillParts: ['app', 'le'] },
-      { id: 'milk', english: 'milk', chinese: '牛奶', imageUrl: '', kind: 'word', drillParts: ['milk'] },
+      { id: 'apple', english: 'apple', chinese: '苹果', imageUrl: '/images/food/apple.png', kind: 'word', drillParts: ['app', 'le'] },
+      { id: 'milk', english: 'milk', chinese: '牛奶', imageUrl: '/images/food/milk.png', kind: 'word', drillParts: ['milk'] },
     ],
     objectives: { sentences: [] },
     teachingHints: { opening: '', reviewCardIds: [], newCardIds: [], quizQuestions: [], closing: '' },
@@ -59,6 +59,7 @@ describe('buildProgressSnapshot', () => {
     expect(snap.courses[0].courseTone).toBe('peach');
     expect(snap.courses[0].masteredWords).toBe(0);
     expect(snap.courses[0].words.every((w) => w.masteryStars === 0 && w.lastPracticed === null)).toBe(true);
+    expect(snap.courses[0].words.map((w) => w.imageUrl)).toEqual(['/images/food/apple.png', '/images/food/milk.png']);
   });
 
   it('single lesson with partial correct → stars derived', () => {

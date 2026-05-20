@@ -67,6 +67,9 @@ export function JournalPage({ snapshot, error = false, onBack, onRetry }: Journa
                   {snapshot.totalWordsMastered} 个掌握词
                 </div>
               </div>
+              <div className="absolute bottom-7 right-8 rotate-[-4deg]">
+                <Cat size={120} mood="happy" />
+              </div>
             </BookPage>
 
             <BookPage side="right">
@@ -86,12 +89,16 @@ export function JournalPage({ snapshot, error = false, onBack, onRetry }: Journa
                     state={word.masteryStars > 0 ? 'correct' : 'idle'}
                     dimmed={word.masteryStars === 0}
                     badgeKind={word.masteryStars === 0 ? 'locked' : undefined}
-                    card={{ kind: 'word', en: word.word, zh: word.zh, tone: activeChapter.courseTone }}
+                    card={{
+                      kind: 'word',
+                      en: word.word,
+                      zh: word.zh,
+                      imageUrl: word.imageUrl,
+                      emoji: word.emoji,
+                      tone: activeChapter.courseTone,
+                    }}
                   />
                 ))}
-              </div>
-              <div className="absolute bottom-5 right-7 rotate-[-4deg]">
-                <Cat size={120} mood="happy" />
               </div>
             </BookPage>
           </div>
@@ -130,4 +137,3 @@ function ChapterRow({ course, active }: { course: CourseProgress; active: boolea
     </div>
   );
 }
-

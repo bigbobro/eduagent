@@ -3,6 +3,7 @@ import type { PaletteKey } from './course';
 export interface WordMastery {
   word: string;
   zh: string;
+  imageUrl?: string;
   emoji?: string;
   attempts: number;
   correct: number;

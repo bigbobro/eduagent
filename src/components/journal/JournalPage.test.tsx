@@ -14,8 +14,8 @@ const snapshot: ProgressSnapshot = {
       totalWords: 2,
       masteredWords: 1,
       words: [
-        { word: 'apple', zh: '苹果', attempts: 2, correct: 2, masteryStars: 2, lastPracticed: '2026-05-20T00:00:00.000Z' },
-        { word: 'milk', zh: '牛奶', attempts: 0, correct: 0, masteryStars: 0, lastPracticed: null },
+        { word: 'apple', zh: '苹果', imageUrl: '/images/food/apple.png', attempts: 2, correct: 2, masteryStars: 2, lastPracticed: '2026-05-20T00:00:00.000Z' },
+        { word: 'milk', zh: '牛奶', imageUrl: '/images/food/milk.png', attempts: 0, correct: 0, masteryStars: 0, lastPracticed: null },
       ],
     },
   ],
@@ -29,6 +29,7 @@ describe('JournalPage', () => {
     expect(screen.getAllByText('食物').length).toBeGreaterThan(0);
     expect(screen.getByText('apple')).toBeTruthy();
     expect(screen.getByText('milk')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'apple' })).toBeTruthy();
   });
 
   it('renders retry state when progress fetch fails', () => {
