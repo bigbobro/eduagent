@@ -1,0 +1,504 @@
+{
+  "_meta": {
+    "schema_version": "1.0.0",
+    "generated_at": "2026-05-16",
+    "source_of_truth": "docs/architecture.md",
+    "intended_audience": "Agents and tooling that need to load EduAgent's architecture in a single fetch without re-reading the full living doc.",
+    "regenerate_when": [
+      "any change to docs/architecture.md",
+      "module added/removed/renamed under src/",
+      "Doubao or MiMo protocol switch",
+      "LessonController or PhasedLessonController state-machine edit",
+      "performance baseline re-run"
+    ],
+    "field_docs": {
+      "project.stack[]": "Runtime / framework / DB / library names that materially affect how code is structured.",
+      "project.entry_points": "Files an agent should open first to bootstrap understanding.",
+      "topology.nodes[].kind": "client | server | upstream | store",
+      "topology.nodes[].tier": "Logical lane in the topology diagram; one of browser, server, upstream, store.",
+      "topology.edges[].protocol": "ws | ws_binary | sse | http | local_fs",
+      "topology.edges[].endpoint": "URL path or upstream identifier carrying this edge.",
+      "modules[].path": "Repo-relative path to the file.",
+      "modules[].layer": "browser | server | shared | worklet",
+      "modules[].category": "infra | voice | agent | audio | lesson_ui | scene_ui | ui_atom | course_data | api_route | db | hook | lib_util | worklet | type | script",
+      "modules[].role": "One-sentence responsibility.",
+      "modules[].critical": "If true, this is on the hot path for voice latency or correctness; touching it requires architecture.md sync.",
+      "state_machines.*.states[].is_initial": "true for the entry state",
+      "state_machines.*.states[].is_terminal": "true if the FSM exits here without further transitions",
+      "state_machines.*.transitions[].kind": "manual_trigger | upstream_event | timer | rule_evaluation",
+      "data_flows[].steps[].actor": "Which node from topology.nodes is acting in this step.",
+      "design_decisions[].category": "performance | reliability | simplicity | safety | ux | scope",
+      "known_issues[].severity": "high | medium | low",
+      "performance_baseline.metrics[].status": "met | near | exceeded_target",
+      "evolution[].kind": "feature | refactor | docs | infra | security",
+      "protocols.*[].severity": "must_know | gotcha | nice_to_know"
+    }
+  },
+
+  "project": {
+    "name": "EduAgent",
+    "tagline": "Children's English teaching Agent with streaming voice + canvas interaction.",
+    "primary_user_count": 1,
+    "guiding_principle": "At single-user stage, prefer authoring more lessons over refactoring architecture. Only invest in architecture when a small change directly unblocks the learning loop.",
+    "stack": [
+      "Next.js 14 (App Router) on a custom Node server",
+      "TypeScript 5",
+      "Tailwind CSS 3.4",
+      "Framer Motion 12",
+      "ws 8 (server-side WebSocket)",
+      "tsx (dev/start runner — Next dev does not handle WS upgrade)",
+      "better-sqlite3 (lesson logs)",
+      "vitest + jsdom + @testing-library/react"
+    ],
+    "entry_points": {
+      "live_doc": "docs/architecture.md",
+      "project_rules": "CLAUDE.md",
+      "custom_server": "server.ts",
+      "first_module_to_read": "src/lib/voice/lesson-controller.ts",
+      "first_route_to_open": "src/app/page.tsx",
+      "course_to_imitate": "src/data/courses/food.ts",
+      "course_authoring_standard": "docs/course-authoring-standard.md",
+      "todo_backlog": "docs/TODO.md",
+      "performance_baseline": "docs/voice-benchmarks.md"
+    },
+    "constraints": [
+      {
+        "id": "secrets_server_only",
+        "rule": "Doubao / MiMo credentials never carry NEXT_PUBLIC_ prefix; any such PR is a hard reject.",
+        "rationale": "Server-only secret boundary; client must not reach upstream APIs directly."
+      },
+      {
+        "id": "push_to_talk_only",
+        "rule": "Single interaction is push-to-talk via spacebar; no long/short press distinction; no barge-in while speaking.",
+        "rationale": "Simpler than canceling inflight PCM mid-flight; product can ship without barge-in."
+      },
+      {
+        "id": "tts_long_conn_asr_per_turn",
+        "rule": "TTS WebSocket is reused across sessions; ASR opens a fresh upstream session per turn.",
+        "rationale": "TTS handshake costs ~3.7s, so amortize it; ASR sessions are short-lived and per-utterance by protocol."
+      },
+      {
+        "id": "voice_mock_offline",
+        "rule": "VOICE_MOCK=true bypasses Doubao + MiMo entirely so the full pipeline works offline / in CI.",
+        "rationale": "Local dev and CI cannot depend on upstream availability."
+      },
+      {
+        "id": "docs_sync_in_commit",
+        "rule": "If a change affects module responsibility, data flow, protocol adapter, state machine, or perf decision, the same commit must update docs/architecture.md.",
+        "rationale": "Living doc only stays accurate when sync is part of the change, not a follow-up task."
+      },
+      {
+        "id": "no_real_secrets_in_docs",
+        "rule": "Real credentials must never appear in README / spec / plan / CLAUDE.md / architecture / TODO / benchmarks / commit / PR. Only placeholders.",
+        "rationale": "Even private repos can leak via mirrors; rotation cost dwarfs care cost."
+      }
+    ],
+    "env_vars": [
+      { "name": "MIMO_BASE_URL", "required": true, "purpose": "MiMo LLM endpoint (https://token-plan-cn.xiaomimimo.com/v1)" },
+      { "name": "MIMO_API_KEY", "required": true, "purpose": "MiMo bearer key — server only" },
+      { "name": "DOUBAO_APP_ID", "required": true, "purpose": "TTS app id (X-Api-App-Id)" },
+      { "name": "DOUBAO_ACCESS_KEY", "required": true, "purpose": "Shared access key for ASR + TTS" },
+      { "name": "DOUBAO_ASR_RESOURCE_ID", "required": true, "purpose": "Big-model async ASR resource id" },
+      { "name": "DOUBAO_TTS_RESOURCE_ID", "required": true, "purpose": "Bidirectional streaming TTS resource id" },
+      { "name": "DOUBAO_TTS_DEFAULT_SPEAKER", "required": true, "purpose": "Default voice (current: Tina老师2.0)" },
+      { "name": "VOICE_MOCK", "required": false, "purpose": "When 'true', short-circuits voice stack to mocks for offline dev / CI" }
+    ]
+  },
+
+  "topology": {
+    "description": "Three lanes: browser hosts the user-facing pipeline; the custom Next.js server brokers WebSockets and SSE; upstream are the Doubao + MiMo + local SQLite services.",
+    "nodes": [
+      { "id": "browser_worklet", "kind": "client", "tier": "browser", "label": "AudioWorklet pcm-recorder", "detail": "16kHz Float32 → Int16, 200ms chunks, flushes remainder on disconnect" },
+      { "id": "browser_recorder", "kind": "client", "tier": "browser", "label": "Recorder + HoldToTalk", "detail": "Singleton AudioContext + worklet; prewarmRecorder runs at startLesson" },
+      { "id": "browser_asr_client", "kind": "client", "tier": "browser", "label": "AsrClient", "detail": "Per-turn WebSocket; emits partial/final; sends {type:'finish'} control frame" },
+      { "id": "browser_tts_client", "kind": "client", "tier": "browser", "label": "TtsClient", "detail": "Long-lived WebSocket; multiplexes startSession/text-chunk/finishSession/cancel" },
+      { "id": "browser_pcm_player", "kind": "client", "tier": "browser", "label": "PcmPlayer", "detail": "24kHz queued PCM playback; stop() silences immediately" },
+      { "id": "browser_lesson_controller", "kind": "client", "tier": "browser", "label": "LessonController", "detail": "7-state FSM orchestrating ASR + SSE + TTS" },
+      { "id": "browser_phased_controller", "kind": "client", "tier": "browser", "label": "PhasedLessonController", "detail": "Outer phase FSM (intro / interactive / reinforcement / done) wrapping LessonController" },
+      { "id": "browser_phased_view", "kind": "client", "tier": "browser", "label": "PhasedLessonView UI", "detail": "React surface; routes phase → IntroPhase | InteractivePhase | ReinforcePhase | Done" },
+
+      { "id": "server_root", "kind": "server", "tier": "server", "label": "server.ts", "detail": "Custom Next.js server; routes WS upgrade for /api/voice/asr and /api/voice/tts" },
+      { "id": "server_asr_proxy", "kind": "server", "tier": "server", "label": "ASR proxy", "detail": "Per-turn upstream session; buffers PCM during handshake; injects targetWords hotwords" },
+      { "id": "server_tts_proxy", "kind": "server", "tier": "server", "label": "TTS proxy", "detail": "Long-conn reuse; one StartConnection per WS, many sessions" },
+      { "id": "server_chat_route", "kind": "server", "tier": "server", "label": "/api/chat (SSE)", "detail": "Orchestrator + SpeechExtractor; emits speech-delta / actions / done" },
+      { "id": "server_courses_api", "kind": "server", "tier": "server", "label": "/api/courses /progress /sessions /stats", "detail": "Read-only aggregation endpoints for home / journal / parents" },
+
+      { "id": "upstream_doubao_asr", "kind": "upstream", "tier": "upstream", "label": "Doubao streaming ASR", "detail": "bigmodel_async; V3 binary; show_utterances + result_type=full + enable_ddc=false" },
+      { "id": "upstream_doubao_tts", "kind": "upstream", "tier": "upstream", "label": "Doubao streaming TTS", "detail": "seed-tts-2.0 + Tina老师2.0; bidirectional; codec flag locked to 0x04" },
+      { "id": "upstream_mimo", "kind": "upstream", "tier": "upstream", "label": "MiMo LLM", "detail": "mimo-v2.5-pro via /v1/chat/completions; response_format: json_object" },
+
+      { "id": "store_sqlite", "kind": "store", "tier": "store", "label": "SQLite", "detail": "better-sqlite3; tables: lessons, turns, word_performance" }
+    ],
+    "edges": [
+      { "from": "browser_worklet", "to": "browser_recorder", "protocol": "messageport", "payload": "Int16 PCM 200ms" },
+      { "from": "browser_recorder", "to": "browser_asr_client", "protocol": "callback", "payload": "onChunk(pcm)" },
+      { "from": "browser_asr_client", "to": "server_asr_proxy", "protocol": "ws", "endpoint": "/api/voice/asr?courseId&targetWords&cardId" },
+      { "from": "server_asr_proxy", "to": "upstream_doubao_asr", "protocol": "ws_binary", "endpoint": "Doubao bigmodel_async ASR" },
+      { "from": "browser_lesson_controller", "to": "server_chat_route", "protocol": "http", "endpoint": "POST /api/chat" },
+      { "from": "server_chat_route", "to": "upstream_mimo", "protocol": "http", "endpoint": "MiMo /v1/chat/completions" },
+      { "from": "server_chat_route", "to": "browser_lesson_controller", "protocol": "sse", "endpoint": "/api/chat (stream body)", "payload": "speech-delta / actions / token_usage / done" },
+      { "from": "browser_tts_client", "to": "server_tts_proxy", "protocol": "ws", "endpoint": "/api/voice/tts" },
+      { "from": "server_tts_proxy", "to": "upstream_doubao_tts", "protocol": "ws_binary", "endpoint": "Doubao TTS bidirectional" },
+      { "from": "upstream_doubao_tts", "to": "browser_pcm_player", "protocol": "ws_binary", "payload": "24kHz PCM frames via server passthrough" },
+      { "from": "server_chat_route", "to": "store_sqlite", "protocol": "local_fs", "payload": "lessons / turns / word_performance" },
+      { "from": "server_courses_api", "to": "store_sqlite", "protocol": "local_fs", "payload": "aggregation reads" }
+    ]
+  },
+
+  "modules": [
+    { "path": "server.ts", "layer": "server", "category": "infra", "role": "Custom Next.js server; routes WS upgrade for ASR / TTS, delegates HTTP to Next.", "critical": true },
+    { "path": "src/lib/init.ts", "layer": "server", "category": "infra", "role": "Startup env validation (DOUBAO_*, MIMO_*); skipped when VOICE_MOCK=true.", "critical": false },
+    { "path": "src/lib/logger.ts", "layer": "shared", "category": "lib_util", "role": "Structured logging shim used across server modules.", "critical": false },
+
+    { "path": "src/lib/voice/doubao-codec.ts", "layer": "shared", "category": "voice", "role": "Doubao binary protocol encode/decode shared by ASR + TTS.", "critical": true },
+    { "path": "src/lib/voice/asr-proxy.ts", "layer": "server", "category": "voice", "role": "Server-side ASR WS proxy: PCM buffer during handshake, finish cache, hotword injection from targetWords.", "critical": true },
+    { "path": "src/lib/voice/tts-proxy.ts", "layer": "server", "category": "voice", "role": "Server-side TTS WS proxy with long-connection reuse (one StartConnection, many sessions).", "critical": true },
+    { "path": "src/lib/voice/asr-client.ts", "layer": "browser", "category": "voice", "role": "Browser ASR WS wrapper; finish() control-frame so upstream final lands before close.", "critical": true },
+    { "path": "src/lib/voice/tts-client.ts", "layer": "browser", "category": "voice", "role": "Browser TTS WS wrapper; forwards startSession / text-chunk / finishSession / cancel.", "critical": true },
+    { "path": "src/lib/voice/lesson-controller.ts", "layer": "browser", "category": "voice", "role": "Browser orchestrator — 7-state FSM that unifies ASR + SSE + TTS for one turn.", "critical": true },
+    { "path": "src/lib/voice/phased-lesson-controller.ts", "layer": "browser", "category": "voice", "role": "Outer phase FSM wrapping LessonController; rules drive intro → interactive → reinforcement → done.", "critical": true },
+
+    { "path": "src/lib/agent/orchestrator.ts", "layer": "server", "category": "agent", "role": "Wraps streamUserInput into an SSE ReadableStream for /api/chat.", "critical": true },
+    { "path": "src/lib/agent/session.ts", "layer": "server", "category": "agent", "role": "One LLM turn: word-attempt judgment → history fetch → streamLLM → chunk drain → usage record.", "critical": true },
+    { "path": "src/lib/agent/speech-extractor.ts", "layer": "server", "category": "agent", "role": "Streaming JSON parser that emits 'speech' field value as it appears; emits delta on the fly.", "critical": true },
+    { "path": "src/lib/agent/memory.ts", "layer": "server", "category": "agent", "role": "Classroom memory: word hits, interest signals, turn history, per-card attempt judgment.", "critical": true },
+    { "path": "src/lib/agent/prompt.ts", "layer": "server", "category": "agent", "role": "System prompt builder; includes learned-words summary and on-failure strategy switch.", "critical": true },
+    { "path": "src/lib/mimo/llm.ts", "layer": "server", "category": "agent", "role": "MiMo client; streamLLM async-generates token delta and final usage.", "critical": true },
+
+    { "path": "src/lib/audio/recorder.ts", "layer": "browser", "category": "audio", "role": "Singleton mic + AudioContext + worklet module; prewarmRecorder primes mic at startLesson.", "critical": true },
+    { "path": "src/lib/audio/pcm-player.ts", "layer": "browser", "category": "audio", "role": "Queued 24kHz PCM player; stop() silences immediately.", "critical": true },
+    { "path": "public/worklets/pcm-recorder.worklet.js", "layer": "worklet", "category": "worklet", "role": "16kHz Float32 → Int16 quantization, 200ms packets, supports flush of trailing partial buffer.", "critical": true },
+
+    { "path": "src/data/courses/food.ts", "layer": "shared", "category": "course_data", "role": "Sole visible course; food three-phase reference course.", "critical": false },
+    { "path": "src/data/courses/index.ts", "layer": "shared", "category": "course_data", "role": "Standard course registry; exports allCourses / getCourseById.", "critical": false },
+    { "path": "src/types/course.ts", "layer": "shared", "category": "type", "role": "Course / Card / Phase type definitions; phases is now required.", "critical": false },
+
+    { "path": "src/components/lesson/PhasedLessonView.tsx", "layer": "browser", "category": "lesson_ui", "role": "Top-level lesson UI; switches by currentPhase between Intro / Interactive / Reinforce / Done.", "critical": true },
+    { "path": "src/components/lesson/IntroPhase.tsx", "layer": "browser", "category": "lesson_ui", "role": "Theme intro: structured scene SVG with hotspot tap-explain.", "critical": false },
+    { "path": "src/components/lesson/InteractivePhase.tsx", "layer": "browser", "category": "lesson_ui", "role": "AI conversation: reuses WordBook / Bunny / SubtitleBar / BloomButton over LessonController.", "critical": true },
+    { "path": "src/components/lesson/ReinforcePhase.tsx", "layer": "browser", "category": "lesson_ui", "role": "Reinforcement: chains pick-word / repeat-after-me quizzes.", "critical": false },
+    { "path": "src/components/lesson/QuizPickWord.tsx", "layer": "browser", "category": "lesson_ui", "role": "Quiz: hear prompt, pick the right picture.", "critical": false },
+    { "path": "src/components/lesson/QuizRepeatAfterMe.tsx", "layer": "browser", "category": "lesson_ui", "role": "Quiz: repeat the phrase; ASR final containing the target word counts as correct.", "critical": false },
+    { "path": "src/components/lesson/BloomButton.tsx", "layer": "browser", "category": "lesson_ui", "role": "Hold-to-talk button: pointer capture + 5-petal SVG (blooms when active).", "critical": false },
+    { "path": "src/components/lesson/WordBook.tsx", "layer": "browser", "category": "lesson_ui", "role": "Tabletop picture book; warmpaper + framed shadow; AnimatePresence card swap.", "critical": false },
+    { "path": "src/components/lesson/SubtitleBar.tsx", "layer": "browser", "category": "lesson_ui", "role": "Subtitle v2; bunny tones; AI-speaking bunny-pink pulse dot.", "critical": false },
+
+    { "path": "src/components/bunny/Bunny.tsx", "layer": "browser", "category": "scene_ui", "role": "Single full-body Bunny; 5 poses × 4 moods; styled-jsx animations.", "critical": false },
+    { "path": "src/components/scene/SceneFrame.tsx", "layer": "browser", "category": "scene_ui", "role": "5-variant scene shell with enter/leave animations (enterFrom controls transition).", "critical": false },
+    { "path": "src/components/scene/YardScene.tsx", "layer": "browser", "category": "scene_ui", "role": "Yard SVG background.", "critical": false },
+    { "path": "src/components/scene/CabinScene.tsx", "layer": "browser", "category": "scene_ui", "role": "Cabin SVG background.", "critical": false },
+    { "path": "src/components/scene/GrassScene.tsx", "layer": "browser", "category": "scene_ui", "role": "Grass SVG background.", "critical": false },
+    { "path": "src/components/scene/StorageScene.tsx", "layer": "browser", "category": "scene_ui", "role": "Storage SVG background.", "critical": false },
+    { "path": "src/components/scene/AtticScene.tsx", "layer": "browser", "category": "scene_ui", "role": "Attic SVG background.", "critical": false },
+
+    { "path": "src/components/home/LetterCard.tsx", "layer": "browser", "category": "ui_atom", "role": "Letter-styled course card with layoutId transition into cabin.", "critical": false },
+    { "path": "src/components/done/StickerWord.tsx", "layer": "browser", "category": "ui_atom", "role": "Grass sticker — spring fall + ✦ sparkle.", "critical": false },
+    { "path": "src/components/journal/WordEntry.tsx", "layer": "browser", "category": "ui_atom", "role": "Journal word card.", "critical": false },
+    { "path": "src/components/journal/BookShelf.tsx", "layer": "browser", "category": "ui_atom", "role": "Storage-room shelf grouping.", "critical": false },
+    { "path": "src/components/parents/PinGate.tsx", "layer": "browser", "category": "ui_atom", "role": "Client-side PIN gate for attic.", "critical": false },
+    { "path": "src/components/parents/StatsCard.tsx", "layer": "browser", "category": "ui_atom", "role": "7-day bar chart + totals.", "critical": false },
+    { "path": "src/components/parents/SessionRow.tsx", "layer": "browser", "category": "ui_atom", "role": "Session list row.", "critical": false },
+    { "path": "src/components/parents/SettingsAccordion.tsx", "layer": "browser", "category": "ui_atom", "role": "Parents settings accordion.", "critical": false },
+    { "path": "src/components/ui/Button.tsx", "layer": "browser", "category": "ui_atom", "role": "Base button.", "critical": false },
+    { "path": "src/components/ui/Surface.tsx", "layer": "browser", "category": "ui_atom", "role": "Card surface primitive.", "critical": false },
+    { "path": "src/components/ui/Stars.tsx", "layer": "browser", "category": "ui_atom", "role": "Mastery 3-star indicator.", "critical": false },
+    { "path": "src/components/ui/PinPad.tsx", "layer": "browser", "category": "ui_atom", "role": "Numeric PIN pad.", "critical": false },
+    { "path": "src/components/ui/ErrorBoundary.tsx", "layer": "browser", "category": "ui_atom", "role": "Root error boundary; falls back to yard.", "critical": false },
+
+    { "path": "src/hooks/useSpacebar.ts", "layer": "browser", "category": "hook", "role": "Document-level spacebar push-to-talk (filters e.repeat and input fields).", "critical": true },
+
+    { "path": "src/lib/progress.ts", "layer": "shared", "category": "lib_util", "role": "Progress aggregation (cross-lesson SUM attempts/correct, lastPracticed).", "critical": false },
+    { "path": "src/lib/stats.ts", "layer": "shared", "category": "lib_util", "role": "Stats aggregation for parents dashboard.", "critical": false },
+    { "path": "src/lib/pin.ts", "layer": "browser", "category": "lib_util", "role": "Client-side PIN hashing (SHA-256 + salt; 3-strike lockout 30s).", "critical": false },
+
+    { "path": "src/lib/db/schema.ts", "layer": "server", "category": "db", "role": "SQLite table definitions.", "critical": false },
+    { "path": "src/lib/db/queries.ts", "layer": "server", "category": "db", "role": "Query helpers used by /api/chat + aggregation routes.", "critical": false },
+    { "path": "src/lib/db/index.ts", "layer": "server", "category": "db", "role": "DB handle factory; better-sqlite3 init.", "critical": false },
+
+    { "path": "src/app/api/chat/route.ts", "layer": "server", "category": "api_route", "role": "POST /api/chat — start / message / end actions; SSE response.", "critical": true },
+    { "path": "src/app/api/courses/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/courses — currently returns food only.", "critical": false },
+    { "path": "src/app/api/progress/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/progress — WordMastery snapshot for journal / done page.", "critical": false },
+    { "path": "src/app/api/sessions/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/sessions — recent lessons list (default limit=10).", "critical": false },
+    { "path": "src/app/api/stats/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/stats — 7-day totals + mastery counts.", "critical": false },
+
+    { "path": "src/app/page.tsx", "layer": "browser", "category": "lesson_ui", "role": "/ yard route; lists LetterCard courses.", "critical": false },
+    { "path": "src/app/lesson/[id]/LessonClient.tsx", "layer": "browser", "category": "lesson_ui", "role": "Cabin route; mounts PhasedLessonView.", "critical": false },
+    { "path": "src/app/lesson/[id]/done/LessonDoneClient.tsx", "layer": "browser", "category": "lesson_ui", "role": "Grass route; sticker summary.", "critical": false },
+    { "path": "src/app/journal/JournalClient.tsx", "layer": "browser", "category": "lesson_ui", "role": "Storage route; mastered-word journal.", "critical": false },
+    { "path": "src/app/parents/ParentsClient.tsx", "layer": "browser", "category": "lesson_ui", "role": "Attic route; PIN-gated stats dashboard.", "critical": false },
+    { "path": "src/app/template.tsx", "layer": "browser", "category": "lesson_ui", "role": "Route-level fade-in wrapper; SceneFrame handles variant-specific transitions.", "critical": false },
+
+    { "path": "scripts/lesson-report-data.ts", "layer": "shared", "category": "script", "role": "Lesson-report data layer: aggregates session + course + anomaly flags for /lesson-report.", "critical": false },
+    { "path": "scripts/smoke-pages.ts", "layer": "shared", "category": "script", "role": "pnpm run smoke — starts dev server + probes 5 pages + 4 APIs.", "critical": false },
+    { "path": "scripts/asr-hotwords-regression.ts", "layer": "shared", "category": "script", "role": "ASR hotwords regression harness.", "critical": false }
+  ],
+
+  "state_machines": {
+    "lesson_controller": {
+      "owner_file": "src/lib/voice/lesson-controller.ts",
+      "purpose": "Single-turn voice orchestration: greeting → listen → think → speak → wait.",
+      "states": [
+        { "name": "idle", "is_initial": true, "description": "Lesson not started." },
+        { "name": "greeting", "description": "Opening monologue playing." },
+        { "name": "awaiting", "description": "Ready for user to press spacebar." },
+        { "name": "listening", "description": "Recording PCM, streaming to ASR." },
+        { "name": "thinking", "description": "Waiting for ASR final + LLM first token." },
+        { "name": "speaking", "description": "Streaming TTS audio to the user." },
+        { "name": "ending", "description": "Tearing down; transitions to idle.", "is_terminal": true }
+      ],
+      "transitions": [
+        { "from": "idle", "to": "greeting", "on": "startLesson", "kind": "manual_trigger" },
+        { "from": "greeting", "to": "awaiting", "on": "TTS session-finished (opening)", "kind": "upstream_event" },
+        { "from": "awaiting", "to": "listening", "on": "spacebar pressed", "kind": "manual_trigger", "note": "Must come from awaiting; barge-in from speaking is intentionally not supported." },
+        { "from": "listening", "to": "awaiting", "on": "spacebar released && recordedMs < 800ms", "kind": "manual_trigger", "note": "Short-press guard — Doubao confidence too low under 1.5s." },
+        { "from": "listening", "to": "thinking", "on": "spacebar released && recordedMs >= 800ms", "kind": "manual_trigger" },
+        { "from": "thinking", "to": "awaiting", "on": "5s timeout || ASR final empty", "kind": "timer" },
+        { "from": "thinking", "to": "speaking", "on": "first speech-delta (onFirstSpeech)", "kind": "upstream_event" },
+        { "from": "speaking", "to": "awaiting", "on": "TTS session-finished", "kind": "upstream_event" },
+        { "from": "*", "to": "ending", "on": "endLesson", "kind": "manual_trigger" },
+        { "from": "ending", "to": "idle", "on": "teardown complete", "kind": "rule_evaluation" }
+      ]
+    },
+
+    "phased_lesson_controller": {
+      "owner_file": "src/lib/voice/phased-lesson-controller.ts",
+      "purpose": "Outer phase axis for three-phase lessons; LLM does NOT emit phase transitions — rules do.",
+      "states": [
+        { "name": "idle", "is_initial": true, "description": "Lesson not started." },
+        { "name": "intro", "description": "Theme introduction — scene SVG + hotspot taps." },
+        { "name": "interactive", "description": "AI conversation; LessonController is active inside." },
+        { "name": "reinforcement", "description": "Quiz round (pick-word, repeat-after-me)." },
+        { "name": "done", "description": "Lesson complete — go to grass summary.", "is_terminal": true }
+      ],
+      "transitions": [
+        { "from": "idle", "to": "intro", "on": "startLesson", "kind": "manual_trigger" },
+        { "from": "intro", "to": "interactive", "on": "introducedCardIds.size === cards.length && controller awaiting", "kind": "rule_evaluation" },
+        { "from": "interactive", "to": "reinforcement", "on": "clearedCardIds.size === cards.length OR totalAttempts >= 3×cards.length, then controller awaiting", "kind": "rule_evaluation" },
+        { "from": "reinforcement", "to": "done", "on": "all reinforcement quizzes answered", "kind": "rule_evaluation" },
+        { "from": "*", "to": "idle", "on": "endLesson", "kind": "manual_trigger" }
+      ]
+    }
+  },
+
+  "data_flows": [
+    {
+      "name": "Enter lesson (opening monologue)",
+      "description": "PhasedLessonView mount → opening speech plays → user lands on awaiting.",
+      "steps": [
+        { "actor": "browser_phased_view", "action": "mount → new LessonController → new PhasedLessonController" },
+        { "actor": "browser_phased_controller", "action": "phased.startLesson() → controller.startLesson(courseId)" },
+        { "actor": "browser_lesson_controller", "action": "Promise.all(tts.open(), prewarmRecorder())", "note": "TTS handshake ~3.7s; prewarm primes getUserMedia + AudioContext + worklet so the first press has zero startup cost." },
+        { "actor": "browser_tts_client", "action": "WS /api/voice/tts → Doubao StartConnection (event=1)" },
+        { "actor": "upstream_doubao_tts", "action": "ConnectionStarted (event=50)" },
+        { "actor": "browser_lesson_controller", "action": "POST /api/chat?action=start" },
+        { "actor": "server_chat_route", "action": "SSE: speech-delta × N, actions, done" },
+        { "actor": "browser_lesson_controller", "action": "speech-delta → tts.startSession + sendText (event=200) → enqueue 24kHz PCM" },
+        { "actor": "browser_lesson_controller", "action": "done → tts.finishSession (event=102) → on SessionFinished → state=awaiting" }
+      ]
+    },
+    {
+      "name": "Single conversation turn",
+      "description": "User holds spacebar → ASR → MiMo → SSE → TTS → playback complete.",
+      "steps": [
+        { "actor": "browser_lesson_controller", "action": "spacebar down (state=awaiting) → startListening; setState(listening); record listenStartedAt." },
+        { "actor": "browser_asr_client", "action": "Open WS /api/voice/asr?courseId&targetWords&cardId; bind partial/final/error." },
+        { "actor": "browser_recorder", "action": "startRecorder({ onChunk: pcm => asr.sendPcm(pcm) })" },
+        { "actor": "server_asr_proxy", "action": "Upstream not ready yet → buffer pendingPcm." },
+        { "actor": "server_asr_proxy", "action": "Upstream open → send FullClientRequest (with corpus.context hotwords) → flush pendingPcm." },
+        { "actor": "upstream_doubao_asr", "action": "Emit partial frames (utterances[].definite=false)." },
+        { "actor": "browser_asr_client", "action": "onmessage('partial') → emit subtitle." },
+        { "actor": "browser_lesson_controller", "action": "spacebar up: if recordedMs < 800ms emit '太短啦~' + state=awaiting; else flush worklet, asr.finish(), setState(thinking), arm 5s fallback." },
+        { "actor": "server_asr_proxy", "action": "On finish: if upstream ready send -seq, else mark pendingFinish; on final frame, forward JSON {type:'final', text}." },
+        { "actor": "browser_lesson_controller", "action": "handleAsrFinal(text) → clear timer → asr.close → POST /api/chat {action:'message', sessionId, text, asrResult}." },
+        { "actor": "server_chat_route", "action": "Add raw ASR user message → streamLLM (MiMo) with prompt containing currentCardId / cardProgress / drillParts → SpeechExtractor → SSE." },
+        { "actor": "server_chat_route", "action": "Commit attempt_assessment + show_card to cardProgress / clearedCardIds; record token_usage (LLM + ASR chars + TTS chars)." },
+        { "actor": "browser_lesson_controller", "action": "First speech-delta → ensureTtsSession (event=100) → onFirstSpeech → setState(speaking)." },
+        { "actor": "browser_tts_client", "action": "sendText (event=200) → upstream TTSResponse (event=352) → PcmPlayer.enqueue (drops if state moved back to listening/thinking)." },
+        { "actor": "browser_phased_controller", "action": "On actions: accumulate introducedCardIds; pick last show_card → WordBook switches card." },
+        { "actor": "browser_lesson_controller", "action": "done → tts.finishSession (event=102) → SessionFinished → setState(awaiting)." }
+      ]
+    },
+    {
+      "name": "End lesson",
+      "description": "User taps end → tear down WS + audio + recorder; reset to idle.",
+      "steps": [
+        { "actor": "browser_lesson_controller", "action": "chatAbort.abort + clear asrFinalTimer" },
+        { "actor": "browser_lesson_controller", "action": "recorder.stop / asr.close" },
+        { "actor": "browser_lesson_controller", "action": "player.stop + tts.close (FinishConnection event=2)" },
+        { "actor": "browser_lesson_controller", "action": "POST /api/chat?action=end" },
+        { "actor": "browser_lesson_controller", "action": "player.dispose + disposeRecorder (release mic + AudioContext)" },
+        { "actor": "browser_lesson_controller", "action": "state = idle" }
+      ]
+    }
+  ],
+
+  "design_decisions": [
+    { "topic": "Streaming JSON extraction", "choice": "SpeechExtractor state machine parses a single LLM response.", "rationale": "Saves one LLM call and gives best first-token latency; ~100 lines.", "category": "performance" },
+    { "topic": "TTS voice", "choice": "Fixed seed-tts-2.0-standard + Tina老师2.0 + caching.", "rationale": "Stability over expressive variance; opening / prompt sentences are 100% deterministic.", "category": "reliability" },
+    { "topic": "No client-side sentence splitting", "choice": "Pipe LLM tokens straight into TTS.", "rationale": "Doubao docs recommend it for naturalness + emotion.", "category": "ux" },
+    { "topic": "Echo suppression", "choice": "Browser getUserMedia flags only.", "rationale": "Simple; no server-side DSP cost.", "category": "simplicity" },
+    { "topic": "ASR per-turn / TTS long-conn", "choice": "Different lifecycles for ASR vs TTS sockets.", "rationale": "ASR needs a fresh session per utterance; TTS handshake costs ~3.7s and is worth amortizing.", "category": "performance" },
+    { "topic": "AudioContext is module-singleton", "choice": "Do not close+new per turn.", "rationale": "Browser quotas: 3–5 rebuilds in a row brick the mic.", "category": "reliability" },
+    { "topic": "Mic prewarm at startLesson", "choice": "Run getUserMedia + worklet on lesson start.", "rationale": "Otherwise startup costs ~300ms and the first few characters of the user's first sentence are lost.", "category": "performance" },
+    { "topic": "ASR proxy buffers PCM during handshake", "choice": "Queue PCM until upstream is ready.", "rationale": "Client WS opens in tens of ms but upstream handshake + full-client-request takes 1–3s; dropping during that window loses the user's first 1–3s.", "category": "reliability" },
+    { "topic": "Worklet flushes trailing buffer", "choice": "Flush <200ms tail on disconnect.", "rationale": "Otherwise the last word of the user's utterance gets dropped.", "category": "reliability" },
+    { "topic": "Front-end 800ms short-press reject", "choice": "Reject without entering thinking.", "rationale": "Doubao times out below ~1.5s; better to tell the user immediately than wait.", "category": "ux" },
+    { "topic": "5s (not 9s) ASR final fallback", "choice": "5s timeout to awaiting.", "rationale": "Faster failure feedback so users can retry.", "category": "ux" },
+    { "topic": "No barge-in while speaking", "choice": "Ignore spacebar during speaking.", "rationale": "In-flight PCM is hard to fully clear; future work.", "category": "scope" },
+    { "topic": "Subtitle leads audio", "choice": "Do not time-sync subtitle with audio.", "rationale": "Spec accepted at the time; canvas actions feel ~3s ahead of speech — see Known Issues.", "category": "scope" },
+    { "topic": "Word correctness judgment", "choice": "Exact English token match against current target.", "rationale": "Conservative; 'train' counts, 'tree' does not. No phonetic-similarity heuristics.", "category": "reliability" },
+    { "topic": "ASR/TTS usage accounting", "choice": "Count requests + recognized text length (ASR) and speech chars (TTS).", "rationale": "Provider-native tokens not exposed; this still surfaces meaningful cost signal in lesson reports.", "category": "performance" },
+    { "topic": "Canvas aspect ratio", "choice": "1:1 square; 75% image (4:3 1024×768), 25% text.", "rationale": "For young learners: image is the protagonist, text is the anchor.", "category": "ux" },
+    { "topic": "Phase switching is rule-driven", "choice": "PhasedLessonController evaluates conditions; LLM does not emit phase transitions.", "rationale": "LLM-driven transitions are unpredictable; rules are testable and reversible.", "category": "reliability" },
+    { "topic": "Only food course is visible", "choice": "Retire transportation / timeNumbers data and the old LessonView fallback.", "rationale": "Avoid maintaining two parallel course paths at user-count = 1.", "category": "scope" },
+    { "topic": "Keep LessonController under PhasedLessonController", "choice": "Reuse ASR/TTS/SSE pipeline rather than rewriting per phase.", "rationale": "Lower risk than rewriting the audio path.", "category": "scope" }
+  ],
+
+  "performance_baseline": {
+    "source": "docs/voice-benchmarks.md",
+    "measurement_date": "2026-05-01",
+    "sample_size": "18 manual rounds, 14 successful",
+    "metrics": [
+      { "name": "user release → ASR final", "target_ms": 500, "median_ms": 594, "status": "near", "note": "Limit set by Doubao recognition itself once prewarm + buffer are in place." },
+      { "name": "ASR final → LLM first speech token", "target_ms": 1000, "median_ms": 3976, "status": "exceeded_target", "note": "MiMo first-token is the bottleneck; front-end cannot fix." },
+      { "name": "LLM first token → TTS first PCM packet", "target_ms": 500, "median_ms": 2200, "status": "exceeded_target", "note": "SSE parse + TTS synthesis + network." },
+      { "name": "Total first-audio latency", "target_ms": 2000, "median_ms": 6212, "status": "exceeded_target", "note": "Dominated by MiMo first-token." },
+      { "name": "Round-trip (release → AI finishes)", "target_ms": 3000, "median_ms": 8860, "status": "exceeded_target", "note": "Includes AI speech duration; not a pure first-response metric." }
+    ],
+    "primary_bottleneck": "MiMo first-token (~4s). Front-end optimization can recover only a few hundred ms.",
+    "candidate_optimizations": [
+      "Switch to a faster model",
+      "Prompt-enforced 'speech' field first ordering",
+      "Filler hum during thinking phase"
+    ]
+  },
+
+  "known_issues": [
+    { "id": "session_resume", "severity": "high", "summary": "sessions is a module-level in-memory Map: server restart / refresh / network drop invalidates the client sessionId. Client just shows '课程已过期'.", "fix_direction": "SQLite persistence + client resume flow." },
+    { "id": "actions_vs_tts_timing", "severity": "medium", "summary": "show_card actions lead AI speech; canvas feels ~3s ahead." },
+    { "id": "mimo_first_token", "severity": "high", "summary": "MiMo first-token ~4s dominates first-audio latency. Front-end cannot fix." },
+    { "id": "asr_recognition_quality", "severity": "medium", "summary": "Doubao ASR weak on short English words and number normalization (e.g. 'hour' → 'Our.'). Dictionary fallback was removed because it overfit. LLM attempt_assessment now handles fuzzy mastery on raw ASR." },
+    { "id": "token_usage_high", "severity": "medium", "summary": "LLM message history trimmed to last 12 entries (~6 turns) but no summarization compression yet." },
+    { "id": "voice_tuning", "severity": "low", "summary": "Tina老师2.0 is acceptable; finer auditions are future work." },
+    { "id": "vad_auto_stop", "severity": "low", "summary": "No silence-based auto-stop; user must release spacebar (anti hold-without-releasing)." },
+    { "id": "ws_backoff", "severity": "low", "summary": "Single reconnect attempt; could add exponential backoff." },
+    { "id": "preload_opening_tts", "severity": "low", "summary": "Doubao caches identical text — could be exploited for near-zero opening-line latency." }
+  ],
+
+  "evolution": [
+    { "date": "2026-05-01", "kind": "feature", "title": "Voice pipeline v1 + sync docs", "impact": "README / TODO / benchmarks created alongside initial voice stack." },
+    { "date": "2026-05-01", "kind": "refactor", "title": "E2E acceptance bug fixes", "impact": "Multiple integration bugs corrected during initial acceptance; the architecture stabilized here." },
+    { "date": "2026-05-01", "kind": "infra", "title": "Removed [bench] instrumentation + TODO refresh", "impact": "Once perf baseline captured, instrumentation pruned." },
+    { "date": "2026-05-01", "kind": "docs", "title": "Introduced architecture.md + CLAUDE.md", "impact": "Established the living-doc + project-rule contract." },
+    { "date": "2026-05-01", "kind": "security", "title": "Redacted secrets from git history + added credential rule to CLAUDE.md", "impact": "Established the rotate → redact → force-push → rule playbook." },
+    { "date": "2026-05-05", "kind": "feature", "title": "Canvas v2: WordCardCanvas replaces ImageCanvas", "impact": "Protocol unified to show_card; course data migrated from images[] to cards[]; ShowTool/FocusTool/AnnotateTool removed." },
+    { "date": "2026-05-10", "kind": "feature", "title": "Teaching loop v1.1 — in-lesson progress engine + drillParts", "impact": "Every card requires drillParts; server uses show_card to sync currentCardId; LLM emits attempt_assessment; memory tracks cardProgress / clearedCardIds; history trimmed to 12." },
+    { "date": "2026-05-14", "kind": "refactor", "title": "Front-end refactor — Bunny's yard (5 spaces, 5 pages)", "impact": "Bunny upgraded to pose × mood full-body component; SceneFrame + LetterCard + WordBook + BloomButton + StickerWord; storage + attic added; client-side PIN gate; /api/{progress,sessions,stats}." },
+    { "date": "2026-05-15", "kind": "feature", "title": "Three-phase lesson structure refactor", "impact": "Added food three-phase course + ImageGen PNG + structured scene.svg; phase-aware prompt / SSE progress_snapshot / phase-transition / quiz-answer; PhasedLessonController + Intro / Interactive / Reinforce / Quiz components; old courses + LessonView fallback retired; Course.phases is now required." }
+  ],
+
+  "protocols": {
+    "doubao_tts_v3_pitfalls": [
+      { "id": "codec_flag_0x04", "severity": "must_know", "rule": "Lock codec flag to 0x04 (with event). Whether the frame carries sessionId is decided by event_id (<100 no; ≥100 yes; ConnectionStarted=50 carries connection_id). Do NOT swap flag based on 'is there a sessionId'." },
+      { "id": "additions_is_jsonstring", "severity": "gotcha", "rule": "req_params.additions is a JSON-encoded string, not an object. The Doubao table easily reads as object." },
+      { "id": "text_inside_req_params", "severity": "must_know", "rule": "TaskRequest text lives in req_params.text, not at the top level. All synthesis params are nested under req_params." },
+      { "id": "long_conn_one_session_at_a_time", "severity": "must_know", "rule": "One WebSocket may host multiple sessions, but only one at a time; never re-send StartConnection between sessions." }
+    ],
+    "doubao_asr_v3_pitfalls": [
+      { "id": "show_utterances_required", "severity": "must_know", "rule": "show_utterances: true must be set, otherwise responses have no utterances array and final cannot be detected." },
+      { "id": "result_type_full", "severity": "must_know", "rule": "result_type: 'full', NOT 'single'. 'single' returns the current sentence only, leading words are lost." },
+      { "id": "enable_ddc_false", "severity": "must_know", "rule": "enable_ddc: false for children — semantic smoothing drops repeated / hesitated words." },
+      { "id": "hotwords_via_corpus_context", "severity": "gotcha", "rule": "targetWords flow via WS query → proxy writes request.corpus.context = '{\\\"hotwords\\\":[...]}'. No per-word weight, no language_hint in current Doubao docs." },
+      { "id": "hotwords_limits", "severity": "gotcha", "rule": "2026-05-05 regression: hotwords do not rescue 'hour → Our.' or '1000 → 10' style misrecognitions. The earlier dictionary-correction fallback was reverted because it overfit and hid raw ASR from the LLM. Real fuzziness is now handled by LLM attempt_assessment." },
+      { "id": "client_finish_control_frame", "severity": "must_know", "rule": "Client must NOT close the WS directly. Send {type:'finish'} so proxy can send -seq to upstream; close only after the final frame returns. Direct close strands the user in thinking forever." },
+      { "id": "proxy_must_buffer_pcm", "severity": "must_know", "rule": "Client WS opens in tens of ms but upstream handshake + full-client-request takes 1–3s. Proxy must queue PCM during that window or the first 1–3s of speech is lost." }
+    ],
+    "auth_headers": {
+      "asr_old_console": ["X-Api-App-Key", "X-Api-Access-Key", "X-Api-Resource-Id", "X-Api-Request-Id", "X-Api-Sequence: -1"],
+      "tts_old_console": ["X-Api-App-Id", "X-Api-Access-Key", "X-Api-Resource-Id", "X-Api-Connect-Id"],
+      "note": "Watch the App-Key vs App-Id one-letter difference; X-Api-Sequence: -1 is required for ASR."
+    },
+    "mimo_api": {
+      "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+      "auth": "Authorization: Bearer (NOT api-key header, despite docs)",
+      "llm": "mimo-v2.5-pro via /v1/chat/completions; response_format json_object",
+      "asr_legacy": "mimo-v2.5 with input_audio content part (NOT /v1/audio/transcriptions) — currently superseded by Doubao",
+      "tts_legacy": "mimo-v2.5-tts; base64 WAV in chat completion — currently superseded by Doubao",
+      "image_gen": "Not supported"
+    }
+  },
+
+  "frontend": {
+    "routes": [
+      { "path": "/", "scene": "yard", "purpose": "Course list (LetterCard)", "data": "/api/courses" },
+      { "path": "/lesson/[id]", "scene": "cabin", "purpose": "Three-phase lesson (PhasedLessonView)", "data": "voice WS + SSE" },
+      { "path": "/lesson/[id]/done", "scene": "grass", "purpose": "Sticker summary of just-learned words", "data": "/api/progress" },
+      { "path": "/journal", "scene": "storage", "purpose": "Mastered-word journal", "data": "/api/progress" },
+      { "path": "/parents", "scene": "attic", "purpose": "Stats dashboard (PIN-gated)", "data": "/api/sessions + /api/stats" }
+    ],
+    "design_tokens": {
+      "palette": {
+        "bunny-cream": "Off-white background",
+        "bunny-warmpaper": "Tabletop / book paper",
+        "bunny-sky": "User voice tone",
+        "bunny-night": "Dark accents",
+        "bunny-grass / wood / pink / gold / berry / leaf": "Accent set",
+        "bunny-ink / ink-soft / ink-faint": "Text greys"
+      },
+      "fonts": {
+        "english": "Fredoka (next/font/google)",
+        "chinese": "LXGW WenKai TC (CDN @import)"
+      },
+      "radii": { "sm": "12px", "md": "20px", "lg": "28px" },
+      "shadows": { "soft": "subtle", "medium": "default", "bunny": "bunny-pink emphasis" }
+    },
+    "mastery_derivation": {
+      "function": "masteryStarsFromRatio(correct, attempts)",
+      "rules": [
+        "attempts === 0 → 0",
+        "ratio >= 0.9 → 3",
+        "ratio >= 0.6 → 2",
+        "ratio > 0 → 1"
+      ],
+      "aggregation": "buildProgressSnapshot SUMs across lessons; lastPracticed = MAX(start_time)."
+    },
+    "pin_gate": "lib/pin.ts hashes PIN with SHA-256 + salt in localStorage; 3 failures locks for 30s; success resets counter.",
+    "reduced_motion": "prefers-reduced-motion: reduce shortens all non-.bunny-motion animations to 0.01ms. Bunny mood animations preserved as semantic feedback."
+  },
+
+  "tooling": {
+    "lesson_report": {
+      "command": "/lesson-report [session-id?]",
+      "data_layer": "scripts/lesson-report-data.ts (pure function buildReport(db, sessionId, courseLoader) with unit tests)",
+      "llm_template": ".claude/commands/lesson-report.md",
+      "output_path": "docs/lesson-reports/YYYY-MM-DD-<sid8>.md (gitignored)",
+      "scope": "Engineering signals only (ASR misrecognition, conversational deadlocks, token usage, instrumentation). Pedagogy observations listed but not judged.",
+      "anomaly_flags": ["highAvgInput", "asrUsageNotTracked", "ttsUsageNotTracked", "tokensCorrupted"]
+    },
+    "smoke": "pnpm run smoke — starts dev server, probes 5 pages + 4 APIs.",
+    "tests": {
+      "runner": "vitest (jsdom)",
+      "key_suites": [
+        "src/lib/voice/doubao-codec.test.ts — binary protocol (10 tests)",
+        "src/lib/agent/speech-extractor.test.ts — streaming JSON (9 tests)",
+        "src/hooks/useSpacebar.test.ts — spacebar (8 tests)"
+      ]
+    }
+  },
+
+  "conventions": {
+    "directory_layout": {
+      "src/app": "Next.js App Router routes (page.tsx + route.ts).",
+      "src/components": "React components grouped by surface (lesson, bunny, scene, journal, parents, ui, home, done).",
+      "src/lib": "Pure logic + adapters (voice, agent, audio, db, mimo).",
+      "src/data": "Course data.",
+      "src/hooks": "Shared React hooks.",
+      "src/types": "Cross-module type definitions.",
+      "public/worklets": "AudioWorklet modules served by Next.",
+      "scripts": "Dev / smoke / report scripts."
+    },
+    "course_authoring": "See docs/course-authoring-standard.md; every card needs drillParts; courses now must define phases.",
+    "commit_style": "subject = type(scope): summary (e.g. fix(voice): ...); body = '-' bullets explaining substantive changes; Co-Authored-By footer required.",
+    "secrets_policy": "Real credentials never appear in docs/commits/PRs even in private repos. Use placeholders. Leak playbook: rotate → git filter-repo --replace-text → force push → add a rule to CLAUDE.md."
+  }
+}
