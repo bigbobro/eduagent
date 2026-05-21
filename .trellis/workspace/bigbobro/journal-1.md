@@ -111,3 +111,36 @@ Fixed intro-to-interactive handoff, teacher-repeat behavior, sentence-card displ
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Address PR review findings
+
+**Date**: 2026-05-22
+**Task**: Address PR review findings
+**Branch**: `feature/cc-ui-refresh`
+
+### Summary
+
+Fixed PR review issues: repeat-after-me ASR-only quiz flow, completion restart routing, done-page progress fetch, course image audit limits, optimized PNG assets, docs/spec updates, and verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eeb098d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

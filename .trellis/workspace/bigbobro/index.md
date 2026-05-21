@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
-- **Last Active**: 2026-05-21
+- **Total Sessions**: 4
+- **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~113 | Active |
+| `journal-1.md` | ~146 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-05-22 | Address PR review findings | `eeb098d` | `feature/cc-ui-refresh` |
 | 3 | 2026-05-21 | Fix lesson interactive card flow | `eafcbcd` | `feature/cc-ui-refresh` |
 | 2 | 2026-05-21 | Complete CC lesson catalog and assets | `c2a2d62`, `84793d9` | `feature/cc-ui-refresh` |
 | 1 | 2026-05-20 | Bootstrap Trellis project guidelines | `a4ce3dc` | `main` |
