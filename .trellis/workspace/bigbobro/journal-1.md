@@ -78,3 +78,36 @@ Completed the CC UI/course iteration with 10 visible courses, 120 project-local 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Fix lesson interactive card flow
+
+**Date**: 2026-05-21
+**Task**: Fix lesson interactive card flow
+**Branch**: `feature/cc-ui-refresh`
+
+### Summary
+
+Fixed intro-to-interactive handoff, teacher-repeat behavior, sentence-card display, and current-target guards so interactive lessons do not jump back to cleared cards.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eafcbcd` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
