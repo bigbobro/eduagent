@@ -51,7 +51,20 @@ async function waitForServer(): Promise<boolean> {
   return false;
 }
 
-async function fetchCoursesOnlyFood(): Promise<boolean> {
+const EXPECTED_COURSE_IDS = [
+  'food',
+  'colors',
+  'sports',
+  'animals',
+  'family',
+  'toys',
+  'clothes',
+  'weather',
+  'body',
+  'shapes',
+];
+
+async function fetchCoursesCatalog(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/api/courses`);
     if (!res.ok) {
@@ -59,14 +72,13 @@ async function fetchCoursesOnlyFood(): Promise<boolean> {
       return false;
     }
     const courses = await res.json();
-    const ok = Array.isArray(courses)
-      && courses.length === 1
-      && courses[0]?.id === 'food';
+    const ids = Array.isArray(courses) ? courses.map((course: { id?: string }) => course.id) : [];
+    const ok = JSON.stringify(ids) === JSON.stringify(EXPECTED_COURSE_IDS);
     if (!ok) {
-      console.error(`❌ ${BASE}/api/courses expected only food, got:`, courses);
+      console.error(`❌ ${BASE}/api/courses expected catalog ${EXPECTED_COURSE_IDS.join(', ')}, got:`, courses);
       return false;
     }
-    console.log(`✓ ${BASE}/api/courses only food`);
+    console.log(`✓ ${BASE}/api/courses catalog`);
     return true;
   } catch (e) {
     console.error(`❌ ${BASE}/api/courses exception:`, e);
@@ -95,7 +107,7 @@ async function main() {
       await fetchOk(`${BASE}/lesson/food/done`),
       await fetchOk(`${BASE}/journal`),
       await fetchOk(`${BASE}/parents`),
-      await fetchCoursesOnlyFood(),
+      await fetchCoursesCatalog(),
       await fetchOk(`${BASE}/api/progress`, { jsonHas: ['courses', 'totalWordsMastered'] }),
       await fetchOk(`${BASE}/api/sessions`),
       await fetchOk(`${BASE}/api/stats`, { jsonHas: ['totalMinutes', 'last7Days'] }),

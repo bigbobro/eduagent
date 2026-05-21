@@ -1,8 +1,8 @@
-const KEY_PIN = 'bunny.parents.pin';
-const KEY_FAIL = 'bunny.parents.failcount';
-const KEY_LOCK = 'bunny.parents.lockedUntil';
-const SALT = 'bunny-attic-2026';
-const MAX_FAIL = 3;
+const KEY_PIN = 'mochi.parents.pin';
+const KEY_FAIL = 'mochi.parents.failcount';
+const KEY_LOCK = 'mochi.parents.lockedUntil';
+const SALT = 'mochi-loft-2026';
+export const MAX_FAIL = 3;
 const LOCKOUT_MS = 30_000;
 
 async function sha256Hex(s: string): Promise<string> {
@@ -35,12 +35,13 @@ export async function verifyPin(pin: string): Promise<boolean> {
   return ok;
 }
 
-export function recordFail(): void {
+export function recordFail(): number {
   const cur = Number(localStorage.getItem(KEY_FAIL) ?? '0') + 1;
   localStorage.setItem(KEY_FAIL, String(cur));
   if (cur >= MAX_FAIL) {
     localStorage.setItem(KEY_LOCK, String(Date.now() + LOCKOUT_MS));
   }
+  return cur;
 }
 
 export function isLockedOut(): { locked: boolean; resumeAt?: number } {

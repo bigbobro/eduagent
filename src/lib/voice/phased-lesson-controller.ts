@@ -18,22 +18,22 @@ interface ProgressSnapshot {
 export class PhasedLessonController {
   private listeners = new Map<EventName, Set<Listener>>();
   private currentPhase: PhaseName = 'intro';
-  private introducedCardIds = new Set<string>();
   private lastSnapshot: ProgressSnapshot | null = null;
   private pendingTransition: PhaseName | null = null;
-  private introIdleTimer: ReturnType<typeof setTimeout> | null = null;
   private introStartupUnlockTimer: ReturnType<typeof setTimeout> | null = null;
-  private introFollowupCount = 0;
   private introBusy = false;
   private introActiveCardId: string | null = null;
-  private static readonly INTRO_IDLE_MS = 3000;
+  private readonly wordCardIds: Set<string>;
+  private readonly wordCardCount: number;
   private static readonly INTRO_STARTUP_UNLOCK_MS = 7000;
-  private static readonly MAX_INTRO_FOLLOWUPS = 2;
 
   constructor(
     private v2: LessonController,
     private course: Course,
   ) {
+    const wordCards = course.cards.filter((card) => card.kind === 'word');
+    this.wordCardIds = new Set(wordCards.map((card) => card.id));
+    this.wordCardCount = wordCards.length;
     this.v2.on('actions', this.onV2Actions);
     this.v2.on('progress', this.onV2Progress);
     this.v2.on('state', this.onV2State);
@@ -71,10 +71,6 @@ export class PhasedLessonController {
   }
 
   async endLesson(): Promise<void> {
-    if (this.introIdleTimer) {
-      clearTimeout(this.introIdleTimer);
-      this.introIdleTimer = null;
-    }
     if (this.introStartupUnlockTimer) {
       clearTimeout(this.introStartupUnlockTimer);
       this.introStartupUnlockTimer = null;
@@ -135,12 +131,10 @@ export class PhasedLessonController {
   private onV2Actions = (actions: ToolAction[]) => {
     if (this.currentPhase !== 'intro') return;
     for (const action of actions) {
-      if (action.tool === 'show_card') {
-        this.introducedCardIds.add(action.params.card_id);
+      if (action.tool === 'show_card' && this.wordCardIds.has(action.params.card_id)) {
         this.setIntroActiveCardId(action.params.card_id);
       }
     }
-    this.maybeArmTransition();
   };
 
   private onV2Progress = (snapshot: ProgressSnapshot) => {
@@ -154,10 +148,6 @@ export class PhasedLessonController {
     }
 
     if (state !== 'awaiting') {
-      if (this.introIdleTimer) {
-        clearTimeout(this.introIdleTimer);
-        this.introIdleTimer = null;
-      }
       return;
     }
     this.clearIntroStartupUnlockTimer();
@@ -170,29 +160,10 @@ export class PhasedLessonController {
       return;
     }
 
-    if (this.currentPhase === 'intro' && this.introducedCardIds.size < this.course.cards.length) {
-      this.armIntroIdleTimer();
+    if (this.currentPhase === 'intro') {
+      void this.performTransition('interactive');
     }
   };
-
-  private armIntroIdleTimer(): void {
-    if (this.introIdleTimer) clearTimeout(this.introIdleTimer);
-    this.introIdleTimer = setTimeout(() => {
-      this.introIdleTimer = null;
-      if (this.currentPhase !== 'intro') return;
-      if (this.introducedCardIds.size >= this.course.cards.length) return;
-      if (this.introFollowupCount >= PhasedLessonController.MAX_INTRO_FOLLOWUPS) {
-        void this.performTransition('interactive');
-        return;
-      }
-      this.introFollowupCount += 1;
-      this.setIntroBusy(true);
-      void this.v2.sendCustomAction({
-        action: 'message',
-        text: '(请继续介绍下一张 card,直到全部介绍完)',
-      });
-    }, PhasedLessonController.INTRO_IDLE_MS);
-  }
 
   private armIntroStartupUnlockTimer(): void {
     this.clearIntroStartupUnlockTimer();
@@ -212,16 +183,12 @@ export class PhasedLessonController {
 
   private maybeArmTransition(): void {
     if (this.pendingTransition) return;
-    if (this.currentPhase === 'intro') {
-      if (this.introducedCardIds.size >= this.course.cards.length) {
-        this.pendingTransition = 'interactive';
-      }
-      return;
-    }
+    if (this.currentPhase === 'intro') return;
 
     if (this.currentPhase === 'interactive' && this.lastSnapshot) {
-      const allCleared = this.lastSnapshot.clearedCardIds.length >= this.course.cards.length;
-      const maxAttemptsReached = this.lastSnapshot.totalAttempts >= 3 * this.course.cards.length;
+      const clearedWordCount = this.lastSnapshot.clearedCardIds.filter((id) => this.wordCardIds.has(id)).length;
+      const allCleared = clearedWordCount >= this.wordCardCount;
+      const maxAttemptsReached = this.lastSnapshot.totalAttempts >= 3 * this.wordCardCount;
       if (allCleared || maxAttemptsReached) {
         this.pendingTransition = 'reinforcement';
       }
@@ -230,7 +197,7 @@ export class PhasedLessonController {
 
   private async performTransition(to: PhaseName): Promise<void> {
     this.currentPhase = to;
-    this.setIntroBusy(true);
+    this.setIntroBusy(false);
     this.setIntroActiveCardId(null);
     this.emit('phase-change', to);
     await this.v2.sendCustomAction({ action: 'phase-transition', to });

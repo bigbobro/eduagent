@@ -1,0 +1,1021 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EduAgent — Architecture & Flows</title>
+<style>
+  :root {
+    --cream:#FBF6EC; --paper:#FFF8ED; --paper-dim:#F4ECDC;
+    --sky:#DCE9F0; --sky-line:#8FB6CA;
+    --pink:#E89A9F; --pink-soft:#F4C8CC;
+    --ink:#2D2A2A; --ink-soft:#5C5654; --ink-faint:#948B86;
+    --line:#E5DAC6; --line-soft:#F0E6D3;
+    --leaf:#82A57E; --grass:#6B8E5A;
+    --wood:#A47B5C; --wood-soft:#C8A685;
+    --gold:#D4A14F; --gold-soft:#F1D89A; --gold-bg:#FFF5DC;
+    --berry:#BD5B6B; --night:#2E3942;
+    --code-bg:#2E2A26; --code-fg:#F4ECDC;
+    --radius-sm:10px; --radius-md:16px;
+    --shadow-soft:0 1px 0 rgba(45,42,42,.04), 0 4px 14px rgba(45,42,42,.06);
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--cream); color:var(--ink); font-size:15px; line-height:1.6;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+      "Microsoft YaHei", "Helvetica Neue", Arial, "Noto Sans CJK SC", sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  code,pre,.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size:.92em; }
+  a { color:var(--berry); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+
+  .shell { display:grid; grid-template-columns:220px minmax(0,1fr); max-width:1500px; margin:0 auto; }
+  aside.toc { position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto;
+    padding:32px 14px 32px 24px; border-right:1px solid var(--line);
+    background:linear-gradient(180deg,var(--paper) 0%,var(--cream) 100%); }
+  aside.toc .brand { font-weight:600; font-size:13px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:12px; }
+  aside.toc nav a { display:block; padding:5px 10px; margin:1px 0; border-radius:8px; color:var(--ink-soft); font-size:13px; }
+  aside.toc nav a:hover { background:var(--paper-dim); color:var(--ink); text-decoration:none; }
+  aside.toc .meta { margin-top:20px; padding-top:14px; border-top:1px dashed var(--line); font-size:11.5px; color:var(--ink-faint); line-height:1.5; }
+  aside.toc .meta code { background:var(--paper-dim); padding:1px 6px; border-radius:4px; color:var(--ink-soft); }
+
+  main { padding:36px 44px 96px; min-width:0; }
+  section { margin-bottom:56px; scroll-margin-top:24px; }
+  section h2 { font-size:26px; margin:0 0 6px; letter-spacing:-.01em; }
+  section h2 .num { display:inline-block; width:28px; height:28px; line-height:28px; text-align:center; border-radius:50%;
+    background:var(--pink-soft); color:var(--berry); font-size:13px; font-weight:600; margin-right:12px; vertical-align:4px; }
+  section > p.lead { color:var(--ink-soft); margin:0 0 22px; max-width:64ch; }
+  section h3 { margin:24px 0 8px; font-size:15.5px; }
+
+  .hero { margin-bottom:48px; padding:36px 0 18px; border-bottom:1px solid var(--line); }
+  .hero h1 { font-size:38px; line-height:1.15; margin:0 0 10px; letter-spacing:-.02em; }
+  .hero .tagline { font-size:16px; color:var(--ink-soft); max-width:64ch; margin:0 0 22px; }
+  .hero-meta { display:flex; flex-wrap:wrap; gap:8px 18px; font-size:12.5px; color:var(--ink-faint); }
+  .hero-meta strong { color:var(--ink-soft); font-weight:500; }
+  .hero-meta code { background:var(--paper); padding:2px 7px; border-radius:6px; color:var(--ink-soft); border:1px solid var(--line-soft); }
+
+  .chips { display:flex; flex-wrap:wrap; gap:7px; }
+  .chip { display:inline-flex; align-items:center; padding:3px 11px; background:var(--paper); border:1px solid var(--line); border-radius:999px; font-size:12px; color:var(--ink-soft); }
+  .chip.pink{background:var(--pink-soft);border-color:transparent;color:var(--berry);}
+  .chip.leaf{background:#E8EFD8;border-color:transparent;color:var(--grass);}
+  .chip.sky{background:var(--sky);border-color:transparent;color:#3B6478;}
+  .chip.gold{background:#F6E1B3;border-color:transparent;color:#8A6420;}
+  .chip.wood{background:#EEDFCD;border-color:transparent;color:#6A4828;}
+  .chip.berry{background:#F2D2D6;border-color:transparent;color:#6A2E37;}
+  .chip.night{background:#E1E6EA;border-color:transparent;color:#364550;}
+
+  .grid-2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+  .grid-3 { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:10px; }
+  .card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px 18px; box-shadow:var(--shadow-soft); }
+  .card h4 { margin:0 0 4px; font-size:14px; }
+  .card p { margin:6px 0 0; color:var(--ink-soft); font-size:13px; }
+
+  /* ====== ARCHITECTURE & FLOWS (interactive) ====== */
+  .archflow { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:20px; align-items:start; }
+  .diagram-wrap { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px; box-shadow:var(--shadow-soft); overflow-x:auto; }
+  .diagram-inner { position:relative; width:max-content; min-width:100%; }
+  .col-legend { display:flex; flex-wrap:wrap; gap:14px; font-size:11.5px; color:var(--ink-soft); margin-bottom:12px; padding:0 4px; }
+  .col-legend .dot { display:inline-block; width:10px; height:3px; border-radius:2px; margin-right:6px; vertical-align:middle; }
+  .diagram { display:grid; grid-template-columns:repeat(8, 124px); gap:10px; position:relative; z-index:1; }
+  .column { display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .col-header { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-faint); padding-bottom:6px; border-bottom:1px solid var(--line-soft); margin-bottom:4px; min-height:22px; line-height:1.2; }
+  .component { padding:9px 10px; background:var(--paper); border:1px solid var(--line); border-radius:8px; position:relative;
+    transition:opacity 200ms, background 200ms, border-color 200ms, box-shadow 200ms; }
+  .component .label { font-weight:600; color:var(--ink); line-height:1.25; font-size:11.5px; }
+  .component .sub { font-size:10px; color:var(--ink-faint); margin-top:2px; line-height:1.35; word-break:break-word; }
+  .component[data-tone="actor"]    { border-top:3px solid var(--ink-soft); }
+  .component[data-tone="route"]    { border-top:3px solid var(--leaf); }
+  .component[data-tone="browser"]  { border-top:3px solid var(--sky-line); }
+  .component[data-tone="server"]   { border-top:3px solid var(--wood); }
+  .component[data-tone="agent"]    { border-top:3px solid var(--pink); }
+  .component[data-tone="storage"]  { border-top:3px solid var(--grass); }
+  .component[data-tone="upstream"] { border-top:3px solid var(--berry); }
+  .diagram.flow-on .component { opacity:.18; }
+  .diagram.flow-on .component.active { opacity:1; border-color:var(--gold); background:var(--gold-bg); box-shadow:0 0 0 2px rgba(212,161,79,.35), 0 4px 12px rgba(212,161,79,.18); }
+
+  .arrows-overlay { position:absolute; inset:0; pointer-events:none; z-index:2; }
+  .arrows-overlay path { fill:none; stroke:var(--gold); stroke-width:2; }
+  .arrows-overlay .step-bubble circle { fill:var(--gold); stroke:var(--paper); stroke-width:2; }
+  .arrows-overlay .step-bubble text { fill:#5A3F12; font-size:11px; font-weight:700; text-anchor:middle; dominant-baseline:central; font-family: ui-sans-serif, system-ui, sans-serif; }
+
+  .flow-side { display:flex; flex-direction:column; gap:14px; position:sticky; top:20px; }
+  .flow-panel { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:14px; box-shadow:var(--shadow-soft); }
+  .flow-panel .panel-header { font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-faint); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
+  .flow-panel .panel-header button.clear { background:transparent; border:none; color:var(--ink-faint); font-size:11px; cursor:pointer; padding:2px 4px; }
+  .flow-panel .panel-header button.clear:hover { color:var(--ink); }
+  .flow-list { display:flex; flex-direction:column; gap:6px; }
+  .flow-btn { text-align:left; background:var(--paper); border:1px solid var(--line); border-radius:9px; padding:9px 11px; cursor:pointer; font:inherit; color:inherit; display:block; width:100%; }
+  .flow-btn:hover { border-color:var(--gold-soft); background:#FFFCF3; }
+  .flow-btn.selected { border-color:var(--gold); background:var(--gold-bg); box-shadow:0 0 0 1px rgba(212,161,79,.35); }
+  .flow-btn .flow-title { font-weight:600; font-size:12.5px; line-height:1.3; }
+  .flow-btn .flow-sub { font-size:11px; color:var(--ink-soft); margin-top:2px; line-height:1.35; }
+
+  .steps-panel { max-height:520px; overflow-y:auto; }
+  .steps-panel .empty { color:var(--ink-faint); font-size:12.5px; padding:6px 2px; }
+  .steps-panel .steps-title { font-weight:600; font-size:13px; margin-bottom:2px; }
+  .steps-panel .steps-sub { font-size:11.5px; color:var(--ink-soft); margin-bottom:12px; line-height:1.4; }
+  .steps-panel ol { list-style:none; padding:0; margin:0; counter-reset:step; }
+  .steps-panel li { counter-increment:step; display:grid; grid-template-columns:22px 1fr; gap:8px; padding:8px 0; border-top:1px dashed var(--line-soft); }
+  .steps-panel li:first-of-type { border-top:none; padding-top:2px; }
+  .steps-panel li::before { content:counter(step); display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:var(--gold); color:#5A3F12; font-size:11px; font-weight:700; margin-top:1px; }
+  .steps-panel .step-name { font-weight:600; font-size:12px; line-height:1.3; color:var(--ink); }
+  .steps-panel .step-edge { font-family: ui-monospace, Menlo, monospace; font-size:10.5px; color:var(--ink-faint); margin-top:1px; }
+  .steps-panel .step-edge code { background:var(--paper-dim); padding:0 4px; border-radius:3px; color:var(--ink-soft); }
+  .steps-panel .step-desc { color:var(--ink-soft); font-size:12px; margin-top:4px; line-height:1.5; }
+
+  @media (max-width:1240px) { .archflow { grid-template-columns:1fr; } .flow-side { position:static; flex-direction:row; flex-wrap:wrap; } .flow-side > * { flex:1 1 280px; } }
+
+  /* ====== FSM ====== */
+  .fsm-grid { display:grid; grid-template-columns:1fr; gap:18px; }
+  @media (min-width:1100px) { .fsm-grid { grid-template-columns:1fr 1fr; } }
+  .fsm-wrap { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:18px; box-shadow:var(--shadow-soft); }
+  .fsm-wrap h3 { margin:0 0 4px; }
+  .fsm-wrap p.owner { color:var(--ink-faint); font-size:12px; margin:0 0 12px; font-family: ui-monospace, Menlo, monospace; }
+
+  /* ====== MODULES ====== */
+  .module-card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-sm); padding:11px 13px; position:relative; }
+  .module-card .path { font-family: ui-monospace, Menlo, monospace; font-size:12px; color:var(--ink); word-break:break-all; }
+  .module-card .role { color:var(--ink-soft); font-size:12.5px; margin-top:5px; line-height:1.45; }
+  .module-card.critical { border-color:var(--pink); }
+  .module-card .badge-crit { position:absolute; top:9px; right:11px; font-size:10px; padding:1px 6px; background:var(--pink-soft); color:var(--berry); border-radius:999px; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+
+  /* ====== TABLE ====== */
+  table.t { width:100%; border-collapse:collapse; background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden; box-shadow:var(--shadow-soft); font-size:13px; }
+  table.t th,table.t td { text-align:left; padding:11px 14px; border-bottom:1px solid var(--line-soft); vertical-align:top; }
+  table.t th { background:var(--paper-dim); color:var(--ink-soft); font-weight:500; font-size:12px; letter-spacing:.02em; text-transform:uppercase; }
+  table.t tr:last-child td { border-bottom:none; }
+  table.t td.topic { font-weight:600; width:22%; }
+  table.t td.cat { width:12%; }
+
+  /* ====== METRICS ====== */
+  .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+  .metric { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:14px 16px; box-shadow:var(--shadow-soft); }
+  .metric .name { font-size:13px; margin-bottom:4px; }
+  .metric .vals { font-family: ui-monospace, Menlo, monospace; font-size:12px; color:var(--ink-soft); margin-bottom:7px; }
+  .metric .bar { height:6px; border-radius:3px; background:var(--line-soft); position:relative; overflow:hidden; }
+  .metric .bar > span { display:block; height:100%; border-radius:3px; }
+  .metric.met .bar > span { background:var(--leaf); }
+  .metric.near .bar > span { background:var(--gold); }
+  .metric.exceeded_target .bar > span { background:var(--berry); }
+  .metric .status { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11px; margin-top:8px; }
+  .metric.met .status { background:#E8EFD8; color:var(--grass); }
+  .metric.near .status { background:#F6E1B3; color:#8A6420; }
+  .metric.exceeded_target .status { background:var(--pink-soft); color:var(--berry); }
+  .metric .note { font-size:11.5px; color:var(--ink-faint); margin-top:6px; line-height:1.5; }
+
+  /* ====== ISSUES ====== */
+  .issue-list { list-style:none; padding:0; margin:0; }
+  .issue-list li { background:var(--paper); border:1px solid var(--line); border-left:4px solid var(--leaf); border-radius:var(--radius-sm); padding:11px 14px; margin-bottom:8px; }
+  .issue-list li.sev-medium { border-left-color:var(--gold); }
+  .issue-list li.sev-high { border-left-color:var(--berry); }
+  .issue-list li .id { font-family: ui-monospace, Menlo, monospace; font-size:11.5px; color:var(--ink-faint); margin-right:8px; }
+  .issue-list li .badge { font-size:10.5px; padding:1px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+  .issue-list li.sev-low .badge { background:#E8EFD8; color:var(--grass); }
+  .issue-list li.sev-medium .badge { background:#F6E1B3; color:#8A6420; }
+  .issue-list li.sev-high .badge { background:var(--pink-soft); color:var(--berry); }
+  .issue-list li .summary { display:block; color:var(--ink-soft); margin-top:4px; font-size:13px; }
+  .issue-list li .fix { display:block; color:var(--ink-faint); margin-top:2px; font-size:12px; }
+
+  /* ====== TIMELINE ====== */
+  .timeline { list-style:none; padding:0; margin:0; position:relative; }
+  .timeline::before { content:""; position:absolute; left:7px; top:6px; bottom:6px; width:2px; background:var(--line); }
+  .timeline li { position:relative; padding:0 0 16px 30px; }
+  .timeline li::before { content:""; position:absolute; left:2px; top:6px; width:12px; height:12px; border-radius:50%; background:var(--paper); border:2px solid var(--wood); }
+  .timeline li.feature::before { border-color:var(--berry); }
+  .timeline li.refactor::before { border-color:var(--gold); }
+  .timeline li.docs::before { border-color:var(--leaf); }
+  .timeline li.infra::before { border-color:var(--ink-soft); }
+  .timeline li.security::before { border-color:var(--night); }
+  .timeline li .date { font-family: ui-monospace, Menlo, monospace; font-size:12px; color:var(--ink-faint); margin-right:10px; }
+  .timeline li .title { font-weight:600; font-size:14px; }
+  .timeline li .impact { color:var(--ink-soft); font-size:13px; margin-top:3px; }
+
+  /* ====== PROTO ====== */
+  .proto { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:18px 20px; margin-bottom:12px; box-shadow:var(--shadow-soft); }
+  .proto h3 { margin:0 0 10px; }
+  .proto .rule { padding:9px 0; border-top:1px dashed var(--line-soft); }
+  .proto .rule:first-of-type { border-top:none; padding-top:4px; }
+  .proto .rule .head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+  .proto .rule .id { font-family: ui-monospace, Menlo, monospace; font-size:11.5px; color:var(--ink-soft); }
+  .proto .rule .sev { font-size:10px; padding:1px 7px; border-radius:999px; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+  .proto .rule .sev.must_know { background:var(--pink-soft); color:var(--berry); }
+  .proto .rule .sev.gotcha { background:#F6E1B3; color:#8A6420; }
+  .proto .rule p { margin:5px 0 0; color:var(--ink-soft); font-size:13px; }
+
+  pre.kbd { background:var(--code-bg); color:var(--code-fg); border-radius:var(--radius-sm); padding:11px 14px; overflow-x:auto; font-size:12px; line-height:1.55; }
+
+  .palette { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; }
+  .swatch-card { background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-sm); padding:9px; }
+  .swatch-card .swatch { height:32px; border-radius:6px; margin-bottom:6px; border:1px solid var(--line-soft); }
+  .swatch-card .label { font-size:11.5px; font-family: ui-monospace, Menlo, monospace; }
+  .swatch-card .desc { font-size:11px; color:var(--ink-faint); }
+
+  @media (max-width:960px) {
+    .shell { grid-template-columns:1fr; }
+    aside.toc { position:relative; height:auto; border-right:none; border-bottom:1px solid var(--line); }
+    main { padding:24px; }
+  }
+  @media print {
+    aside.toc { display:none; } .shell { grid-template-columns:1fr; } main { padding:0; }
+    section { break-inside:avoid; } .arrows-overlay { display:block; }
+    .diagram.flow-on .component { opacity:1 !important; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+<aside class="toc">
+  <div class="brand">EduAgent · Arch</div>
+  <nav>
+    <a href="#overview">① Overview</a>
+    <a href="#archflow">② Arch &amp; Flows</a>
+    <a href="#state-machines">③ State machines</a>
+    <a href="#modules">④ Module catalog</a>
+    <a href="#decisions">⑤ Design decisions</a>
+    <a href="#performance">⑥ Performance</a>
+    <a href="#issues">⑦ Known issues</a>
+    <a href="#protocols">⑧ Protocols</a>
+    <a href="#evolution">⑨ Evolution</a>
+    <a href="#frontend">⑩ Frontend</a>
+    <a href="#tooling">⑪ Tooling</a>
+  </nav>
+  <div class="meta">
+    Source of truth — <code>docs/architecture.md</code><br>
+    Machine view — <code>docs/architecture.json</code><br>
+    Generated 2026-05-16
+  </div>
+</aside>
+
+<main>
+
+<header class="hero">
+  <h1>EduAgent — Architecture &amp; Flows</h1>
+  <p class="tagline">儿童英语教学 Agent。下方泳道铺开整个系统的组件;点右侧任一 flow,即可看到这次交互在哪些组件之间流动,以及每一步在做什么。机器消费用 <code>docs/architecture.json</code>;权威来源 <code>docs/architecture.md</code>。</p>
+  <div class="hero-meta">
+    <span><strong>Status</strong> · MVP validated, single user</span>
+    <span><strong>Stack</strong> · Next.js 14 + TS + ws + better-sqlite3</span>
+    <span><strong>Server</strong> · <code>server.ts</code>(Next dev 不路由 WS upgrade)</span>
+    <span><strong>Generated</strong> · 2026-05-16</span>
+  </div>
+</header>
+
+<!-- ① OVERVIEW -->
+<section id="overview">
+  <h2><span class="num">1</span>Overview</h2>
+  <p class="lead">单用户阶段优先内容驱动 — 默认建议写更多课程,而非重构架构。架构投入仅在小改动可直接解锁学习循环时启动。</p>
+
+  <h3>Stack</h3>
+  <div class="chips">
+    <span class="chip night">Next.js 14</span>
+    <span class="chip night">TypeScript 5</span>
+    <span class="chip sky">Tailwind 3.4</span>
+    <span class="chip pink">Framer Motion 12</span>
+    <span class="chip wood">ws 8</span>
+    <span class="chip wood">tsx</span>
+    <span class="chip leaf">better-sqlite3</span>
+    <span class="chip gold">vitest + RTL</span>
+  </div>
+
+  <h3>Entry points</h3>
+  <div class="grid-3">
+    <div class="card"><h4>Living doc</h4><p><code>docs/architecture.md</code></p></div>
+    <div class="card"><h4>Project rules</h4><p><code>CLAUDE.md</code></p></div>
+    <div class="card"><h4>Custom server</h4><p><code>server.ts</code></p></div>
+    <div class="card"><h4>First module</h4><p><code>src/lib/voice/lesson-controller.ts</code></p></div>
+    <div class="card"><h4>Course to imitate</h4><p><code>src/data/courses/food.ts</code></p></div>
+    <div class="card"><h4>Backlog</h4><p><code>docs/TODO.md</code></p></div>
+  </div>
+
+  <h3>Hard constraints</h3>
+  <table class="t">
+    <thead><tr><th style="width:22%">Rule</th><th>What it means</th><th style="width:30%">Why</th></tr></thead>
+    <tbody>
+      <tr><td class="topic">secrets server-only</td><td>豆包/MiMo 凭据从不挂 <code>NEXT_PUBLIC_</code> 前缀。</td><td>PR review 一票否决。</td></tr>
+      <tr><td class="topic">push-to-talk only</td><td>空格 = 一次发声。不区分长短按,不支持打断。</td><td>清理 in-flight PCM 太麻烦。</td></tr>
+      <tr><td class="topic">TTS 长连 / ASR 按轮</td><td>不同 socket 生命周期。</td><td>TTS 握手 ~3.7s 值得复用;ASR 协议本就 per-utterance。</td></tr>
+      <tr><td class="topic">VOICE_MOCK 离线</td><td><code>VOICE_MOCK=true</code> 跳过豆包 + MiMo。</td><td>本地/CI 必须能跑通全链路。</td></tr>
+      <tr><td class="topic">docs sync 同 commit</td><td>影响模块职责/数据流/协议/FSM/性能的改动,同 commit 改 <code>docs/architecture.md</code>。</td><td>doc 同步必须是 commit 的一部分。</td></tr>
+      <tr><td class="topic">no secrets in docs</td><td>占位符,即使 repo private。</td><td>泄露后的 rotation 成本远高于谨慎成本。</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ② ARCHITECTURE & FLOWS (interactive) -->
+<section id="archflow">
+  <h2><span class="num">2</span>Architecture &amp; Flows</h2>
+  <p class="lead">左侧泳道按职责把组件分成 8 列(从用户到 upstream);点右侧任一 flow,沿途组件高亮,弧线箭头按时序编号,下方 STEPS 给出每一步的中文解释。</p>
+
+  <div class="col-legend">
+    <span><span class="dot" style="background:var(--ink-soft)"></span>Actor</span>
+    <span><span class="dot" style="background:var(--leaf)"></span>Client route</span>
+    <span><span class="dot" style="background:var(--sky-line)"></span>Browser logic / audio</span>
+    <span><span class="dot" style="background:var(--wood)"></span>Server</span>
+    <span><span class="dot" style="background:var(--pink)"></span>Agent lib</span>
+    <span><span class="dot" style="background:var(--grass)"></span>Storage</span>
+    <span><span class="dot" style="background:var(--berry)"></span>Upstream</span>
+  </div>
+
+  <div class="archflow">
+    <div class="diagram-wrap">
+      <div class="diagram-inner">
+        <svg id="arrow-overlay" class="arrows-overlay" aria-hidden="true"></svg>
+        <div class="diagram" id="diagram">
+
+          <div class="column">
+            <div class="col-header">Actors</div>
+            <div class="component" id="cmp-end-user" data-tone="actor"><div class="label">End user</div><div class="sub">browser · mic · speakers</div></div>
+            <div class="component" id="cmp-course-author" data-tone="actor"><div class="label">Course author</div><div class="sub">src/data/courses/*</div></div>
+          </div>
+
+          <div class="column">
+            <div class="col-header">Client routes</div>
+            <div class="component" id="cmp-route-yard" data-tone="route"><div class="label">/ yard</div><div class="sub">app/page.tsx · LetterCards</div></div>
+            <div class="component" id="cmp-route-cabin" data-tone="route"><div class="label">/lesson/[id]</div><div class="sub">LessonClient · cabin</div></div>
+            <div class="component" id="cmp-route-grass" data-tone="route"><div class="label">/lesson/.../done</div><div class="sub">LessonDoneClient · grass</div></div>
+            <div class="component" id="cmp-route-storage" data-tone="route"><div class="label">/journal</div><div class="sub">JournalClient · storage</div></div>
+            <div class="component" id="cmp-route-attic" data-tone="route"><div class="label">/parents</div><div class="sub">ParentsClient · attic</div></div>
+          </div>
+
+          <div class="column">
+            <div class="col-header">Browser orch</div>
+            <div class="component" id="cmp-phased-view" data-tone="browser"><div class="label">PhasedLessonView</div><div class="sub">phase → Intro/Inter/Reinf</div></div>
+            <div class="component" id="cmp-phased-controller" data-tone="browser"><div class="label">PhasedLessonController</div><div class="sub">phase FSM · rule-driven</div></div>
+            <div class="component" id="cmp-lesson-controller" data-tone="browser"><div class="label">LessonController</div><div class="sub">7-state FSM · ASR/SSE/TTS</div></div>
+            <div class="component" id="cmp-use-spacebar" data-tone="browser"><div class="label">useSpacebar / BloomButton</div><div class="sub">push-to-talk trigger</div></div>
+            <div class="component" id="cmp-pin-gate" data-tone="browser"><div class="label">PIN gate (lib/pin)</div><div class="sub">sha-256 + salt · 3-strike</div></div>
+          </div>
+
+          <div class="column">
+            <div class="col-header">Browser audio</div>
+            <div class="component" id="cmp-recorder" data-tone="browser"><div class="label">Recorder</div><div class="sub">getUserMedia · singleton AC</div></div>
+            <div class="component" id="cmp-worklet" data-tone="browser"><div class="label">pcm-recorder.worklet</div><div class="sub">16k Int16 · 200ms · flush</div></div>
+            <div class="component" id="cmp-asr-client" data-tone="browser"><div class="label">AsrClient</div><div class="sub">per-turn WS · finish frame</div></div>
+            <div class="component" id="cmp-tts-client" data-tone="browser"><div class="label">TtsClient</div><div class="sub">long-lived WS · multiplexed</div></div>
+            <div class="component" id="cmp-pcm-player" data-tone="browser"><div class="label">PcmPlayer</div><div class="sub">24kHz queued · state-guard</div></div>
+          </div>
+
+          <div class="column">
+            <div class="col-header">Server</div>
+            <div class="component" id="cmp-server-root" data-tone="server"><div class="label">server.ts</div><div class="sub">WS upgrade router</div></div>
+            <div class="component" id="cmp-asr-proxy" data-tone="server"><div class="label">ASR proxy</div><div class="sub">handshake buf · hotwords</div></div>
+            <div class="component" id="cmp-tts-proxy" data-tone="server"><div class="label">TTS proxy</div><div class="sub">long-conn reuse</div></div>
+            <div class="component" id="cmp-chat-route" data-tone="server"><div class="label">/api/chat (SSE)</div><div class="sub">start · message · end</div></div>
+            <div class="component" id="cmp-read-api" data-tone="server"><div class="label">Read APIs</div><div class="sub">courses · progress · sessions · stats</div></div>
+          </div>
+
+          <div class="column">
+            <div class="col-header">Agent lib</div>
+            <div class="component" id="cmp-orchestrator" data-tone="agent"><div class="label">orchestrator</div><div class="sub">streamUserInput → SSE</div></div>
+            <div class="component" id="cmp-session" data-tone="agent"><div class="label">session</div><div class="sub">one LLM turn</div></div>
+            <div class="component" id="cmp-speech-extractor" data-tone="agent"><div class="label">SpeechExtractor</div><div class="sub">streaming JSON parser</div></div>
+            <div class="component" id="cmp-memory" data-tone="agent"><div class="label">memory</div><div class="sub">cardProgress · clearedCardIds</div></div>
+            <div class="component" id="cmp-prompt" data-tone="agent"><div class="label">prompt</div><div class="sub">phase-aware system prompt</div></div>
+            <div class="component" id="cmp-mimo-llm" data-tone="agent"><div class="label">mimo client</div><div class="sub">streamLLM token gen</div></div>
+          </div>
+
+          <div class="column">
+            <div class="col-header">Storage</div>
+            <div class="component" id="cmp-sqlite" data-tone="storage"><div class="label">SQLite</div><div class="sub">lessons · turns · word_performance</div></div>
+          </div>
+
+          <div class="column">
+            <div class="col-header">Upstream</div>
+            <div class="component" id="cmp-doubao-asr" data-tone="upstream"><div class="label">Doubao ASR</div><div class="sub">bigmodel_async · V3</div></div>
+            <div class="component" id="cmp-doubao-tts" data-tone="upstream"><div class="label">Doubao TTS</div><div class="sub">seed-tts-2.0 · Tina老师2.0</div></div>
+            <div class="component" id="cmp-mimo" data-tone="upstream"><div class="label">MiMo LLM</div><div class="sub">mimo-v2.5-pro · first-token ~4s</div></div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-side">
+      <div class="flow-panel">
+        <div class="panel-header"><span>Flows</span><button class="clear" id="clear-flow" type="button">Clear</button></div>
+        <div class="flow-list" id="flow-list"></div>
+      </div>
+      <div class="flow-panel">
+        <div class="panel-header"><span>Steps</span></div>
+        <div class="steps-panel" id="steps-panel"><p class="empty">点击左侧任一 flow,这里会展开它的每一步:谁调谁、传什么、为什么。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ③ STATE MACHINES -->
+<section id="state-machines">
+  <h2><span class="num">3</span>State machines</h2>
+  <p class="lead">两层 FSM:<code>LessonController</code> 调度单轮语音管线;<code>PhasedLessonController</code> 包在外面用规则驱动 phase 切换。LLM 不输出 phase transition。</p>
+
+  <div class="fsm-grid">
+    <div class="fsm-wrap">
+      <h3>LessonController · 7 states</h3>
+      <p class="owner">src/lib/voice/lesson-controller.ts</p>
+      <svg viewBox="0 0 540 480" width="100%" role="img" aria-label="LessonController FSM">
+        <defs>
+          <marker id="ah-fsm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5C5654"/></marker>
+          <marker id="ah-fsm-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#BD5B6B"/></marker>
+        </defs>
+        <g font-size="13" font-weight="600" fill="#2D2A2A">
+          <circle cx="80" cy="60" r="34" fill="#FFF8ED" stroke="#A47B5C"/><text x="80" y="64" text-anchor="middle">idle</text>
+          <circle cx="240" cy="60" r="34" fill="#F4C8CC" stroke="#E89A9F"/><text x="240" y="64" text-anchor="middle">greeting</text>
+          <circle cx="400" cy="60" r="34" fill="#DCE9F0" stroke="#8FB6CA"/><text x="400" y="64" text-anchor="middle">awaiting</text>
+          <circle cx="400" cy="200" r="34" fill="#DCE9F0" stroke="#8FB6CA"/><text x="400" y="204" text-anchor="middle">listening</text>
+          <circle cx="400" cy="340" r="34" fill="#F6E1B3" stroke="#D4A14F"/><text x="400" y="344" text-anchor="middle">thinking</text>
+          <circle cx="240" cy="340" r="34" fill="#F4C8CC" stroke="#E89A9F"/><text x="240" y="344" text-anchor="middle">speaking</text>
+          <circle cx="80" cy="340" r="34" fill="#FFF8ED" stroke="#BD5B6B" stroke-dasharray="3 3"/><text x="80" y="344" text-anchor="middle">ending</text>
+        </g>
+        <g stroke="#5C5654" fill="none" stroke-width="1.5">
+          <line x1="114" y1="60" x2="206" y2="60" marker-end="url(#ah-fsm)"/>
+          <line x1="274" y1="60" x2="366" y2="60" marker-end="url(#ah-fsm)"/>
+          <line x1="400" y1="94" x2="400" y2="166" marker-end="url(#ah-fsm)"/>
+          <line x1="400" y1="234" x2="400" y2="306" marker-end="url(#ah-fsm)"/>
+          <path d="M428 188 C 480 160 480 100 432 76" marker-end="url(#ah-fsm)"/>
+          <path d="M428 326 C 510 280 510 100 432 60" stroke-dasharray="5 4" marker-end="url(#ah-fsm)"/>
+          <line x1="366" y1="340" x2="274" y2="340" marker-end="url(#ah-fsm)"/>
+          <path d="M232 306 C 200 220 320 100 372 78" marker-end="url(#ah-fsm)"/>
+        </g>
+        <g stroke="#BD5B6B" fill="none" stroke-width="1.5" stroke-dasharray="4 4">
+          <line x1="206" y1="340" x2="114" y2="340" marker-end="url(#ah-fsm-end)"/>
+          <line x1="80" y1="306" x2="80" y2="94" marker-end="url(#ah-fsm-end)"/>
+        </g>
+        <g font-size="11" fill="#5C5654">
+          <text x="160" y="50" text-anchor="middle">startLesson</text>
+          <text x="320" y="50" text-anchor="middle">TTS finished</text>
+          <text x="410" y="135" text-anchor="start">↓ space pressed</text>
+          <text x="410" y="275" text-anchor="start">↓ space ≥800ms</text>
+          <text x="320" y="332" text-anchor="middle">first speech-delta</text>
+          <text x="265" y="232" text-anchor="start">speaking → awaiting</text>
+          <text x="265" y="246" text-anchor="start">(TTS finished)</text>
+          <text x="490" y="148" text-anchor="middle">&lt;800ms</text>
+          <text x="525" y="207" text-anchor="middle">5s timeout</text>
+          <text x="160" y="332" text-anchor="middle" fill="#BD5B6B">endLesson</text>
+          <text x="60" y="220" text-anchor="middle" fill="#BD5B6B">teardown</text>
+        </g>
+      </svg>
+    </div>
+
+    <div class="fsm-wrap">
+      <h3>PhasedLessonController · 5 phases</h3>
+      <p class="owner">src/lib/voice/phased-lesson-controller.ts</p>
+      <svg viewBox="0 0 540 480" width="100%" role="img" aria-label="PhasedLessonController FSM">
+        <defs>
+          <marker id="ah-fsm2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5C5654"/></marker>
+          <marker id="ah-fsm2-end" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#BD5B6B"/></marker>
+        </defs>
+        <g font-size="13" font-weight="600" fill="#2D2A2A">
+          <circle cx="80" cy="240" r="38" fill="#FFF8ED" stroke="#A47B5C"/><text x="80" y="244" text-anchor="middle">idle</text>
+          <circle cx="200" cy="120" r="38" fill="#F6E1B3" stroke="#D4A14F"/><text x="200" y="124" text-anchor="middle">intro</text>
+          <circle cx="350" cy="120" r="44" fill="#F4C8CC" stroke="#E89A9F"/><text x="350" y="124" text-anchor="middle">interactive</text>
+          <circle cx="350" cy="280" r="48" fill="#DCE9F0" stroke="#8FB6CA"/><text x="350" y="276" text-anchor="middle">reinforcement</text>
+          <circle cx="200" cy="380" r="38" fill="#E8EFD8" stroke="#82A57E"/><text x="200" y="384" text-anchor="middle">done</text>
+        </g>
+        <g stroke="#5C5654" fill="none" stroke-width="1.5">
+          <line x1="116" y1="220" x2="170" y2="148" marker-end="url(#ah-fsm2)"/>
+          <line x1="240" y1="120" x2="306" y2="120" marker-end="url(#ah-fsm2)"/>
+          <line x1="350" y1="164" x2="350" y2="232" marker-end="url(#ah-fsm2)"/>
+          <line x1="312" y1="306" x2="232" y2="358" marker-end="url(#ah-fsm2)"/>
+        </g>
+        <g stroke="#BD5B6B" fill="none" stroke-width="1.5" stroke-dasharray="4 4">
+          <path d="M162 380 C 100 360 70 320 78 278" marker-end="url(#ah-fsm2-end)"/>
+        </g>
+        <g font-size="11" fill="#5C5654">
+          <text x="120" y="180" text-anchor="middle">startLesson</text>
+          <text x="270" y="105" text-anchor="middle">[切1] all introduced</text>
+          <text x="270" y="118" text-anchor="middle">&amp; controller awaiting</text>
+          <text x="378" y="200" text-anchor="start">[切2] cleared OR</text>
+          <text x="378" y="214" text-anchor="start">3×cards attempts</text>
+          <text x="280" y="345" text-anchor="middle">[切3] all quizzes answered</text>
+          <text x="100" y="320" text-anchor="middle" fill="#BD5B6B">endLesson (any)</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- ④ MODULES -->
+<section id="modules">
+  <h2><span class="num">4</span>Module catalog</h2>
+  <p class="lead">72 个模块按职责分组。粉色边框 = 关键路径(语音延迟/正确性热点),改它必须同步 <code>architecture.md</code>。</p>
+
+  <h3>Infrastructure</h3>
+  <div class="grid-3">
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">server.ts</div><div class="role">Custom Next.js server; routes WS upgrade for ASR / TTS, delegates HTTP to Next.</div></div>
+    <div class="module-card"><div class="path">src/lib/init.ts</div><div class="role">Startup env validation; skipped when VOICE_MOCK=true.</div></div>
+    <div class="module-card"><div class="path">src/lib/logger.ts</div><div class="role">Structured logging shim.</div></div>
+  </div>
+
+  <h3>Voice (browser + server)</h3>
+  <div class="grid-3">
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/voice/doubao-codec.ts</div><div class="role">Doubao binary protocol encode/decode shared by ASR + TTS.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/voice/asr-proxy.ts</div><div class="role">Server ASR WS proxy: PCM buffer during handshake, finish cache, hotword injection.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/voice/tts-proxy.ts</div><div class="role">Server TTS WS proxy with long-connection reuse.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/voice/asr-client.ts</div><div class="role">Browser ASR WS wrapper; finish() control frame.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/voice/tts-client.ts</div><div class="role">Browser TTS WS wrapper; startSession / sendText / finishSession / cancel.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/voice/lesson-controller.ts</div><div class="role">7-state FSM unifying ASR + SSE + TTS for one turn.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/voice/phased-lesson-controller.ts</div><div class="role">Outer phase FSM; rules drive intro → interactive → reinforcement → done.</div></div>
+  </div>
+
+  <h3>Agent (LLM orchestration)</h3>
+  <div class="grid-3">
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/agent/orchestrator.ts</div><div class="role">Wraps streamUserInput into an SSE ReadableStream for /api/chat.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/agent/session.ts</div><div class="role">One LLM turn: judgment → history → streamLLM → chunk drain → usage.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/agent/speech-extractor.ts</div><div class="role">Streaming JSON parser; emits speech-delta as field appears.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/agent/memory.ts</div><div class="role">cardProgress / clearedCardIds / interest signals / per-card attempt judgment.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/agent/prompt.ts</div><div class="role">Phase-aware system prompt; on-failure strategy switch.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/mimo/llm.ts</div><div class="role">MiMo client; streamLLM async-generates token delta + final usage.</div></div>
+  </div>
+
+  <h3>Audio (browser-only)</h3>
+  <div class="grid-3">
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/audio/recorder.ts</div><div class="role">Singleton mic + AudioContext + worklet; prewarmRecorder at startLesson.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/lib/audio/pcm-player.ts</div><div class="role">Queued 24kHz PCM player; stop() silences immediately.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">public/worklets/pcm-recorder.worklet.js</div><div class="role">16kHz Int16, 200ms packets, flushes trailing partial buffer.</div></div>
+  </div>
+
+  <h3>Course data, lesson UI, scene UI, atoms, hooks, db, API routes, app routes, scripts</h3>
+  <div class="grid-3">
+    <div class="module-card"><div class="path">src/data/courses/food.ts</div><div class="role">Sole visible course; food three-phase reference.</div></div>
+    <div class="module-card"><div class="path">src/data/courses/index.ts</div><div class="role">Course registry; allCourses / getCourseById.</div></div>
+    <div class="module-card"><div class="path">src/types/course.ts</div><div class="role">Course / Card / Phase types; phases required.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/components/lesson/PhasedLessonView.tsx</div><div class="role">Routes phase → Intro / Interactive / Reinforce / Done.</div></div>
+    <div class="module-card"><div class="path">src/components/lesson/IntroPhase.tsx</div><div class="role">Theme intro: scene SVG + hotspot tap-explain.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/components/lesson/InteractivePhase.tsx</div><div class="role">AI conversation: WordBook + Bunny + SubtitleBar + BloomButton over LessonController.</div></div>
+    <div class="module-card"><div class="path">src/components/lesson/ReinforcePhase.tsx</div><div class="role">Chains pick-word / repeat-after-me quizzes.</div></div>
+    <div class="module-card"><div class="path">src/components/lesson/QuizPickWord.tsx</div><div class="role">Quiz: hear prompt, pick picture.</div></div>
+    <div class="module-card"><div class="path">src/components/lesson/QuizRepeatAfterMe.tsx</div><div class="role">Quiz: ASR final containing target word → correct.</div></div>
+    <div class="module-card"><div class="path">src/components/lesson/BloomButton.tsx</div><div class="role">Hold-to-talk: pointer capture + 5-petal SVG.</div></div>
+    <div class="module-card"><div class="path">src/components/lesson/WordBook.tsx</div><div class="role">Tabletop picture book; AnimatePresence card swap.</div></div>
+    <div class="module-card"><div class="path">src/components/lesson/SubtitleBar.tsx</div><div class="role">v2 subtitle; bunny tones; AI-speaking pulse dot.</div></div>
+    <div class="module-card"><div class="path">src/components/bunny/Bunny.tsx</div><div class="role">Single full-body Bunny; 5 poses × 4 moods.</div></div>
+    <div class="module-card"><div class="path">src/components/scene/SceneFrame.tsx</div><div class="role">5-variant scene shell with enter/leave animations.</div></div>
+    <div class="module-card"><div class="path">src/components/scene/{Yard,Cabin,Grass,Storage,Attic}Scene.tsx</div><div class="role">5 SVG backgrounds (1280×800 viewBox).</div></div>
+    <div class="module-card"><div class="path">src/components/home/LetterCard.tsx</div><div class="role">Letter-styled course card; layoutId transition.</div></div>
+    <div class="module-card"><div class="path">src/components/done/StickerWord.tsx</div><div class="role">Spring fall + sparkle.</div></div>
+    <div class="module-card"><div class="path">src/components/journal/{WordEntry,BookShelf}.tsx</div><div class="role">Word card + shelf grouping.</div></div>
+    <div class="module-card"><div class="path">src/components/parents/{PinGate,StatsCard,SessionRow,SettingsAccordion}.tsx</div><div class="role">Attic PIN + dashboard primitives.</div></div>
+    <div class="module-card"><div class="path">src/components/ui/{Button,Surface,Stars,PinPad,ErrorBoundary,icons}.tsx</div><div class="role">UI atoms; root ErrorBoundary falls back to yard.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/hooks/useSpacebar.ts</div><div class="role">Document-level spacebar push-to-talk.</div></div>
+    <div class="module-card"><div class="path">src/lib/progress.ts</div><div class="role">Cross-lesson SUM(attempts/correct); lastPracticed = MAX(start_time).</div></div>
+    <div class="module-card"><div class="path">src/lib/stats.ts</div><div class="role">Stats aggregation for parents dashboard.</div></div>
+    <div class="module-card"><div class="path">src/lib/pin.ts</div><div class="role">Client-side PIN (SHA-256 + salt; 3-strike lockout 30s).</div></div>
+    <div class="module-card"><div class="path">src/lib/db/{schema,queries,index}.ts</div><div class="role">SQLite schema, queries, handle factory.</div></div>
+    <div class="module-card critical"><span class="badge-crit">critical</span><div class="path">src/app/api/chat/route.ts</div><div class="role">POST /api/chat — start / message / end; SSE response.</div></div>
+    <div class="module-card"><div class="path">src/app/api/{courses,progress,sessions,stats}/route.ts</div><div class="role">Read-only aggregation endpoints.</div></div>
+    <div class="module-card"><div class="path">src/app/page.tsx + {lesson,journal,parents}/...</div><div class="role">5 client routes (yard, cabin, grass, storage, attic).</div></div>
+    <div class="module-card"><div class="path">scripts/lesson-report-data.ts</div><div class="role">Pure data layer for /lesson-report; aggregates + anomaly flags.</div></div>
+    <div class="module-card"><div class="path">scripts/smoke-pages.ts</div><div class="role">pnpm run smoke — dev + 5 pages + 4 APIs.</div></div>
+    <div class="module-card"><div class="path">scripts/asr-hotwords-regression.ts</div><div class="role">ASR hotwords regression harness.</div></div>
+  </div>
+</section>
+
+<!-- ⑤ DECISIONS -->
+<section id="decisions">
+  <h2><span class="num">5</span>Design decisions</h2>
+  <p class="lead">19 条已固化的取舍。改它们之前请先回看 rationale,而不是默认翻新。</p>
+  <table class="t">
+    <thead><tr><th>Topic</th><th>Choice</th><th>Why</th><th class="cat">Bucket</th></tr></thead>
+    <tbody>
+      <tr><td class="topic">Streaming JSON extraction</td><td>SpeechExtractor 解析单个 LLM 响应。</td><td>省一次 LLM 调用 + 首字延迟最优;~100 行。</td><td><span class="chip sky">performance</span></td></tr>
+      <tr><td class="topic">TTS voice</td><td>Fixed seed-tts-2.0-standard + Tina老师2.0 + cache。</td><td>稳定性优先,开场白 100% 一致。</td><td><span class="chip leaf">reliability</span></td></tr>
+      <tr><td class="topic">No client splitting</td><td>LLM token 直接喂 TTS。</td><td>豆包推荐;更自然 + 情绪饱满。</td><td><span class="chip gold">ux</span></td></tr>
+      <tr><td class="topic">Echo suppression</td><td>仅 getUserMedia 三标志位。</td><td>简单,无服务端 DSP。</td><td><span class="chip wood">simplicity</span></td></tr>
+      <tr><td class="topic">ASR per-turn / TTS long-conn</td><td>不同 socket 生命周期。</td><td>TTS 握手 ~3.7s 值得复用;ASR 协议本就 per-utterance。</td><td><span class="chip sky">performance</span></td></tr>
+      <tr><td class="topic">AudioContext singleton</td><td>不每轮 close+new。</td><td>3-5 次重建后 mic 失活。</td><td><span class="chip leaf">reliability</span></td></tr>
+      <tr><td class="topic">Mic prewarm at startLesson</td><td>getUserMedia + worklet 提前就绪。</td><td>否则前几个字会丢。</td><td><span class="chip sky">performance</span></td></tr>
+      <tr><td class="topic">ASR proxy PCM buffer</td><td>upstream 握手期间 queue PCM。</td><td>否则前 1-3 秒说话丢失。</td><td><span class="chip leaf">reliability</span></td></tr>
+      <tr><td class="topic">Worklet flush</td><td>disconnect 时刷剩余 buffer。</td><td>否则尾字丢。</td><td><span class="chip leaf">reliability</span></td></tr>
+      <tr><td class="topic">800ms short-press reject</td><td>前端直接拒,不进 thinking。</td><td>豆包对 &lt;1.5s 置信度低,立即反馈更友好。</td><td><span class="chip gold">ux</span></td></tr>
+      <tr><td class="topic">5s ASR fallback</td><td>5s timeout → awaiting。</td><td>9s 太长,让重试不畅。</td><td><span class="chip gold">ux</span></td></tr>
+      <tr><td class="topic">No barge-in</td><td>speaking 时空格忽略。</td><td>清理 in-flight PCM 难做干净;后续再加。</td><td><span class="chip night">scope</span></td></tr>
+      <tr><td class="topic">Subtitle leads audio</td><td>不做时间戳同步。</td><td>画布跳得快 ~3s — 见 Known Issues。</td><td><span class="chip night">scope</span></td></tr>
+      <tr><td class="topic">Exact word match</td><td>仅目标英文词精确 token 命中。</td><td>保守优先;train 算对,tree 不算。</td><td><span class="chip leaf">reliability</span></td></tr>
+      <tr><td class="topic">ASR/TTS usage</td><td>请求数 + 字符长度。</td><td>provider 没暴露 token,先保证课后报告可观测。</td><td><span class="chip sky">performance</span></td></tr>
+      <tr><td class="topic">Canvas 1:1</td><td>图 75% (4:3 1024×768) · 文字 25%。</td><td>幼儿教学:图为主角,文字为锚点。</td><td><span class="chip gold">ux</span></td></tr>
+      <tr><td class="topic">Phase rule-driven</td><td>PhasedLessonController 判定;LLM 不输出 phase。</td><td>LLM 切换不可预测;规则可测、可回滚。</td><td><span class="chip leaf">reliability</span></td></tr>
+      <tr><td class="topic">Only food visible</td><td>退役 transportation / timeNumbers + 旧 LessonView。</td><td>单用户阶段不维护两套并行路径。</td><td><span class="chip night">scope</span></td></tr>
+      <tr><td class="topic">Keep LessonController inside Phased</td><td>复用 ASR/TTS/SSE 管线。</td><td>比重写音频链路风险低。</td><td><span class="chip night">scope</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ⑥ PERFORMANCE -->
+<section id="performance">
+  <h2><span class="num">6</span>Performance baseline</h2>
+  <p class="lead">2026-05-01 实测,18 轮中 14 成功。主要瓶颈是 MiMo first-token ~4s,前端再快也只能省几百 ms。</p>
+  <div class="metrics">
+    <div class="metric near"><div class="name">用户松手 → ASR final</div><div class="vals">target 500ms · median <strong>594ms</strong></div><div class="bar"><span style="width:84%"></span></div><span class="status">near</span><div class="note">prewarm + buffer 之后,剩下豆包识别本身。</div></div>
+    <div class="metric exceeded_target"><div class="name">ASR final → LLM 第一句 token</div><div class="vals">target 1000ms · median <strong>3976ms</strong></div><div class="bar"><span style="width:100%"></span></div><span class="status">超目标 4×</span><div class="note">MiMo first-token 慢,前端无法优化。</div></div>
+    <div class="metric exceeded_target"><div class="name">LLM 第一句 → TTS 首 PCM 包</div><div class="vals">target 500ms · median <strong>2200ms</strong></div><div class="bar"><span style="width:100%"></span></div><span class="status">超目标 4×</span><div class="note">SSE 解析 + TTS 合成 + 网络。</div></div>
+    <div class="metric exceeded_target"><div class="name">首音频总延迟</div><div class="vals">target 2000ms · median <strong>6212ms</strong></div><div class="bar"><span style="width:100%"></span></div><span class="status">超目标 3×</span><div class="note">主要被 LLM 拖累。</div></div>
+    <div class="metric exceeded_target"><div class="name">Round-trip(松手 → AI 说完)</div><div class="vals">target 3000ms · median <strong>8860ms</strong></div><div class="bar"><span style="width:100%"></span></div><span class="status">超目标 3×</span><div class="note">含 AI 说话时长,非纯首响指标。</div></div>
+  </div>
+</section>
+
+<!-- ⑦ KNOWN ISSUES -->
+<section id="issues">
+  <h2><span class="num">7</span>Known issues</h2>
+  <p class="lead">已识别未修;详情入口 <code>docs/TODO.md</code>。</p>
+  <ul class="issue-list">
+    <li class="sev-high"><span class="id">session_resume</span><span class="badge">high</span><span class="summary">sessions 是 in-memory Map:server 重启 / 刷新 / 断网 = 客户端旧 sessionId 失效。</span><span class="fix">→ SQLite 持久化 + client resume 流程</span></li>
+    <li class="sev-medium"><span class="id">actions_vs_tts_timing</span><span class="badge">medium</span><span class="summary">show_card 动作领先 AI 讲解,体感跳得快 ~3s。</span></li>
+    <li class="sev-high"><span class="id">mimo_first_token</span><span class="badge">high</span><span class="summary">MiMo first-token ~4s 主导首音频延迟,前端无法优化。</span></li>
+    <li class="sev-medium"><span class="id">asr_recognition_quality</span><span class="badge">medium</span><span class="summary">豆包 ASR 在英文短词与数字归一化弱(hour → Our.)。容错由 LLM attempt_assessment 承担。</span></li>
+    <li class="sev-medium"><span class="id">token_usage_high</span><span class="badge">medium</span><span class="summary">LLM history 已裁 12 条,尚未做摘要压缩。</span></li>
+    <li class="sev-low"><span class="id">voice_tuning</span><span class="badge">low</span><span class="summary">Tina老师2.0 可接受;细致试听后续再做。</span></li>
+    <li class="sev-low"><span class="id">vad_auto_stop</span><span class="badge">low</span><span class="summary">无静音自动停止,依赖用户主动松手。</span></li>
+    <li class="sev-low"><span class="id">ws_backoff</span><span class="badge">low</span><span class="summary">当前只重连一次,可加指数退避。</span></li>
+    <li class="sev-low"><span class="id">preload_opening_tts</span><span class="badge">low</span><span class="summary">利用豆包 cache 让开场首句近零延迟。</span></li>
+  </ul>
+</section>
+
+<!-- ⑧ PROTOCOLS -->
+<section id="protocols">
+  <h2><span class="num">8</span>Protocol pitfalls</h2>
+  <p class="lead">碰到豆包 ASR/TTS 报错时先翻这里,再翻 <code>docs/DOUBAO Protocol/{asr,tts}.md</code>。</p>
+
+  <div class="proto">
+    <h3>Doubao V3 Bidirectional TTS</h3>
+    <div class="rule"><div class="head"><span class="id">codec_flag_0x04</span><span class="sev must_know">must_know</span></div><p>Codec flag 锁 0x04(with event)。是否带 sessionId 由 event_id 决定(&lt;100 不带、≥100 带、ConnectionStarted=50 带 connection_id)。<strong>不要</strong>根据"有没有 sessionId"切 flag,豆包会按 V1 sequence 协议解码报 sequence mismatch 伪错。</p></div>
+    <div class="rule"><div class="head"><span class="id">additions_is_jsonstring</span><span class="sev gotcha">gotcha</span></div><p>req_params.additions 是 JSON 编码<strong>字符串</strong>,不是 object。</p></div>
+    <div class="rule"><div class="head"><span class="id">text_inside_req_params</span><span class="sev must_know">must_know</span></div><p>TaskRequest 的 text 在 req_params.text,不在顶层。</p></div>
+    <div class="rule"><div class="head"><span class="id">long_conn_one_session</span><span class="sev must_know">must_know</span></div><p>一个 WS 可多 session,同一时刻只能一个;session 间不重发 StartConnection。</p></div>
+  </div>
+
+  <div class="proto">
+    <h3>Doubao V3 Streaming ASR</h3>
+    <div class="rule"><div class="head"><span class="id">show_utterances_required</span><span class="sev must_know">must_know</span></div><p><code>show_utterances: true</code> 必传,否则无 utterances 字段,无法判 final。</p></div>
+    <div class="rule"><div class="head"><span class="id">result_type_full</span><span class="sev must_know">must_know</span></div><p><code>result_type: 'full'</code>,不是 'single'。single 增量,前面字会丢。</p></div>
+    <div class="rule"><div class="head"><span class="id">enable_ddc_false</span><span class="sev must_know">must_know</span></div><p><code>enable_ddc: false</code>,儿童语料关掉语义顺滑。</p></div>
+    <div class="rule"><div class="head"><span class="id">hotwords_via_corpus_context</span><span class="sev gotcha">gotcha</span></div><p>targetWords 进 WS query → proxy 写 <code>request.corpus.context = '{"hotwords":[...]}'</code>。无 per-word weight,无 language_hint。</p></div>
+    <div class="rule"><div class="head"><span class="id">hotwords_limits</span><span class="sev gotcha">gotcha</span></div><p>2026-05-05 实测:hotwords 对 hour → Our.、1000 → 10 没救。字典化纠正已撤销(过拟合 + 让 LLM 看不见 raw ASR)。容错由 LLM attempt_assessment 承担。</p></div>
+    <div class="rule"><div class="head"><span class="id">client_finish_control_frame</span><span class="sev must_know">must_know</span></div><p>客户端<strong>不能</strong>直接 close WS;必须发 <code>{type:'finish'}</code>,proxy 发 -seq 等 final。直接 close 卡 thinking。</p></div>
+    <div class="rule"><div class="head"><span class="id">proxy_must_buffer_pcm</span><span class="sev must_know">must_know</span></div><p>client WS 几十 ms open,但 upstream 握手 1-3s。proxy 不 buffer 就丢前 1-3s。</p></div>
+  </div>
+
+  <div class="proto">
+    <h3>Auth headers</h3>
+    <p><strong>ASR</strong>:<code>X-Api-App-Key</code> · <code>X-Api-Access-Key</code> · <code>X-Api-Resource-Id</code> · <code>X-Api-Request-Id</code> · <code>X-Api-Sequence: -1</code></p>
+    <p><strong>TTS</strong>:<code>X-Api-App-Id</code> · <code>X-Api-Access-Key</code> · <code>X-Api-Resource-Id</code> · <code>X-Api-Connect-Id</code></p>
+    <p style="color:var(--ink-faint);font-size:12.5px">注意 App-Key 与 App-Id 一字之差;<code>X-Api-Sequence: -1</code> ASR 必传。</p>
+  </div>
+
+  <div class="proto">
+    <h3>MiMo API</h3>
+    <p><strong>Base</strong> · <code>https://token-plan-cn.xiaomimimo.com/v1</code></p>
+    <p><strong>Auth</strong> · <code>Authorization: Bearer</code>(不是 <code>api-key</code>)</p>
+    <p><strong>LLM</strong> · mimo-v2.5-pro;<code>response_format: { type: 'json_object' }</code> 工作正常</p>
+    <p><strong>ASR/TTS legacy</strong> · 已被豆包取代;MiMo 无 image generation。</p>
+  </div>
+</section>
+
+<!-- ⑨ EVOLUTION -->
+<section id="evolution">
+  <h2><span class="num">9</span>Evolution timeline</h2>
+  <p class="lead">粗粒度演进。不再 hardcode SHA — git history 经过 redact 重写。具体 commit 用 <code>git log --oneline</code>。</p>
+  <ul class="timeline">
+    <li class="feature"><span class="date">2026-05-01</span><span class="title">Voice pipeline v1 + sync docs</span><div class="impact">README / TODO / benchmarks created alongside initial voice stack.</div></li>
+    <li class="refactor"><span class="date">2026-05-01</span><span class="title">E2E acceptance bug fixes</span><div class="impact">Multiple integration bugs corrected; architecture stabilized.</div></li>
+    <li class="docs"><span class="date">2026-05-01</span><span class="title">Introduced architecture.md + CLAUDE.md</span><div class="impact">Living-doc + project-rule contract established.</div></li>
+    <li class="security"><span class="date">2026-05-01</span><span class="title">Redacted secrets + credential rule</span><div class="impact">rotate → redact → force-push → rule playbook.</div></li>
+    <li class="feature"><span class="date">2026-05-05</span><span class="title">Canvas v2: WordCardCanvas</span><div class="impact">Unified to show_card; images[] → cards[]; old tools removed.</div></li>
+    <li class="feature"><span class="date">2026-05-10</span><span class="title">Teaching loop v1.1 — drillParts</span><div class="impact">Every card requires drillParts; show_card → currentCardId; attempt_assessment; history trimmed to 12.</div></li>
+    <li class="refactor"><span class="date">2026-05-14</span><span class="title">Front-end refactor — Bunny's yard</span><div class="impact">5 spaces, Bunny pose × mood, SceneFrame, PIN gate, /api/{progress,sessions,stats}.</div></li>
+    <li class="feature"><span class="date">2026-05-15</span><span class="title">Three-phase lesson structure</span><div class="impact">food three-phase course; phase-aware prompt + SSE; PhasedLessonController; old courses + LessonView retired; Course.phases required.</div></li>
+  </ul>
+</section>
+
+<!-- ⑩ FRONTEND -->
+<section id="frontend">
+  <h2><span class="num">10</span>Frontend — Bunny's yard</h2>
+  <p class="lead">5 个空间 / 5 个页面 / 1 个 Bunny 全身组件。每条路由对应一个 SceneFrame variant。</p>
+
+  <h3>Routes</h3>
+  <table class="t">
+    <thead><tr><th>Path</th><th>Scene</th><th>Purpose</th><th>Data</th></tr></thead>
+    <tbody>
+      <tr><td><code>/</code></td><td>yard</td><td>Course list (LetterCard)</td><td><code>/api/courses</code></td></tr>
+      <tr><td><code>/lesson/[id]</code></td><td>cabin</td><td>Three-phase lesson</td><td>voice WS + SSE</td></tr>
+      <tr><td><code>/lesson/[id]/done</code></td><td>grass</td><td>Sticker summary</td><td><code>/api/progress</code></td></tr>
+      <tr><td><code>/journal</code></td><td>storage</td><td>Mastered-word journal</td><td><code>/api/progress</code></td></tr>
+      <tr><td><code>/parents</code></td><td>attic</td><td>Stats dashboard (PIN)</td><td><code>/api/sessions</code> + <code>/api/stats</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Palette</h3>
+  <div class="palette">
+    <div class="swatch-card"><div class="swatch" style="background:#FBF6EC"></div><div class="label">bunny-cream</div><div class="desc">off-white bg</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#FFF8ED"></div><div class="label">bunny-warmpaper</div><div class="desc">paper</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#DCE9F0"></div><div class="label">bunny-sky</div><div class="desc">user tone</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#2E3942"></div><div class="label">bunny-night</div><div class="desc">dark accent</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#E89A9F"></div><div class="label">bunny-pink</div><div class="desc">emphasis</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#82A57E"></div><div class="label">bunny-leaf</div><div class="desc">leaf green</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#6B8E5A"></div><div class="label">bunny-grass</div><div class="desc">grass green</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#A47B5C"></div><div class="label">bunny-wood</div><div class="desc">wood brown</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#D4A14F"></div><div class="label">bunny-gold</div><div class="desc">accent</div></div>
+    <div class="swatch-card"><div class="swatch" style="background:#BD5B6B"></div><div class="label">bunny-berry</div><div class="desc">link/alert</div></div>
+  </div>
+
+  <h3>Mastery derivation</h3>
+<pre class="kbd">masteryStarsFromRatio(correct, attempts):
+  attempts === 0     → 0
+  ratio &gt;= 0.9       → 3
+  ratio &gt;= 0.6       → 2
+  ratio &gt;  0         → 1
+
+buildProgressSnapshot — SUM(attempts/correct) across lessons;
+lastPracticed = MAX(start_time).</pre>
+</section>
+
+<!-- ⑪ TOOLING -->
+<section id="tooling">
+  <h2><span class="num">11</span>Tooling</h2>
+  <p class="lead">课后报告 + 烟测脚本 + 单测。</p>
+
+  <h3>/lesson-report</h3>
+  <div class="grid-2">
+    <div class="card"><h4>Data layer</h4><p><code>scripts/lesson-report-data.ts</code> — pure <code>buildReport(db, sessionId, courseLoader)</code> with unit tests. 基础聚合 + 目标词 + anomaly flags(highAvgInput / asrUsageNotTracked / ttsUsageNotTracked / tokensCorrupted)。</p></div>
+    <div class="card"><h4>LLM template</h4><p><code>.claude/commands/lesson-report.md</code> — 模板,LLM 看 raw <code>interactions</code> 判 ASR 误识 / 话术循环卡死。输出到 <code>docs/lesson-reports/YYYY-MM-DD-&lt;sid8&gt;.md</code>(gitignored)。</p></div>
+  </div>
+
+  <h3>Commands</h3>
+  <pre class="kbd">pnpm install
+pnpm run dev      # tsx watch server.ts(WS upgrade)
+pnpm test         # vitest
+pnpm run smoke    # dev + 5 pages + 4 APIs
+pnpm exec tsc --noEmit
+pnpm run voice:asr-hotwords</pre>
+
+  <h3>Test suites</h3>
+  <div class="grid-3">
+    <div class="card"><h4>doubao-codec.test.ts</h4><p>二进制协议 · 10 tests</p></div>
+    <div class="card"><h4>speech-extractor.test.ts</h4><p>流式 JSON · 9 tests</p></div>
+    <div class="card"><h4>useSpacebar.test.ts</h4><p>push-to-talk · 8 tests</p></div>
+  </div>
+</section>
+
+<footer style="margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--ink-faint);font-size:12px">
+  <p>Source of truth: <code>docs/architecture.md</code> · Machine view: <code>docs/architecture.json</code> · Generated 2026-05-16.</p>
+  <p>本页是 architecture.md 的可视化呈现。变更同步规则见 <code>CLAUDE.md</code>。</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+const COMPONENTS = {
+  'end-user':{label:'End user'}, 'course-author':{label:'Course author'},
+  'route-yard':{label:'/ yard'}, 'route-cabin':{label:'/lesson/[id]'}, 'route-grass':{label:'/.../done'},
+  'route-storage':{label:'/journal'}, 'route-attic':{label:'/parents'},
+  'phased-view':{label:'PhasedLessonView'}, 'phased-controller':{label:'PhasedLessonController'},
+  'lesson-controller':{label:'LessonController'}, 'use-spacebar':{label:'useSpacebar'}, 'pin-gate':{label:'PIN gate'},
+  'recorder':{label:'Recorder'}, 'worklet':{label:'worklet'}, 'asr-client':{label:'AsrClient'},
+  'tts-client':{label:'TtsClient'}, 'pcm-player':{label:'PcmPlayer'},
+  'server-root':{label:'server.ts'}, 'asr-proxy':{label:'ASR proxy'}, 'tts-proxy':{label:'TTS proxy'},
+  'chat-route':{label:'/api/chat'}, 'read-api':{label:'Read APIs'},
+  'orchestrator':{label:'orchestrator'}, 'session':{label:'session'}, 'speech-extractor':{label:'SpeechExtractor'},
+  'memory':{label:'memory'}, 'prompt':{label:'prompt'}, 'mimo-llm':{label:'mimo client'},
+  'sqlite':{label:'SQLite'},
+  'doubao-asr':{label:'Doubao ASR'}, 'doubao-tts':{label:'Doubao TTS'}, 'mimo':{label:'MiMo LLM'}
+};
+
+const FLOWS = {
+  'enter-lesson': {
+    title: '① 进课(开场白)',
+    sub: '点课程卡 → 进木屋 → 开场白播完 → state=awaiting',
+    steps: [
+      { name:'导航到课堂', from:'route-yard', to:'route-cabin',
+        actors:['end-user','route-yard','route-cabin'],
+        desc:'用户在 / 上点 LetterCard。Framer Motion layoutId 转场到 /lesson/[id],cabin scene 渲染。' },
+      { name:'挂载控制器', from:'route-cabin', to:'phased-controller',
+        actors:['route-cabin','phased-view','phased-controller','lesson-controller'],
+        desc:'LessonClient mount → PhasedLessonView → new PhasedLessonController + new LessonController。phased.startLesson() → controller.startLesson(courseId)。' },
+      { name:'预热音频 + 开 TTS WS', from:'lesson-controller', to:'doubao-tts',
+        actors:['lesson-controller','recorder','tts-client','tts-proxy','doubao-tts'],
+        desc:'Promise.all(tts.open(), prewarmRecorder())。TTS WS 上行 StartConnection (event=1) → ConnectionStarted (event=50) ~3.7s 完成长连握手;同时 getUserMedia + AudioContext + worklet 全就绪。' },
+      { name:'请求开场白 LLM', from:'lesson-controller', to:'mimo',
+        actors:['lesson-controller','chat-route','orchestrator','session','prompt','memory','speech-extractor','mimo-llm','mimo'],
+        desc:'POST /api/chat?action=start。orchestrator 包 SSE。session 拼 prompt + 调 streamLLM(mimo-v2.5-pro)。SpeechExtractor 边收 token 边吐 speech-delta。' },
+      { name:'SSE 回客户端 + 合成播放', from:'chat-route', to:'pcm-player',
+        actors:['chat-route','lesson-controller','tts-client','tts-proxy','doubao-tts','pcm-player'],
+        desc:'SSE: speech-delta × N + actions + done。controller 收到第一个 delta → tts.startSession (event=100) + sendText (event=200) → Doubao 合成 → PCM (event=352) 经 proxy → PcmPlayer 入队 24kHz。' },
+      { name:'session-finished → awaiting', from:'lesson-controller', to:'phased-controller',
+        actors:['lesson-controller','tts-client','doubao-tts','phased-controller'],
+        desc:'done → tts.finishSession (event=102) → SessionFinished (event=152) → setState(awaiting)。等用户按空格。' }
+    ]
+  },
+
+  'single-turn': {
+    title: '② 单轮对话',
+    sub: '按住空格 → ASR → MiMo → SSE → TTS → 回到 awaiting',
+    steps: [
+      { name:'开始 listening', from:'use-spacebar', to:'lesson-controller',
+        actors:['end-user','use-spacebar','lesson-controller'],
+        desc:'空格按下(过滤 e.repeat + 输入框)。controller awaiting → listening,记 listenStartedAt。' },
+      { name:'开 ASR + 推 PCM', from:'lesson-controller', to:'doubao-asr',
+        actors:['lesson-controller','recorder','worklet','asr-client','asr-proxy','doubao-asr'],
+        desc:'AsrClient 开 WS /api/voice/asr?courseId&targetWords&cardId。proxy 启动 upstream 握手(1-3s)期间 buffer pendingPcm。worklet emit 200ms 16k Int16 → recorder.onChunk → asr.sendPcm,upstream 就绪后 flush。' },
+      { name:'partial → 字幕', from:'doubao-asr', to:'lesson-controller',
+        actors:['doubao-asr','asr-proxy','asr-client','lesson-controller'],
+        desc:'Doubao 推 partial(utterances[].definite=false),proxy 转 JSON {type:"partial"},AsrClient emit subtitle。' },
+      { name:'结束 listening', from:'lesson-controller', to:'doubao-asr',
+        actors:['end-user','use-spacebar','lesson-controller','asr-client','asr-proxy','doubao-asr'],
+        desc:'空格松开。<800ms → "太短啦~" + 回 awaiting;否则 flush worklet 残余 + asr.finish() 控制帧,proxy 发 -seq 给 upstream 等 final;state=thinking,armed 5s fallback。' },
+      { name:'final → POST /api/chat', from:'lesson-controller', to:'chat-route',
+        actors:['doubao-asr','asr-client','lesson-controller','chat-route'],
+        desc:'Doubao 返回 final 帧 → handleAsrFinal(text) → POST /api/chat {action:"message", sessionId, text, asrResult}。' },
+      { name:'流式 LLM', from:'chat-route', to:'mimo',
+        actors:['chat-route','memory','prompt','session','speech-extractor','mimo-llm','mimo'],
+        desc:'memory 追加 raw ASR + 取最近 12 条 history;prompt 拼上 currentCardId + cardProgress + drillParts;session.streamLLM(mimo-v2.5-pro,first-token ~4s 是瓶颈);SpeechExtractor 解析 JSON,吐 speech-delta + actions(show_card / attempt_assessment)+ token_usage。' },
+      { name:'落库进度', from:'chat-route', to:'sqlite',
+        actors:['chat-route','sqlite'],
+        desc:'commit attempt_assessment + show_card 到 cardProgress / clearedCardIds;记录 token_usage(LLM + ASR chars + TTS chars)。' },
+      { name:'SSE 回 + 合成播放', from:'chat-route', to:'pcm-player',
+        actors:['chat-route','lesson-controller','phased-controller','tts-client','tts-proxy','doubao-tts','pcm-player'],
+        desc:'SSE: speech-delta × N + actions + done。第一个 delta → ensureTtsSession + onFirstSpeech → state=speaking;tts.sendText → Doubao → PCM → PcmPlayer(state-guard 丢弃过期 PCM);phased-controller 累计 introducedCardIds,show_card → WordBook 切卡。' },
+      { name:'session-finished → awaiting', from:'lesson-controller', to:'phased-controller',
+        actors:['lesson-controller','tts-client','doubao-tts','phased-controller'],
+        desc:'done → tts.finishSession (event=102) → SessionFinished → setState(awaiting)。phase 规则评估(introduce / clear 计数)。' }
+    ]
+  },
+
+  'end-lesson': {
+    title: '③ 结束课堂',
+    sub: '点结束 → 拆 WS + audio + recorder → 跳 done',
+    steps: [
+      { name:'触发 endLesson', from:'end-user', to:'lesson-controller',
+        actors:['end-user','lesson-controller'],
+        desc:'用户点"结束课堂"。chatAbort.abort + 清 asrFinalTimer。' },
+      { name:'关闭 WS + 静音', from:'lesson-controller', to:'doubao-tts',
+        actors:['lesson-controller','asr-client','recorder','pcm-player','tts-client','tts-proxy','doubao-tts'],
+        desc:'asr.close(如活跃);recorder.stop;player.stop;tts.close 发 FinishConnection (event=2)。' },
+      { name:'POST end → 落库', from:'lesson-controller', to:'sqlite',
+        actors:['lesson-controller','chat-route','sqlite'],
+        desc:'POST /api/chat?action=end。server 终结 session 聚合写入 sqlite(usage 汇总等)。' },
+      { name:'释放硬件', from:'lesson-controller', to:'recorder',
+        actors:['lesson-controller','recorder','pcm-player'],
+        desc:'disposeRecorder — 真实释放 mic + AudioContext(避免浏览器配额);player.dispose。state=idle。' },
+      { name:'跳 done 页面', from:'route-cabin', to:'sqlite',
+        actors:['route-cabin','route-grass','read-api','sqlite'],
+        desc:'navigate /lesson/[id]/done。LessonDoneClient 拉 /api/progress 渲染贴纸总结。' }
+    ]
+  },
+
+  'journal': {
+    title: '④ 储物间 · Journal',
+    sub: '看历史掌握的词条',
+    steps: [
+      { name:'进入储物间', from:'route-yard', to:'route-storage',
+        actors:['end-user','route-yard','route-storage'],
+        desc:'用户在 yard 上点门图标 → /journal,storage scene 渲染。' },
+      { name:'拉进度', from:'route-storage', to:'sqlite',
+        actors:['route-storage','read-api','sqlite'],
+        desc:'GET /api/progress → buildProgressSnapshot:跨 lesson SUM(attempts/correct);lastPracticed = MAX(start_time)。返回 WordMastery[]。' },
+      { name:'渲染书架', from:'read-api', to:'route-storage',
+        actors:['read-api','route-storage'],
+        desc:'BookShelf 按 mastery 星级(0/1/2/3)分组 WordEntry。' }
+    ]
+  },
+
+  'parents': {
+    title: '⑤ 阁楼 · Parents',
+    sub: '客户端 PIN + 7 天统计 + 最近 sessions',
+    steps: [
+      { name:'爬梯子进阁楼', from:'route-yard', to:'route-attic',
+        actors:['end-user','route-yard','route-attic'],
+        desc:'用户点 ladder → /parents,attic scene 渲染。' },
+      { name:'PIN 校验(本地)', from:'route-attic', to:'pin-gate',
+        actors:['route-attic','pin-gate'],
+        desc:'PinPad 输入。lib/pin SHA-256 + salt hash → 比对 localStorage。3 次错锁 30s;成功 reset 失败计数。不走服务端 API。' },
+      { name:'拉统计 + 最近 sessions', from:'route-attic', to:'sqlite',
+        actors:['route-attic','read-api','sqlite'],
+        desc:'PIN 通过后:GET /api/sessions(默认 limit=10)+ GET /api/stats(7 天柱状 + 掌握词数)。server 从 sqlite 聚合。' },
+      { name:'渲染 dashboard', from:'read-api', to:'route-attic',
+        actors:['read-api','route-attic'],
+        desc:'StatsCard(7 天柱状图)+ SessionRow 列表 + SettingsAccordion。' }
+    ]
+  }
+};
+
+let selectedFlow = null;
+
+function renderFlowList() {
+  const list = document.getElementById('flow-list');
+  list.innerHTML = '';
+  Object.entries(FLOWS).forEach(([id, flow]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'flow-btn';
+    btn.dataset.flow = id;
+    btn.innerHTML = `<div class="flow-title">${flow.title}</div><div class="flow-sub">${flow.sub}</div>`;
+    btn.addEventListener('click', () => selectFlow(id));
+    list.appendChild(btn);
+  });
+}
+
+function selectFlow(id) {
+  selectedFlow = selectedFlow === id ? null : id;
+  apply();
+}
+
+function apply() {
+  document.querySelectorAll('.flow-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.flow === selectedFlow);
+  });
+  const diagram = document.getElementById('diagram');
+  diagram.classList.toggle('flow-on', !!selectedFlow);
+  document.querySelectorAll('.component').forEach(el => el.classList.remove('active'));
+  const overlay = document.getElementById('arrow-overlay');
+  overlay.innerHTML = '';
+
+  if (!selectedFlow) {
+    renderSteps(null);
+    return;
+  }
+  const flow = FLOWS[selectedFlow];
+  const involved = new Set();
+  flow.steps.forEach(s => { (s.actors||[]).forEach(a=>involved.add(a)); involved.add(s.from); involved.add(s.to); });
+  involved.forEach(id => {
+    const el = document.getElementById('cmp-'+id);
+    if (el) el.classList.add('active');
+  });
+  drawArrows(flow);
+  renderSteps(flow);
+}
+
+function drawArrows(flow) {
+  const overlay = document.getElementById('arrow-overlay');
+  const inner = overlay.parentElement;
+  const rect = inner.getBoundingClientRect();
+  overlay.setAttribute('width', rect.width);
+  overlay.setAttribute('height', rect.height);
+  overlay.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+  overlay.innerHTML = '';
+
+  flow.steps.forEach((step, i) => {
+    const fromEl = document.getElementById('cmp-'+step.from);
+    const toEl   = document.getElementById('cmp-'+step.to);
+    if (!fromEl || !toEl) return;
+    const fr = fromEl.getBoundingClientRect();
+    const tr = toEl.getBoundingClientRect();
+    const goRight = (tr.left + tr.width/2) >= (fr.left + fr.width/2);
+    const fromX = (goRight ? fr.right : fr.left) - rect.left;
+    const fromY = fr.top + fr.height/2 - rect.top;
+    const toX   = (goRight ? tr.left : tr.right) - rect.left;
+    const toY   = tr.top + tr.height/2 - rect.top;
+
+    const dx = Math.abs(toX - fromX);
+    const ctrl = Math.min(100, dx/2 + 20);
+    const c1x = goRight ? fromX + ctrl : fromX - ctrl;
+    const c2x = goRight ? toX - ctrl   : toX + ctrl;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${fromX} ${fromY} C ${c1x} ${fromY}, ${c2x} ${toY}, ${toX} ${toY}`);
+    overlay.appendChild(path);
+
+    const t = 0.5;
+    const u = 1 - t;
+    const midX = u*u*u*fromX + 3*u*u*t*c1x + 3*u*t*t*c2x + t*t*t*toX;
+    const midY = u*u*u*fromY + 3*u*u*t*fromY + 3*u*t*t*toY + t*t*t*toY;
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('class','step-bubble');
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('cx', midX); c.setAttribute('cy', midY); c.setAttribute('r', 11);
+    const tx = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tx.setAttribute('x', midX); tx.setAttribute('y', midY); tx.textContent = i+1;
+    g.appendChild(c); g.appendChild(tx); overlay.appendChild(g);
+  });
+}
+
+function renderSteps(flow) {
+  const panel = document.getElementById('steps-panel');
+  if (!flow) {
+    panel.innerHTML = '<p class="empty">点击左侧任一 flow,这里会展开它的每一步:谁调谁、传什么、为什么。</p>';
+    return;
+  }
+  const html = `
+    <div class="steps-title">${flow.title}</div>
+    <div class="steps-sub">${flow.sub}</div>
+    <ol>${flow.steps.map(s => `
+      <li><div>
+        <div class="step-name">${s.name}</div>
+        <div class="step-edge"><code>${COMPONENTS[s.from]?.label||s.from}</code> → <code>${COMPONENTS[s.to]?.label||s.to}</code></div>
+        <div class="step-desc">${s.desc}</div>
+      </div></li>`).join('')}</ol>
+  `;
+  panel.innerHTML = html;
+}
+
+document.getElementById('clear-flow').addEventListener('click', () => { selectedFlow = null; apply(); });
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (selectedFlow) drawArrows(FLOWS[selectedFlow]); }, 100);
+});
+
+renderFlowList();
+apply();
+</script>
+</body>
+</html>

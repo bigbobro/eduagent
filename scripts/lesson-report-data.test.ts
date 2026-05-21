@@ -213,7 +213,20 @@ describe('buildReport — course definition', () => {
     const course = await defaultCourseLoader('food');
 
     expect(course?.title).toBe('食物 Food');
-    expect(course?.words).toEqual(['apple', 'banana', 'bread', 'milk', 'egg', 'rice']);
+    expect(course?.words).toEqual([
+      'apple',
+      'banana',
+      'bread',
+      'milk',
+      'egg',
+      'rice',
+      'water',
+      'juice',
+      'cake',
+      'cheese',
+      'carrot',
+      'chicken',
+    ]);
   });
 });
 

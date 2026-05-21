@@ -166,6 +166,33 @@ export function commitAssistantStreamResult(
   return addAssistantMessage(memory, { speech, actions, state_update: stateUpdate });
 }
 
+export function normalizeAssistantActions(
+  memory: LessonMemory,
+  course: Course,
+  response: AgentResponse
+): ToolAction[] {
+  const assessedMemory = applyAttemptAssessment(memory, response);
+  const activeWordCardId = getActiveWordCardId(assessedMemory, course);
+  let rejectedShowCard = false;
+  let keptShowCard = false;
+
+  const actions = response.actions.filter((action) => {
+    if (action.tool !== 'show_card') return false;
+    if (canShowCard(action.params.card_id, assessedMemory, course, activeWordCardId)) {
+      keptShowCard = true;
+      return true;
+    }
+    rejectedShowCard = true;
+    return false;
+  });
+
+  if (!keptShowCard && activeWordCardId && (rejectedShowCard || didClearCurrentCard(memory, response))) {
+    actions.push({ tool: 'show_card', params: { card_id: activeWordCardId } });
+  }
+
+  return actions;
+}
+
 function getLastShowCardId(actions: ToolAction[]): string {
   for (let i = actions.length - 1; i >= 0; i--) {
     const action = actions[i];
@@ -235,6 +262,46 @@ function resolvePhase(memory: LessonMemory, requested: LessonPhase): LessonPhase
 
 function hasUntouchedCards(memory: LessonMemory): boolean {
   return Object.values(memory.cardProgress).some((state) => state === 'untouched');
+}
+
+function getActiveWordCardId(memory: LessonMemory, course: Course): string {
+  const wordCardIds = new Set(course.cards.filter((card) => card.kind === 'word').map((card) => card.id));
+  const currentWordCardId = getWordCardIdForCard(course, memory.currentCardId);
+  if (currentWordCardId && wordCardIds.has(currentWordCardId) && memory.cardProgress[currentWordCardId] !== 'cleared') {
+    return currentWordCardId;
+  }
+  return course.teachingHints.newCardIds.find((id) => wordCardIds.has(id) && memory.cardProgress[id] !== 'cleared') || '';
+}
+
+function canShowCard(cardId: string, memory: LessonMemory, course: Course, activeWordCardId: string): boolean {
+  if (!cardId || !activeWordCardId) return false;
+  const card = course.cards.find((item) => item.id === cardId);
+  if (!card) return false;
+  if (card.kind === 'word') {
+    return card.id === activeWordCardId && memory.cardProgress[card.id] !== 'cleared';
+  }
+  return getWordCardIdForCard(course, card.id) === activeWordCardId && memory.cardProgress[activeWordCardId] !== 'cleared';
+}
+
+function getWordCardIdForCard(course: Course, cardId: string): string {
+  const card = course.cards.find((item) => item.id === cardId);
+  if (!card) return '';
+  if (card.kind === 'word') return card.id;
+
+  const wordCardIds = new Set(course.cards.filter((item) => item.kind === 'word').map((item) => item.id));
+  const sentenceSuffix = card.id.startsWith('sentence_') ? card.id.slice('sentence_'.length) : '';
+  if (sentenceSuffix && wordCardIds.has(sentenceSuffix)) return sentenceSuffix;
+
+  return course.cards.find((item) => item.kind === 'word' && item.imageUrl === card.imageUrl)?.id || '';
+}
+
+function didClearCurrentCard(memory: LessonMemory, response: AgentResponse): boolean {
+  const assessment = response.state_update.attempt_assessment;
+  return Boolean(
+    assessment
+    && assessment.result === 'correct'
+    && assessment.card_id === memory.currentCardId
+  );
 }
 
 function updateWordPerformance(memory: LessonMemory, word: string | undefined, correct: boolean): LessonMemory {

@@ -9,15 +9,15 @@ const fixtureCourses: Course[] = [
     title: '食物',
     description: '',
     targetAge: [3, 6],
-    theme: 'food',
+    tone: 'peach',
     cards: [
-      { id: 'apple', english: 'apple', chinese: '苹果', imageUrl: '', kind: 'word', drillParts: ['app', 'le'] },
-      { id: 'milk', english: 'milk', chinese: '牛奶', imageUrl: '', kind: 'word', drillParts: ['milk'] },
+      { id: 'apple', english: 'apple', chinese: '苹果', imageUrl: '/images/food/apple.png', kind: 'word', drillParts: ['app', 'le'] },
+      { id: 'milk', english: 'milk', chinese: '牛奶', imageUrl: '/images/food/milk.png', kind: 'word', drillParts: ['milk'] },
     ],
     objectives: { sentences: [] },
     teachingHints: { opening: '', reviewCardIds: [], newCardIds: [], quizQuestions: [], closing: '' },
     phases: {
-      introduction: { sceneImage: '/images/food/scene.svg' },
+      introduction: { sceneCaption: '今天要认识食物' },
       interactive: {},
       reinforcement: { quizzes: [] },
     },
@@ -56,8 +56,10 @@ describe('buildProgressSnapshot', () => {
   it('empty DB → all words ★0 with lastPracticed=null', () => {
     const snap = buildProgressSnapshot(db, fixtureCourses);
     expect(snap.totalWordsMastered).toBe(0);
+    expect(snap.courses[0].courseTone).toBe('peach');
     expect(snap.courses[0].masteredWords).toBe(0);
     expect(snap.courses[0].words.every((w) => w.masteryStars === 0 && w.lastPracticed === null)).toBe(true);
+    expect(snap.courses[0].words.map((w) => w.imageUrl)).toEqual(['/images/food/apple.png', '/images/food/milk.png']);
   });
 
   it('single lesson with partial correct → stars derived', () => {

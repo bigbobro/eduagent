@@ -7,33 +7,51 @@ const publicDir = path.join(process.cwd(), 'public');
 
 describe('food course authoring standard', () => {
   const cardIds = new Set(foodCourse.cards.map((card) => card.id));
+  const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
+  const sentenceCards = foodCourse.cards.filter((card) => card.kind === 'sentence');
+  const wordCardIds = new Set(wordCards.map((card) => card.id));
+  const sentenceCardIds = new Set(sentenceCards.map((card) => card.id));
 
   it('defines a complete phased lesson', () => {
     expect(foodCourse.phases).toBeDefined();
-    expect(foodCourse.phases.introduction.sceneImage).toBe('/images/food/scene.svg');
-    expect(foodCourse.phases.reinforcement.quizzes.length).toBe(5);
+    expect(foodCourse.tone).toBe('peach');
+    expect(foodCourse.phases.introduction.sceneCaption).toContain('食物');
+    expect(foodCourse.phases.reinforcement.quizzes.length).toBe(8);
   });
 
   it('uses unique word card ids', () => {
     expect(cardIds.size).toBe(foodCourse.cards.length);
-    expect(foodCourse.cards.every((card) => card.kind === 'word')).toBe(true);
+    expect(wordCards).toHaveLength(12);
+    expect(sentenceCards).toHaveLength(4);
+    expect(foodCourse.cards).toHaveLength(16);
   });
 
   it('defines short sentence objectives', () => {
-    expect(foodCourse.objectives.sentences.length).toBeGreaterThanOrEqual(1);
-    expect(foodCourse.objectives.sentences).toContain('This is a ___.');
-    expect(foodCourse.objectives.sentences).toContain('I like ___.');
+    expect(foodCourse.objectives.sentences).toEqual(['This is an apple.', 'I like milk.', 'I want water.', 'I eat rice.']);
+    expect(sentenceCards.map((card) => card.english)).toEqual(foodCourse.objectives.sentences);
+    expect(sentenceCards.map((card) => card.imageUrl)).toEqual([
+      '/images/food/apple.png',
+      '/images/food/milk.png',
+      '/images/food/water.png',
+      '/images/food/rice.png',
+    ]);
   });
 
   it('quiz references only valid card ids and uses real repeat sentences', () => {
     for (const quiz of foodCourse.phases.reinforcement.quizzes) {
       if (quiz.type === 'pick-word') {
         expect(cardIds.has(quiz.correctCardId)).toBe(true);
-        for (const id of quiz.distractorCardIds) expect(cardIds.has(id)).toBe(true);
+        expect(wordCardIds.has(quiz.correctCardId)).toBe(true);
+        for (const id of quiz.distractorCardIds) {
+          expect(cardIds.has(id)).toBe(true);
+          expect(wordCardIds.has(id)).toBe(true);
+        }
       } else {
         expect(cardIds.has(quiz.cardId)).toBe(true);
+        expect(sentenceCardIds.has(quiz.cardId)).toBe(true);
         expect(quiz.targetText).toMatch(/[.!?]$/);
         expect(quiz.targetText).not.toMatch(/^Say\s+\w+\.?$/i);
+        expect(foodCourse.cards.find((card) => card.id === quiz.cardId)?.english).toBe(quiz.targetText);
       }
     }
   });
@@ -45,13 +63,8 @@ describe('food course authoring standard', () => {
     }
   });
 
-  it('keeps a structured scene.svg with one hotspot per card', () => {
-    const scene = foodCourse.phases.introduction.sceneImage;
-    expect(scene).toBe('/images/food/scene.svg');
-    const svg = fs.readFileSync(path.join(publicDir, scene!), 'utf8');
-    for (const id of Array.from(cardIds)) {
-      expect(svg).toContain(`id="card-${id}"`);
-      expect(svg).toContain(`/images/food/${id}.png`);
-    }
+  it('does not require an introduction scene asset field', () => {
+    const removedField = ['scene', 'Image'].join('');
+    expect(removedField in foodCourse.phases.introduction).toBe(false);
   });
 });

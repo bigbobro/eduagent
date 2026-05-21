@@ -1,17 +1,21 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/Button';
 import { Course, PhaseName } from '@/types/course';
 import { LessonController } from '@/lib/voice/lesson-controller';
 import { PhasedLessonController } from '@/lib/voice/phased-lesson-controller';
-import { InteractivePhase } from './InteractivePhase';
-import { IntroPhase } from './IntroPhase';
-import { ReinforcePhase } from './ReinforcePhase';
+import { DoneCelebrateFrame } from './DoneCelebrateFrame';
+import { IntroFrame } from './IntroFrame';
+import { LessonMandalaV2 } from './LessonMandalaV2';
+import { ReinforcementFlow } from './ReinforcementFlow';
 
 interface PhasedLessonViewProps {
   course: Course;
+}
+
+interface ProgressSnapshot {
+  clearedCardIds: string[];
 }
 
 export function PhasedLessonView({ course }: PhasedLessonViewProps) {
@@ -22,6 +26,10 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const [started, setStarted] = useState(false);
   const [introBusy, setIntroBusy] = useState(false);
   const [introActiveCardId, setIntroActiveCardId] = useState<string | null>(null);
+  const [clearedWordCount, setClearedWordCount] = useState(0);
+  const [lessonRun, setLessonRun] = useState(0);
+  const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
+  const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
 
   useEffect(() => {
     const v2 = new LessonController();
@@ -29,18 +37,23 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     const onPhaseChange = (next: PhaseName) => setPhase(next);
     const onIntroBusyChange = (busy: boolean) => setIntroBusy(busy);
     const onIntroActiveCardChange = (cardId: string | null) => setIntroActiveCardId(cardId);
+    const onProgress = (next: ProgressSnapshot) => {
+      setClearedWordCount(next.clearedCardIds.filter((cardId) => wordCardIds.has(cardId)).length);
+    };
     v2Ref.current = v2;
     phasedRef.current = phased;
+    v2.on('progress', onProgress);
     phased.on('phase-change', onPhaseChange);
     phased.on('intro-busy-change', onIntroBusyChange);
     phased.on('intro-active-card-change', onIntroActiveCardChange);
     return () => {
+      v2.off('progress', onProgress);
       phased.off('phase-change', onPhaseChange);
       phased.off('intro-busy-change', onIntroBusyChange);
       phased.off('intro-active-card-change', onIntroActiveCardChange);
       phased.endLesson().catch(() => {});
     };
-  }, [course]);
+  }, [course, lessonRun, wordCardIds]);
 
   const handleStart = async () => {
     setStarted(true);
@@ -52,8 +65,15 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     void phasedRef.current?.requestIntroCard(cardId);
   };
 
-  const handleDone = () => router.push(`/lesson/${course.id}/done`);
   const handleLeave = () => router.push('/');
+  const handleRestart = () => {
+    setStarted(false);
+    setPhase('intro');
+    setIntroBusy(false);
+    setIntroActiveCardId(null);
+    setClearedWordCount(0);
+    setLessonRun((run) => run + 1);
+  };
   const v2 = v2Ref.current;
   const sessionId = v2?.getSessionId() || '';
 
@@ -63,34 +83,36 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         <button
           type="button"
           onClick={handleLeave}
-          className="px-3 py-2 rounded-bunny-md text-bunny-ink hover:bg-bunny-pink-soft"
+          className="rounded-paper-md px-3 py-2 text-ink hover:bg-butter/70"
         >
           离开
         </button>
-        <h1 className="font-zh text-xl text-bunny-ink">{course.title}</h1>
+        <h1 className="font-zh text-xl text-ink">{course.title}</h1>
         <div className="w-20" />
       </header>
 
       <div className="absolute inset-0 top-14">
         {!started && (
-          <>
-            <IntroPhase course={course} locked activeCardId={introActiveCardId} onHotspotClick={() => {}} />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <Button size="lg" onClick={handleStart} className="pointer-events-auto">开始上课</Button>
-            </div>
-          </>
+          <IntroFrame
+            course={course}
+            locked
+            activeCardId={introActiveCardId}
+            onWordClick={() => {}}
+            onStart={handleStart}
+          />
         )}
         {started && phase === 'intro' && (
-          <IntroPhase
+          <IntroFrame
             course={course}
             locked={introBusy}
             activeCardId={introActiveCardId}
-            onHotspotClick={handleHotspotClick}
+            onWordClick={handleHotspotClick}
+            started
           />
         )}
-        {started && phase === 'interactive' && v2 && <InteractivePhase course={course} controller={v2} />}
+        {started && phase === 'interactive' && v2 && <LessonMandalaV2 course={course} controller={v2} />}
         {started && phase === 'reinforcement' && v2 && (
-          <ReinforcePhase
+          <ReinforcementFlow
             course={course}
             controller={v2}
             sessionId={sessionId}
@@ -98,10 +120,13 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
           />
         )}
         {started && phase === 'done' && (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-bunny-cream">
-            <h2 className="font-zh text-2xl mb-4 text-bunny-ink">今天的课结束啦!</h2>
-            <Button onClick={handleDone}>看看你学了什么</Button>
-          </div>
+          <DoneCelebrateFrame
+            starsEarned={Math.min(5, clearedWordCount)}
+            totalStars={5}
+            wordsLearned={clearedWordCount}
+            onHome={() => router.push('/')}
+            onAgain={handleRestart}
+          />
         )}
       </div>
     </main>

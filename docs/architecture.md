@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:三阶段课程结构落地 + food 成为唯一可见课程(2026-05-15)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院 + 10 门常规课程 registry(2026-05-21)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -22,8 +22,8 @@
 │  (浏览器调度状态机)  │         │  (SpeechExtractor)   │         └─────────────────┘
 │                     │         │                      │                          
 │ PcmPlayer           │         │ TTS proxy            │         │ 豆包流式 TTS     │
-│  + SubtitleBar      │── WS ──▶│  /api/voice/tts      │── WS ──▶│  seed-tts-2.0   │
-│  + Bunny + Canvas   │         │  (长连复用 + cancel)  │         │  Tina老师2.0     │
+│  + CatSpeech        │── WS ──▶│  /api/voice/tts      │── WS ──▶│  seed-tts-2.0   │
+│  + PictureCard      │         │  (长连复用 + cancel)  │         │  Tina老师2.0     │
 └─────────────────────┘         └──────────────────────┘         └─────────────────┘
                                        ↓
                                  SQLite (lessons/turns/word_performance)
@@ -54,19 +54,20 @@
 | `src/lib/audio/recorder.ts` | **mic + AudioContext + worklet 模块单例**,`prewarmRecorder` 在 startLesson 提前就绪 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
-| `src/data/courses/food.ts` | 当前唯一可见课程:food 三阶段示范课 |
-| `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById` |
+| `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,使用 `tone` 驱动 CC 调色 |
+| `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
-| `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Interactive / Reinforce / Done |
-| `src/components/lesson/IntroPhase.tsx` | 主题导入:结构化场景图 + hotspot 点击讲解 |
-| `src/components/lesson/InteractivePhase.tsx` | AI 互动:复用 WordBook / Bunny / SubtitleBar / BloomButton,接入底层 LessonController |
-| `src/components/lesson/ReinforcePhase.tsx` | 强化巩固:串联 pick-word / repeat-after-me quizzes |
-| `src/components/lesson/QuizPickWord.tsx` | quiz:听 prompt 选正确图片 |
-| `src/components/lesson/QuizRepeatAfterMe.tsx` | quiz:跟读短句,ASR final 含目标词判 correct |
-| `src/components/lesson/BloomButton.tsx` | pointerdown/up + setPointerCapture,5 瓣花朵 SVG(active 时绽放,idle 收拢) |
-| `src/components/bunny/Bunny.tsx` | **单一全身 Bunny**,pose × mood 矩阵(5 pose: sit/stand/point/hold-flower/read,4 mood: idle/listening/thinking/speaking) |
-| `src/components/lesson/WordBook.tsx` | 桌上图画书:warmpaper 底 + 框架投影,AnimatePresence 切卡片 |
-| `src/components/lesson/SubtitleBar.tsx` | v2 字幕,bunny tones(user=sky / ai=cream / idle=warmpaper),AI 播放时 bunny-pink pulse dot |
+| `src/components/magic/*` | CC 绘本风原子组件:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
+| `src/components/home/HomeStudy.tsx` | 首页魔法书房,课程书本入口 + journal/parents CTA |
+| `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
+| `src/components/lesson/IntroFrame.tsx` | 主题导入:麻吉 + 锁定 chip 网格,不再依赖 scene.svg |
+| `src/components/lesson/LessonMandalaV2.tsx` | 跟读练习法阵,保留 `LessonController` ASR/TTS 管线 |
+| `src/components/lesson/QuizPickWordFrame.tsx` | quiz:听 prompt 选正确 PictureCard |
+| `src/components/lesson/ReinforceFrame.tsx` | quiz:句型空填 + repeat-after-me |
+| `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes |
+| `src/components/lesson/DoneCelebrateFrame.tsx` | 下课庆祝页,星星 + 数据 + 双 CTA |
+| `src/components/journal/JournalPage.tsx` | 魔法书双页,展示 progress 聚合的词卡 |
+| `src/components/parents/PINGateFrame.tsx` / `ParentsPage.tsx` | 家长阁楼 PIN 解锁 + stats/session dashboard |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/schema.ts` + `queries.ts` | SQLite 表结构 + 查询封装 |
 
@@ -125,8 +126,8 @@ ASR final 到达 client
        ├─ POST /api/chat { action:'message', sessionId, text, asrResult }
        │   server: add raw ASR user message
        │           → streamLLM (MiMo, prompt 含 currentCardId/cardProgress/drillParts)
-       │           → SpeechExtractor 状态机 → SSE
-       │           → commit attempt_assessment + show_card 到 cardProgress/clearedCardIds
+       │           → SpeechExtractor 状态机 → normalize show_card(过滤/替换已通过或非当前目标卡) → SSE
+       │           → commit attempt_assessment + 归一化后的 show_card 到 cardProgress/clearedCardIds
        │           → token_usage 记录 LLM + ASR + TTS 字符数
        │            speech-delta × N + actions + done
        └─ consumeSSE:
@@ -138,11 +139,17 @@ ASR final 到达 client
                                               (state guard:listening/thinking 时丢弃)
               ◀── TTSSentenceStart (event=350) → tts.on('subtitle') → emit subtitle
             actions:
-              emit('actions') → PhasedLessonController 累计 introducedCardIds;InteractivePhase 从最后一条 show_card 提取 card_id → WordBook 切换当前卡片
-              server 同步使用 show_card 作为 currentCardId 的事实来源
+              emit('actions') → LessonMandalaV2 从最后一条有效 show_card 提取 card_id → PictureCard 切换当前卡片(word 或 sentence_* 均可;已通过 word/sentence 回跳会被 UI 忽略)
+              server 同步使用归一化后的 show_card 作为 currentCardId 的事实来源
             done → tts.finishSession (event=102)
               ◀── SessionFinished (event=152) → setState('awaiting')
 ```
+
+强化巩固里的 `repeat-after-me` 复用同一套 ASR 录音管线,但调用
+`LessonController.startListening({ routeToChat:false })`。这类录音仍会 emit
+`asr-final` 给 `ReinforceFrame` 做本地短句判定并由
+`ReinforcementFlow` 记录 `quiz-answer`,但不会再进入 `/api/chat?action=message`
+触发额外 LLM/TTS 回合。
 
 ### 3.3 结束课程
 
@@ -195,7 +202,7 @@ controller.endLesson:
 - `speaking → awaiting`:TTS session-finished
 - 任意 → ending → idle:用户点"结束课堂"
 
-### 4b. PhasedLessonController phase 轴(food 课程)
+### 4b. PhasedLessonController phase 轴(课程 registry)
 
 ```
 idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ reinforcement ─[切3]─▶ done
@@ -203,10 +210,11 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
   └────── endLesson(任意 phase 都能立刻退出)──────────────────────────────────────┘
 ```
 
-- 切1:`introducedCardIds.size === cards.length` 且底层 `LessonController` 回到 `awaiting`。
-- 切2:`clearedCardIds.size === cards.length` 或 `totalAttempts >= 3 × cards.length`,且底层回到 `awaiting`。
+- 切1:开场介绍 TTS 播放结束,底层 `LessonController` 回到 `awaiting` 后立刻切到 `interactive`;intro 不等待全部 word cards 都被 `show_card` 介绍。
+- 切2:`clearedWordCardIds.size === wordCards.length` 或 `totalAttempts >= 3 × wordCards.length`,且底层回到 `awaiting`;sentence cards 只在 reinforcement 使用。
 - 切3:reinforcement 所有 quizzes 答完。
 - phase 切换由 `PhasedLessonController` 判定,LLM 不输出 phase transition。
+- interactive 阶段的主目标由 prompt 中的"当前目标控制"约束:继续当前未通过 word card,否则切到 `teachingHints.newCardIds` 里的第一个未通过 word card。若老师说短句,必须 `show_card` 对应 `sentence_*` 卡;进度计数仍只按 word cards。server 在 SSE/commit 前归一化 `show_card`,把已通过或非当前目标的回跳替换为当前应练习的 word card。
 - `LessonController` 仍是唯一 ASR/TTS/SSE 管线;旧 `LessonView` fallback 已删除。
 
 ---
@@ -262,7 +270,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
-| 新标准唯一化 | 当前只暴露 food;旧 `transportation` / `timeNumbers` 数据与 `LessonView` fallback 已退役 | 避免长期维护两套课程路径 |
+| 新标准唯一化 | 当前通过 registry 暴露 10 门常规课程;旧 `transportation` / `timeNumbers` 数据与 `LessonView` fallback 已退役 | 避免长期维护两套课程路径 |
 | LessonController 定位 | 继续复用 ASR/TTS/SSE 管线,不作为独立 lesson UI 入口 | 降低重写音频链路风险 |
 
 ---
@@ -308,6 +316,8 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - 2026-05-10 — **教学循环 v1.1:课堂内进度引擎 + drillParts** — 每张 card 必填 `drillParts`;服务端用 `show_card` 同步 currentCardId;LLM 输出 `attempt_assessment`;memory 维护 `cardProgress` / `clearedCardIds`;history 裁到最近 12 条
 - 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};客户端 PIN 门控;详见 §11
 - 2026-05-15 — **三阶段 lesson structure refactor** — 新增 food 三阶段课程、ImageGen PNG 单卡资产 + 结构化 `scene.svg`;新增 phase-aware prompt / SSE progress_snapshot / `phase-transition` / `quiz-answer`;新增 `PhasedLessonController` + Intro / Interactive / Reinforce / Quiz 组件;删除旧课程数据与旧 `LessonView` fallback;`Course.phases` 收紧为必填
+- 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
+- 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 
@@ -334,44 +344,38 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 
 ---
 
-## 11. 前端架构(Bunny 的小院子,2026-05 重构)
+## 11. 前端架构(麻吉魔法学院,2026-05 CC 重构)
 
-5 个空间 / 5 个页面 / 1 个 Bunny 全身组件:
+5 个空间 / 5 个页面 / 1 个麻吉小猫组件:
 
 ```
-/                          院子全景  · SceneFrame variant=yard
-/lesson/[id]               木屋内    · SceneFrame variant=cabin
-/lesson/[id]/done          草地总结  · SceneFrame variant=grass
-/journal                   储物间    · SceneFrame variant=storage
-/parents                   阁楼      · SceneFrame variant=attic (PIN 客户端门控)
+/                          魔法书房  · HomeStudy
+/lesson/[id]               魔法课堂  · IntroFrame / LessonMandalaV2 / ReinforcementFlow
+/lesson/[id]/done          下课庆祝  · DoneCelebrateFrame
+/journal                   魔法书    · JournalPage
+/parents                   家长阁楼  · PINGateFrame + ParentsPage (PIN 客户端门控)
 ```
 
 ### 关键模块
 
 | 文件 | 职责 |
 |------|------|
-| `src/components/scene/SceneFrame.tsx` | 5 variant 场景外壳 + 进退场动画(`enterFrom` 决定 fromYard/fromCabin/默认) |
-| `src/components/scene/{Yard,Cabin,Grass,Storage,Attic}Scene.tsx` | 5 个 SVG 背景(1280×800 viewBox,preserveAspectRatio slice) |
-| `src/components/bunny/Bunny.tsx` | 单一全身组件,pose(5) × mood(4) 矩阵,styled-jsx mood 动画 |
-| `src/components/lesson/{PhasedLessonView,IntroPhase,InteractivePhase,ReinforcePhase,QuizPickWord,QuizRepeatAfterMe}.tsx` | 三阶段上课 UI |
-| `src/components/lesson/{WordBook,SubtitleBar,BloomButton}.tsx` | 互动阶段复用的课堂元素 |
-| `src/components/home/LetterCard.tsx` | 信件造型课程卡(layoutId 转场到木屋) |
-| `src/components/done/StickerWord.tsx` | 草地贴纸(spring 飘落 + ✦ 闪光) |
-| `src/components/journal/{WordEntry,BookShelf}.tsx` | 储物间词条卡 + 书架分组 |
-| `src/components/parents/{PinGate,StatsCard,SessionRow,SettingsAccordion}.tsx` | 阁楼 PIN + dashboard |
-| `src/components/ui/{Button,Surface,Stars,PinPad,icons/}.tsx` | UI 原子 |
-| `src/components/ui/ErrorBoundary.tsx` | root 兜底,出错回院子 |
+| `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
+| `src/components/home/HomeStudy.tsx` | 魔法书房首页,课程以书本卡呈现 |
+| `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | 课中六屏 view 层,保留控制器与 phase 状态机 |
+| `src/components/journal/JournalPage.tsx` | 魔法书双页,按 progress 聚合展示词卡 |
+| `src/components/parents/{PINGateFrame,ParentsPage}.tsx` | 家长阁楼 PIN + dashboard |
+| `src/components/ui/{ErrorBoundary,SVGDefs}.tsx` | root 兜底与全局 SVG defs |
 | `src/lib/progress.ts` / `stats.ts` / `pin.ts` | 纯聚合 + 客户端 PIN |
 | `src/app/api/{progress,sessions,stats}/route.ts` | 三个只读聚合 API |
-| `src/app/template.tsx` | 每次路由切换的外层 fade-in(SceneFrame 处理 variant-specific 动画) |
 | `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 5 页面 + 4 API |
 
 ### Design tokens
 
-- 调色:`tailwind.config.ts` 中 `bunny-*` 前缀 — bg(cream / warmpaper / sky / night)、grass / wood / pink / gold / berry / leaf、ink(主 / soft / faint)
-- 字体:Fredoka(英文,`next/font/google`)+ LXGW WenKai TC(中文,CDN @import)
-- 圆角阶:`bunny-sm 12px` / `bunny-md 20px` / `bunny-lg 28px`
-- 阴影:`shadow-soft` / `shadow-medium` / `shadow-bunny`(bunny-pink 投影,emphasis 用)
+- 调色:`tailwind.config.ts` 中 `paper / ink / rose / butter / mint / sky / lilac / peach / cat* / ember` 以及 Deep / Shadow 变体。
+- 字体:全局 `globals.css` 加载 LXGW WenKai TC / ZCOOL KuaiLe / Fredoka / Caveat / JetBrains Mono,并通过 `font-zh` / `font-display` / `font-en` / `font-en-script` / `font-mono` 使用。
+- 圆角阶:`rounded-paper-sm/md/lg/pill`。
+- 阴影:`shadow-paper` / `shadow-paper-hero`,均为绘本纸张的实心偏移阴影。
 
 ### PIN 门控
 
@@ -380,10 +384,10 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 ### 数据流
 
 ```
-fetch /api/courses    → 首页 LetterCard 列表(当前只返回 food)
-fetch /api/progress   → 储物间 / 总结页(WordMastery + 3 星掌握筛选)
-fetch /api/sessions   → 阁楼 SessionRow 列表(默认 limit=10)
-fetch /api/stats      → 阁楼 StatsCard(7 天柱状图 + 总分钟 + 掌握词数)
+fetch /api/courses    → 首页 HomeStudy 书本列表(当前返回 registry 中 10 门课程)
+fetch /api/progress   → JournalPage / 总结页(WordMastery + 3 星掌握筛选)
+fetch /api/sessions   → ParentsPage 最近课堂列表(默认 limit=10)
+fetch /api/stats      → ParentsPage 数据卡(总分钟 + 掌握词数;streak/accuracy 暂显示占位)
 voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonController)
 ```
 
@@ -401,4 +405,4 @@ masteryStarsFromRatio(correct, attempts):
 
 ### Reduced-motion 策略
 
-`prefers-reduced-motion: reduce` 时,**除 `.bunny-motion` 元素外**的所有动画/过渡降级为 0.01ms。Bunny mood 动画(耳抖、嘴动、头摆)保留,作为 listening/thinking/speaking 的语义反馈。
+`prefers-reduced-motion: reduce` 时,全局动画/过渡降级为 0.01ms,并显式关闭 `.magic-sparkle` 闪烁动画。

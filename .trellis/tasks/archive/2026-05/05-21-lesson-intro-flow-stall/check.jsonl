@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend lesson flow conventions and required checks."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "LessonController and PhasedLessonController state ownership and transition rules."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Lesson state-machine test expectations and interaction safety rules."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Agent session, streaming, and module ownership conventions."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "show_card ordering, memory progress, and backend test expectations."}
