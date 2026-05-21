@@ -72,11 +72,12 @@ describe('buildSystemPrompt v2 wordcard protocol', () => {
     expect(prompt).not.toContain('总览图');
   });
 
-  it('lists every card with id / english / chinese / kind', () => {
+  it('lists word cards and sentence cards with id / english / chinese / kind', () => {
     const memory = createMemory();
     const prompt = buildSystemPrompt(sentenceFixtureCourse, memory);
 
-    expect(prompt).toContain('## 可用卡片');
+    expect(prompt).toContain('## 目标词卡');
+    expect(prompt).toContain('## 短句图卡');
     expect(prompt).toContain('apple: apple / 苹果 (word); drillParts=app | le');
     expect(prompt).toContain('sentence_like_milk: I like milk. / 我喜欢牛奶。 (sentence); drillParts=I like | milk');
   });

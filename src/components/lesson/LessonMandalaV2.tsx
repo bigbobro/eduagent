@@ -19,10 +19,12 @@ interface ProgressSnapshot {
 }
 
 export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
+  const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const [state, setState] = useState<LessonStateName>(controller.getState());
   const [subtitle, setSubtitle] = useState<{ text: string; source: 'user' | 'ai' | 'idle' }>({ text: '', source: 'idle' });
-  const [currentCardId, setCurrentCardId] = useState(course.cards[0]?.id ?? '');
+  const [currentCardId, setCurrentCardId] = useState(wordCards[0]?.id ?? '');
   const [clearedCardIds, setClearedCardIds] = useState<Set<string>>(new Set());
+  const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
 
   useEffect(() => {
     const onState = (next: LessonStateName) => setState(next);
@@ -31,7 +33,7 @@ export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
     const onProgress = (next: ProgressSnapshot) => setClearedCardIds(new Set(next.clearedCardIds));
     const onActions = (actions: ToolAction[]) => {
       for (let i = actions.length - 1; i >= 0; i--) {
-        if (actions[i].tool === 'show_card') {
+        if (actions[i].tool === 'show_card' && wordCardIds.has(actions[i].params.card_id)) {
           setCurrentCardId(actions[i].params.card_id);
           break;
         }
@@ -49,11 +51,15 @@ export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
       controller.off('progress', onProgress);
       controller.off('actions', onActions);
     };
-  }, [controller]);
+  }, [controller, wordCardIds]);
 
   const currentCard = useMemo(
-    () => course.cards.find((card) => card.id === currentCardId) ?? course.cards[0],
-    [course.cards, currentCardId],
+    () => wordCards.find((card) => card.id === currentCardId) ?? wordCards[0],
+    [wordCards, currentCardId],
+  );
+  const clearedWordCount = useMemo(
+    () => wordCards.filter((card) => clearedCardIds.has(card.id)).length,
+    [clearedCardIds, wordCards],
   );
   const canHold = state === 'awaiting' || state === 'listening';
   const cardState = state === 'listening'
@@ -78,7 +84,7 @@ export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
       <section className="flex min-h-0 flex-col gap-5">
         <div className="flex items-center justify-between rounded-paper-pill border-2 border-ink bg-paper px-5 py-3 shadow-paper">
           <span className="font-display text-2xl">{course.title}</span>
-          <span className="font-zh text-sm text-inkSoft">{clearedCardIds.size} / {course.cards.length}</span>
+          <span className="font-zh text-sm text-inkSoft">{clearedWordCount} / {wordCards.length}</span>
         </div>
         <PictureCard card={toPictureCardData(currentCard, course.tone)} state={cardState} />
         <PushToTalkBar disabled={!canHold} active={state === 'listening'} onStart={() => controller.startListening()} onEnd={() => controller.stopListening()} />
@@ -91,9 +97,9 @@ export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
             {subtitle.text || `跟我读 ${currentCard.english}`}
           </div>
         </div>
-        <MiniMandala done={clearedCardIds.size} total={course.cards.length} />
+        <MiniMandala done={clearedWordCount} total={wordCards.length} />
         <div className="grid grid-cols-3 gap-2 overflow-auto rounded-paper-lg border-2 border-ink bg-paper p-3 shadow-paper">
-          {course.cards.map((card) => (
+          {wordCards.map((card) => (
             <PictureCard
               key={card.id}
               card={toPictureCardData(card, course.tone)}
@@ -150,4 +156,3 @@ function MiniMandala({ done, total }: { done: number; total: number }) {
     </div>
   );
 }
-

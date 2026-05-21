@@ -26,6 +26,8 @@ export class PhasedLessonController {
   private introFollowupCount = 0;
   private introBusy = false;
   private introActiveCardId: string | null = null;
+  private readonly wordCardIds: Set<string>;
+  private readonly wordCardCount: number;
   private static readonly INTRO_IDLE_MS = 3000;
   private static readonly INTRO_STARTUP_UNLOCK_MS = 7000;
   private static readonly MAX_INTRO_FOLLOWUPS = 2;
@@ -34,6 +36,9 @@ export class PhasedLessonController {
     private v2: LessonController,
     private course: Course,
   ) {
+    const wordCards = course.cards.filter((card) => card.kind === 'word');
+    this.wordCardIds = new Set(wordCards.map((card) => card.id));
+    this.wordCardCount = wordCards.length;
     this.v2.on('actions', this.onV2Actions);
     this.v2.on('progress', this.onV2Progress);
     this.v2.on('state', this.onV2State);
@@ -135,7 +140,7 @@ export class PhasedLessonController {
   private onV2Actions = (actions: ToolAction[]) => {
     if (this.currentPhase !== 'intro') return;
     for (const action of actions) {
-      if (action.tool === 'show_card') {
+      if (action.tool === 'show_card' && this.wordCardIds.has(action.params.card_id)) {
         this.introducedCardIds.add(action.params.card_id);
         this.setIntroActiveCardId(action.params.card_id);
       }
@@ -170,7 +175,7 @@ export class PhasedLessonController {
       return;
     }
 
-    if (this.currentPhase === 'intro' && this.introducedCardIds.size < this.course.cards.length) {
+    if (this.currentPhase === 'intro' && this.introducedCardIds.size < this.wordCardCount) {
       this.armIntroIdleTimer();
     }
   };
@@ -180,7 +185,7 @@ export class PhasedLessonController {
     this.introIdleTimer = setTimeout(() => {
       this.introIdleTimer = null;
       if (this.currentPhase !== 'intro') return;
-      if (this.introducedCardIds.size >= this.course.cards.length) return;
+      if (this.introducedCardIds.size >= this.wordCardCount) return;
       if (this.introFollowupCount >= PhasedLessonController.MAX_INTRO_FOLLOWUPS) {
         void this.performTransition('interactive');
         return;
@@ -213,15 +218,16 @@ export class PhasedLessonController {
   private maybeArmTransition(): void {
     if (this.pendingTransition) return;
     if (this.currentPhase === 'intro') {
-      if (this.introducedCardIds.size >= this.course.cards.length) {
+      if (this.introducedCardIds.size >= this.wordCardCount) {
         this.pendingTransition = 'interactive';
       }
       return;
     }
 
     if (this.currentPhase === 'interactive' && this.lastSnapshot) {
-      const allCleared = this.lastSnapshot.clearedCardIds.length >= this.course.cards.length;
-      const maxAttemptsReached = this.lastSnapshot.totalAttempts >= 3 * this.course.cards.length;
+      const clearedWordCount = this.lastSnapshot.clearedCardIds.filter((id) => this.wordCardIds.has(id)).length;
+      const allCleared = clearedWordCount >= this.wordCardCount;
+      const maxAttemptsReached = this.lastSnapshot.totalAttempts >= 3 * this.wordCardCount;
       if (allCleared || maxAttemptsReached) {
         this.pendingTransition = 'reinforcement';
       }

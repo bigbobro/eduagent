@@ -8,6 +8,8 @@
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "next lint",
     "test": "vitest run",
+    "course:image-audit": "tsx scripts/prepare-course-image-jobs.ts --audit",
+    "course:image-jobs": "tsx scripts/prepare-course-image-jobs.ts",
     "voice:asr-hotwords": "tsx scripts/asr-hotwords-regression.ts",
     "smoke": "tsx scripts/smoke-pages.ts"
   },

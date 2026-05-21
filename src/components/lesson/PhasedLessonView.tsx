@@ -56,6 +56,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const handleLeave = () => router.push('/');
   const v2 = v2Ref.current;
   const sessionId = v2?.getSessionId() || '';
+  const wordCount = course.cards.filter((card) => card.kind === 'word').length;
 
   return (
     <main className="w-screen h-screen relative">
@@ -101,9 +102,9 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         )}
         {started && phase === 'done' && (
           <DoneCelebrateFrame
-            starsEarned={Math.min(5, course.cards.length)}
+            starsEarned={Math.min(5, wordCount)}
             totalStars={5}
-            wordsLearned={course.cards.filter((card) => card.kind === 'word').length}
+            wordsLearned={wordCount}
             onHome={() => router.push('/')}
             onAgain={handleDone}
           />

@@ -216,7 +216,7 @@
     { "path": "src/lib/db/index.ts", "layer": "server", "category": "db", "role": "DB handle factory; better-sqlite3 init.", "critical": false },
 
     { "path": "src/app/api/chat/route.ts", "layer": "server", "category": "api_route", "role": "POST /api/chat — start / message / end actions; SSE response.", "critical": true },
-    { "path": "src/app/api/courses/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/courses — currently returns food only.", "critical": false },
+    { "path": "src/app/api/courses/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/courses — returns the registered visible course catalog.", "critical": false },
     { "path": "src/app/api/progress/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/progress — WordMastery snapshot for journal / done page.", "critical": false },
     { "path": "src/app/api/sessions/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/sessions — recent lessons list (default limit=10).", "critical": false },
     { "path": "src/app/api/stats/route.ts", "layer": "server", "category": "api_route", "role": "GET /api/stats — 7-day totals + mastery counts.", "critical": false },
@@ -394,7 +394,8 @@
     { "date": "2026-05-05", "kind": "feature", "title": "Canvas v2: WordCardCanvas replaces ImageCanvas", "impact": "Protocol unified to show_card; course data migrated from images[] to cards[]; ShowTool/FocusTool/AnnotateTool removed." },
     { "date": "2026-05-10", "kind": "feature", "title": "Teaching loop v1.1 — in-lesson progress engine + drillParts", "impact": "Every card requires drillParts; server uses show_card to sync currentCardId; LLM emits attempt_assessment; memory tracks cardProgress / clearedCardIds; history trimmed to 12." },
     { "date": "2026-05-14", "kind": "refactor", "title": "Front-end refactor — Bunny's yard (5 spaces, 5 pages)", "impact": "Bunny upgraded to pose × mood full-body component; SceneFrame + LetterCard + WordBook + BloomButton + StickerWord; storage + attic added; client-side PIN gate; /api/{progress,sessions,stats}." },
-    { "date": "2026-05-15", "kind": "feature", "title": "Three-phase lesson structure refactor", "impact": "Added food three-phase course + ImageGen PNG + structured scene.svg; phase-aware prompt / SSE progress_snapshot / phase-transition / quiz-answer; PhasedLessonController + Intro / Interactive / Reinforce / Quiz components; old courses + LessonView fallback retired; Course.phases is now required." }
+    { "date": "2026-05-15", "kind": "feature", "title": "Three-phase lesson structure refactor", "impact": "Added food three-phase course + ImageGen PNG + structured scene.svg; phase-aware prompt / SSE progress_snapshot / phase-transition / quiz-answer; PhasedLessonController + Intro / Interactive / Reinforce / Quiz components; old courses + LessonView fallback retired; Course.phases is now required." },
+    { "date": "2026-05-21", "kind": "feature", "title": "Course registry expansion", "impact": "Expanded visible catalog to 10 courses; regular course contract is 12 word cards + 4 sentence cards; repeat-after-me binds to sentence cards; word-card images are produced with Codex built-in image_gen and sentence cards reuse the target word image." }
   ],
 
   "protocols": {
@@ -430,11 +431,11 @@
 
   "frontend": {
     "routes": [
-      { "path": "/", "scene": "yard", "purpose": "Course list (LetterCard)", "data": "/api/courses" },
-      { "path": "/lesson/[id]", "scene": "cabin", "purpose": "Three-phase lesson (PhasedLessonView)", "data": "voice WS + SSE" },
-      { "path": "/lesson/[id]/done", "scene": "grass", "purpose": "Sticker summary of just-learned words", "data": "/api/progress" },
-      { "path": "/journal", "scene": "storage", "purpose": "Mastered-word journal", "data": "/api/progress" },
-      { "path": "/parents", "scene": "attic", "purpose": "Stats dashboard (PIN-gated)", "data": "/api/sessions + /api/stats" }
+      { "path": "/", "scene": "magic-study", "purpose": "Course book catalog (HomeStudy)", "data": "/api/courses" },
+      { "path": "/lesson/[id]", "scene": "lesson", "purpose": "Three-phase lesson (PhasedLessonView)", "data": "voice WS + SSE" },
+      { "path": "/lesson/[id]/done", "scene": "celebration", "purpose": "Summary of just-learned word cards", "data": "/api/progress" },
+      { "path": "/journal", "scene": "journal", "purpose": "Mastered-word journal", "data": "/api/progress" },
+      { "path": "/parents", "scene": "parents", "purpose": "Stats dashboard (PIN-gated)", "data": "/api/sessions + /api/stats" }
     ],
     "design_tokens": {
       "palette": {

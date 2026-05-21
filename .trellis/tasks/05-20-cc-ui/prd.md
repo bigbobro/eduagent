@@ -17,7 +17,7 @@
 
 视觉决策已全部由 HANDOFF.md 定稿，无需在 PRD 重复（见 HANDOFF §1–§3）。
 
-业务流程（不变）：首页 → Intro → 跟读 ×6 → Quiz → Reinforce → Done；独立屏 `/journal`、`/parents`。
+业务流程（不变）：首页 → Intro → 跟读目标词 → Quiz → Reinforce → Done；独立屏 `/journal`、`/parents`。课程扩展后常规课目标词为 12 个。
 
 ## Brainstorm Decisions（7 项已锁定）
 
@@ -26,7 +26,7 @@
 | Q1 | **单任务推进** | 不拆 subtask；按 HANDOFF §11 七步内部 commit。原因：tokens → atoms → PictureCard → 屏幕是强依赖链，拆任务只增调度成本。 |
 | Q2 | **rip-and-replace + feature 分支** | 工作分支 `feature/cc-ui-refresh`；允许 commit 中间态半坏；PR 合并前真课跑通。**不**做 `/v2` 并行路由。 |
 | Q3 | **`theme` 字段彻底改 `tone`** | `Course.theme: CourseTheme` → `Course.tone: PaletteKey`（`'peach' \| 'butter' \| 'mint' \| 'sky' \| 'lilac'`）；`CourseTheme` 类型删；`progress.courseTheme` → `progress.courseTone`；`food.ts` `theme: 'food'` → `tone: 'peach'`；4 处测试 fixture 同步。 |
-| Q4 | **UI-only，food 维持 6 词 0 句卡** | 课程结构调整（扩到 12 词 + 4 句）另开任务。本次用 gpt-img-2 重生成 **6 张**水彩 PNG 覆盖 `public/images/food/{apple,banana,bread,milk,egg,rice}.png`。 |
+| Q4 | **课程扩展并入本次迭代** | 用户后续确认本次要把课程扩展纳入项目迭代:每门常规课 12 个 `word` cards + 4 个 `sentence` cards;短句也必须有图片素材。新增课程最多补到 10 门,通过共享 `/lesson/[id]` route 和 registry 暴露,不新增单独页面。 |
 | Q5 | **设计资产入 repo** | 已复制到 `design/2026-05-redesign/`，commit 进版本；所有 jsonl 引用走仓库内相对路径。 |
 | Q6 | **L1 机器 + L2 人工验收，不引入 Playwright** | 自动化端到端留下次。详见下方 **Acceptance Criteria**。 |
 | Q7 | **`bunny.*` → `mochi.*` 全 rename** | `bunny.parents.{pin,failcount,lockedUntil}` localStorage key 全部改名；SALT `'bunny-attic-2026'` → `'mochi-loft-2026'`。接受现有 PIN 失效（单用户、重置成本 ≈ 0）。 |
@@ -96,14 +96,30 @@ PR 合并前必须删除：
 - `src/components/parents/{PinGate,PinPad,StatsCard,SessionRow,SettingsAccordion}.tsx`
 - `src/components/ui/{Button,Stars,Surface,PinPad}.tsx`
 
-### R8 图片资产（gpt-img-2 生成）
+### R8 图片资产（Codex 内置 ImageGen 生成）
 
-**生成 6 张 1024×1024 PNG**，覆盖 `public/images/food/{apple,banana,bread,milk,egg,rice}.png`。
+课程图片是核心生产能力,必须用 Codex 内置 `image_gen` 生成,不能用本地 Pillow/canvas/SVG 占位替代真实课程资产。
+
+本次课程扩展要求:
+
+- 课程 registry 最多补到 10 门可见课程。
+- 每门常规主题课包含 12 张 word 卡 + 4 张 sentence 卡。
+- 每张 word 卡都有 `public/images/<courseId>/<wordCardId>.png` 项目资产。
+- sentence 卡不生成独立图片,其 `imageUrl` 复用句子里目标教学单词的 word-card 图片。
+- `repeat-after-me.cardId` 引用对应 sentence 卡,`targetText` 等于 sentence 卡英文文本。
+- 课程是数据,不是页面;不得新增 `food.ts` 对应的单独页面。
 
 **统一提示词模板**（Codex 必须用此模板，不要自由发挥）：
 > "Soft watercolor storybook illustration of a single {WORD}, low-saturation pastel palette (peach / mint / butter / sky / lilac tones), irregular paper-textured edge with subtle bleed, centered subject taking ~70% of frame, off-white paper background (#FBF5E6) or transparent, child-friendly book illustration style. No 3D rendering, no neon, no high-saturation AI gloss, no shiny highlights, no realistic photography, no English or Chinese text in image."
 
 风格自检：每张出图后跟现有 `apple.png`（写实高饱和、HANDOFF 禁止的反面教材）对比，确认走低饱和水彩方向。如不符合上述提示词的视觉约束就重新生成。
+
+生成规则:
+
+- 只使用 Codex 内置 `image_gen`;不做 API key、CLI batch、子 agent 或其他 fallback 方案。
+- `pnpm course:image-jobs -- --course <courseId>` 生成 word-card JSONL prompt queue。
+- `pnpm course:image-audit` 审计缺失 PNG、占位尺寸 PNG、未引用 PNG。
+- 每张图片生成后移入项目路径,并删除 `.codex/generated_images/...` 原始文件。
 
 ### R9 文档同步
 
@@ -118,7 +134,7 @@ PR 合并前必须删除：
 - [ ] `pnpm test` 全绿（含已更新的 `tests/design-tokens.test.ts`、`food.test.ts`、`course.test.ts`、`progress.test.ts`、`LetterCard.test.tsx` 删除或迁移）
 - [ ] `pnpm run dev`（background）启动后 5 秒内无 Next.js / Tailwind / 字体 / 模块缺失报错
 - [ ] `curl -s http://localhost:3000/ -o /dev/null -w "%{http_code}"` 返回 200
-- [ ] `curl -s http://localhost:3000/api/courses` 返回包含 `tone: "peach"` 的 food 课程 JSON
+- [ ] `curl -s http://localhost:3000/api/courses` 返回 10 门课程,且 food 包含 `tone: "peach"`
 - [ ] `git grep -l "bunny" src/` 无业务代码命中（design 文件夹和 docs/superpowers 历史快照可豁免）
 - [ ] `git grep -l "CourseTheme\|courseTheme\|sceneImage" src/` 无命中
 - [ ] HANDOFF §8 映射表所列旧组件全部物理删除（`git ls-files src/components/{bunny,scene} | wc -l` == 0）
@@ -130,7 +146,7 @@ PR 合并前必须删除：
 - [ ] Quiz 1 题答对 + 1 题答错路径都有视觉反馈
 - [ ] Reinforce 句型空填填入有色彩差异
 - [ ] Done 庆祝页 5 颗星 + 数据 + 双 CTA 出现
-- [ ] `/journal` 翻开双页书显示 6 张已学词卡（按 progress db 实际状态）
+- [ ] `/journal` 翻开双页书显示已学词卡（按 progress db 实际状态,只统计 word cards）
 - [ ] `/parents` 输入新 PIN（4 位）首次设置 → 数据面板显示 stats
 - [ ] `prefers-reduced-motion` 模拟下 sparkle 不跳动
 
@@ -145,11 +161,9 @@ PR 合并前必须删除：
 
 ## Out of Scope
 
-- 课程内容扩充（food 6 → 12 词 + 4 句卡）—— 独立任务
 - 自动化端到端测试（Playwright / fixture audio E2E）—— 独立任务（**用户已确认未来一定要补**）
 - 错误态 / 加载态 / 空状态 / 404 视觉重设计
 - 移动端 / 平板触屏适配
-- sentence kind card 真实 PNG 生成
 - 后端 / 语音协议 / 状态机 / API / server 任何改动
 
 ## Technical Notes
@@ -157,7 +171,7 @@ PR 合并前必须删除：
 ### 保留不动的部分（绝对不改）
 
 - `src/lib/{agent,voice,audio,db}/*`
-- `src/data/courses/*` 的**业务结构**（card ids, drillParts, quizzes, teachingHints, narrationHint）—— 只改 `theme` → `tone` 命名和 `sceneImage` 字段删除
+- `src/data/courses/*` 的**既有 schema 核心结构**保持 Course/cards/objectives/phases,但本次按用户确认扩展为 12 word cards + 4 sentence cards 的常规课程合同
 - `src/app/api/*`
 - `server.ts`, `next.config.mjs`
 
@@ -170,7 +184,7 @@ PR 合并前必须删除：
 5. 逐屏拼装：HomeStudy → IntroFrame → LessonMandalaV2 → QuizPickWordFrame → ReinforceFrame → DoneCelebrateFrame
 6. 独立屏：JournalPage / PINGateFrame / ParentsPage
 7. 删除旧组件 + 文档同步（architecture.md / course-authoring-standard.md）
-8. 生成 6 张水彩 PNG（用 R8 提示词模板）
+8. 生成课程水彩 PNG（用 R8 提示词模板 / Codex ImageGen batch）
 9. 跑通真课，自查 L1 全绿，交付给用户做 L2
 
 ### 已知 stats 字段差异
@@ -192,6 +206,4 @@ HANDOFF §6.8.2 用 `weekMin / newWords / streak / accuracy`；现有 `src/lib/s
 ## Future Tasks（用户已确认 follow-up，不在本次范围）
 
 - 自动化端到端测试（Playwright + fixture audio）
-- food 课程扩充到 12 词 + 4 句卡（含 spec 更新 / 新词图 / 新 quizzes）
 - 错误态 / 加载态 / 空状态 / 404 视觉
-- 真实 sentence kind card PNG 生成

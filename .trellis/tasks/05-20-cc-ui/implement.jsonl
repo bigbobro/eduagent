@@ -14,4 +14,5 @@
 {"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复刻 jsx 组件时判断哪些是真的原子（要抽出来）vs 一次性（内联即可），避免过度抽象。"}
 {"file": "docs/course-authoring-standard.md", "reason": "课程规范，本次任务要更新其 §3 / §4 / §5 / §6 中关于 scene.svg / hotspot 的部分（新 IntroFrame 不再依赖 scene 图）。Codex 改完代码后同步更新此文档。"}
 {"file": "docs/architecture.md", "reason": "项目当前架构 living doc。CLAUDE.md 强制要求：前端架构变化必须当次 commit 同步更新此文档。"}
+{"file": ".trellis/tasks/05-20-cc-ui/research/codex-imagegen-batch.md", "reason": "Codex 内置 image_gen 调研结论：课程资源只生成 word-card 图片，sentence cards 复用目标词图片；不做 API key、CLI batch 或子 agent fallback。"}
 {"file": "CLAUDE.md", "reason": "项目级 Claude 规则：文档同步强制、自验证职责、凭据规则、测试自动化原则、提交风格。Codex 同样要遵守。"}

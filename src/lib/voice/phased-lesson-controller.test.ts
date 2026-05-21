@@ -82,12 +82,13 @@ describe('PhasedLessonController phase transitions', () => {
   it('intro to interactive when all cards introduced and TTS finished', async () => {
     await ctrl.startLesson();
     const phaseChanges: PhaseName[] = [];
+    const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
     ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
 
-    for (const card of foodCourse.cards) {
+    for (const card of wordCards) {
       v2.emit('actions', [{ tool: 'show_card', params: { card_id: card.id } }]);
     }
-    expect(ctrl.getIntroActiveCardId()).toBe('rice');
+    expect(ctrl.getIntroActiveCardId()).toBe('chicken');
     expect(ctrl.getCurrentPhase()).toBe('intro');
 
     v2.emit('state', 'awaiting');
@@ -102,10 +103,11 @@ describe('PhasedLessonController phase transitions', () => {
     await ctrl.startLesson();
     (ctrl as any).currentPhase = 'interactive';
     const phaseChanges: PhaseName[] = [];
+    const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
     ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
 
     v2.emit('progress', {
-      clearedCardIds: foodCourse.cards.map((card) => card.id),
+      clearedCardIds: wordCards.map((card) => card.id),
       totalAttempts: 6,
       currentPhase: 'interactive',
     });
@@ -119,11 +121,12 @@ describe('PhasedLessonController phase transitions', () => {
     await ctrl.startLesson();
     (ctrl as any).currentPhase = 'interactive';
     const phaseChanges: PhaseName[] = [];
+    const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
     ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
 
     v2.emit('progress', {
       clearedCardIds: ['apple'],
-      totalAttempts: 3 * foodCourse.cards.length,
+      totalAttempts: 3 * wordCards.length,
       currentPhase: 'interactive',
     });
     v2.emit('state', 'awaiting');
@@ -147,7 +150,7 @@ describe('PhasedLessonController intro follow-up fallback', () => {
 
   it('intro idle with missing cards sends follow-up message', async () => {
     await ctrl.startLesson();
-    for (const card of foodCourse.cards.slice(0, 3)) {
+    for (const card of foodCourse.cards.filter((item) => item.kind === 'word').slice(0, 3)) {
       v2.emit('actions', [{ tool: 'show_card', params: { card_id: card.id } }]);
     }
     v2.emit('state', 'awaiting');

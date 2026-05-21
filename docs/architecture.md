@@ -54,8 +54,8 @@
 | `src/lib/audio/recorder.ts` | **mic + AudioContext + worklet 模块单例**,`prewarmRecorder` 在 startLesson 提前就绪 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
-| `src/data/courses/food.ts` | 当前唯一可见课程:food 三阶段示范课,使用 `tone: 'peach'` |
-| `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById` |
+| `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,使用 `tone` 驱动 CC 调色 |
+| `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
 | `src/components/magic/*` | CC 绘本风原子组件:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/HomeStudy.tsx` | 首页魔法书房,课程书本入口 + journal/parents CTA |
@@ -196,7 +196,7 @@ controller.endLesson:
 - `speaking → awaiting`:TTS session-finished
 - 任意 → ending → idle:用户点"结束课堂"
 
-### 4b. PhasedLessonController phase 轴(food 课程)
+### 4b. PhasedLessonController phase 轴(课程 registry)
 
 ```
 idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ reinforcement ─[切3]─▶ done
@@ -204,8 +204,8 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
   └────── endLesson(任意 phase 都能立刻退出)──────────────────────────────────────┘
 ```
 
-- 切1:`introducedCardIds.size === cards.length` 且底层 `LessonController` 回到 `awaiting`。
-- 切2:`clearedCardIds.size === cards.length` 或 `totalAttempts >= 3 × cards.length`,且底层回到 `awaiting`。
+- 切1:`introducedWordCardIds.size === wordCards.length` 且底层 `LessonController` 回到 `awaiting`;sentence cards 不参与 intro 完成度。
+- 切2:`clearedWordCardIds.size === wordCards.length` 或 `totalAttempts >= 3 × wordCards.length`,且底层回到 `awaiting`;sentence cards 只在 reinforcement 使用。
 - 切3:reinforcement 所有 quizzes 答完。
 - phase 切换由 `PhasedLessonController` 判定,LLM 不输出 phase transition。
 - `LessonController` 仍是唯一 ASR/TTS/SSE 管线;旧 `LessonView` fallback 已删除。
@@ -310,6 +310,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};客户端 PIN 门控;详见 §11
 - 2026-05-15 — **三阶段 lesson structure refactor** — 新增 food 三阶段课程、ImageGen PNG 单卡资产 + 结构化 `scene.svg`;新增 phase-aware prompt / SSE progress_snapshot / `phase-transition` / `quiz-answer`;新增 `PhasedLessonController` + Intro / Interactive / Reinforce / Quiz 组件;删除旧课程数据与旧 `LessonView` fallback;`Course.phases` 收紧为必填
 - 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
+- 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 
@@ -376,7 +377,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 ### 数据流
 
 ```
-fetch /api/courses    → 首页 HomeStudy 书本列表(当前只返回 food)
+fetch /api/courses    → 首页 HomeStudy 书本列表(当前返回 registry 中 10 门课程)
 fetch /api/progress   → JournalPage / 总结页(WordMastery + 3 星掌握筛选)
 fetch /api/sessions   → ParentsPage 最近课堂列表(默认 limit=10)
 fetch /api/stats      → ParentsPage 数据卡(总分钟 + 掌握词数;streak/accuracy 暂显示占位)

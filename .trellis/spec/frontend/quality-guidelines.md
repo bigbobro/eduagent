@@ -45,5 +45,5 @@ ergonomics, accessibility labels, and the CC magic-academy visual system.
   only with an equivalent keyboard path?
 - Does every controller event subscription clean up with `.off()`?
 - Are loading, empty, and error states present for fetch-driven screens?
-- Does the UI still reflect the current course registry, which is currently only
-  `food`?
+- Does the UI still reflect the current course registry without hardcoded course
+  count assumptions?

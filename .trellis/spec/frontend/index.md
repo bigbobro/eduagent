@@ -12,6 +12,8 @@ events.
   surfaces, shared UI, course data, or audio interaction.
 - Read `docs/architecture.md` before changing lesson state, ASR/TTS playback,
   or phase transitions.
+- For course-only work, read `course-authoring.md` before creating course data
+  or artwork.
 - Reuse the current CC palette, paper radii, paper shadows, and font tokens from
   `tailwind.config.ts`.
 - Keep the experience as the actual app screen. Do not replace app views with
@@ -27,6 +29,7 @@ events.
 | [State Management](./state-management.md) | Local, controller, server, durable state boundaries | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Required frontend tests and review checks | Filled |
 | [Type Safety](./type-safety.md) | Shared contracts and runtime validation limits | Filled |
+| [Course Authoring](./course-authoring.md) | Registry-driven course data and ImageGen asset contract | Filled |
 
 ## Quality Check
 

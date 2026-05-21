@@ -5,4 +5,5 @@
 {"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "PictureCard / Cat / Frame 组件实现是否符合规范（props 设计、可访问性、reduced-motion 行为）。"}
 {"file": "docs/course-authoring-standard.md", "reason": "检查本次任务是否同步更新了 §3 / §4 / §5 / §6 中关于 scene.svg / hotspot 的描述。"}
 {"file": "docs/architecture.md", "reason": "检查前端架构 living doc 是否同步更新（CLAUDE.md 强制要求）。"}
+{"file": ".trellis/tasks/05-20-cc-ui/research/codex-imagegen-batch.md", "reason": "检查 ImageGen 实现是否符合修正后的调研结论：只用 Codex 内置 image_gen，word-card 图片入项目后删除 scratch 原图，sentence cards 复用目标词图片。"}
 {"file": "CLAUDE.md", "reason": "终检：文档同步、凭据规则、自验证、提交风格、删除旧组件物理彻底。"}

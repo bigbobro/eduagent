@@ -13,7 +13,8 @@ interface QuizPickWordFrameProps {
 
 export function QuizPickWordFrame({ quiz, course, onAnswer }: QuizPickWordFrameProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const options = useMemo(() => buildOptions(course.cards, quiz), [course.cards, quiz]);
+  const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
+  const options = useMemo(() => buildOptions(wordCards, quiz), [wordCards, quiz]);
 
   return (
     <div className="grid h-full w-full grid-cols-[1fr_320px] gap-7 bg-paperDeep px-8 py-8 text-ink">
@@ -58,4 +59,3 @@ function buildOptions(cards: WordCard[], quiz: Extract<Quiz, { type: 'pick-word'
   }
   return ids.map((id) => cards.find((card) => card.id === id)).filter(Boolean) as WordCard[];
 }
-

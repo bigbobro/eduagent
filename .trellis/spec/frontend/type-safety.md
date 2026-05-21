@@ -27,11 +27,23 @@ runtime schema library such as Zod.
 ## Required Course Data
 
 - Every `WordCard` requires `drillParts: string[]`.
-- Regular visible courses should include `objectives.sentences`,
-  `teachingHints`, and `phases`.
+- Regular visible courses should include exactly 12 word cards, exactly 4
+  sentence cards, exactly 4 child-sayable target sentences in
+  `objectives.sentences`, `teachingHints`, and `phases`.
+- The 4 target sentences are real practice sentences, not blank templates. Each
+  one must use a target word from the course's 12 cards.
+- `repeat-after-me.cardId` should reference the matching `kind: 'sentence'`
+  card. `pick-word` quizzes should only reference `kind: 'word'` cards.
 - Current registry exports `allCourses` and `getCourseById` from
   `src/data/courses/index.ts`; new courses must register there and add
   course-specific integrity tests.
+- Course content is data, not routing. Do not add per-course pages; the shared
+  `/lesson/[id]` route must resolve courses through `allCourses`.
+- Word-card assets must be PNG files generated through Codex built-in
+  `image_gen` and saved under `public/images/<courseId>/<wordCardId>.png`.
+  Sentence cards reuse the image URL of the target word used in the sentence;
+  do not create `sentence-*.png` assets. See `course-authoring.md` for the full
+  generation and cleanup contract.
 
 ## Runtime Validation
 

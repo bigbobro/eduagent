@@ -42,8 +42,8 @@ export function HomeStudy({
         </header>
 
         <section className="relative z-10 mt-8 grid h-[calc(100%-112px)] grid-cols-[1.35fr_1fr] gap-8">
-          <div className="flex flex-col justify-center">
-            <div className="grid max-w-3xl grid-cols-2 gap-6">
+          <div className="flex min-h-0 flex-col justify-center">
+            <div className="grid max-h-full max-w-3xl grid-cols-2 gap-4 overflow-y-auto pr-2">
               {error && (
                 <div className="col-span-2 rounded-paper-lg border-[2.4px] border-ink bg-paper p-8 text-center shadow-paper-hero">
                   <p className="font-zh text-xl text-ink">咒语书暂时没有送到</p>
@@ -55,14 +55,14 @@ export function HomeStudy({
                 <div key={i} className="h-44 animate-pulse rounded-paper-lg border-2 border-inkPale bg-paper/60 shadow-paper" />
               ))}
 
-              {!error && courses?.slice(0, 4).map((course, index) => (
+              {!error && courses?.map((course, index) => (
                 <button
                   key={course.id}
                   type="button"
                   onClick={() => onCourseStart(course.id)}
                   aria-label={`开始课程:${course.title}`}
-                  className="group relative h-44 rounded-paper-lg border-[2.4px] border-ink bg-paper p-5 text-left shadow-paper-hero transition-all duration-200 hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-butterDeep focus-visible:ring-offset-2"
-                  style={{ transform: `rotate(${bookRotation[index] ?? 0}deg)` }}
+                  className="group relative h-32 rounded-paper-lg border-[2.4px] border-ink bg-paper p-5 text-left shadow-paper-hero transition-all duration-200 hover:-translate-y-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-butterDeep focus-visible:ring-offset-2"
+                  style={{ transform: `rotate(${bookRotation[index % bookRotation.length]}deg)` }}
                 >
                   <div
                     className="absolute bottom-0 left-0 top-0 w-10 rounded-l-[26px] border-r-2 border-ink"
@@ -71,7 +71,7 @@ export function HomeStudy({
                   />
                   <div className="ml-12 flex h-full flex-col justify-between">
                     <div>
-                      <div className="font-display text-3xl leading-tight text-ink">{course.title}</div>
+                      <div className="font-display text-[26px] leading-tight text-ink">{course.title}</div>
                       <div className="mt-2 font-en text-base text-inkSoft">{course.id}</div>
                     </div>
                     <div className="font-zh text-sm text-inkSoft">{course.cards.filter((card) => card.kind === 'word').length} 个词</div>
@@ -101,4 +101,3 @@ export function HomeStudy({
     </PaperBg>
   );
 }
-

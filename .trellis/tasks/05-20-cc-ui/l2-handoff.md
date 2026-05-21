@@ -20,13 +20,28 @@ Branch: `feature/cc-ui-refresh`
   - `PINGateFrame`
   - `ParentsPage`
 - Deleted the old Bunny / scene / LetterCard / BloomButton / WordBook / SubtitleBar / legacy parents and legacy UI components.
-- Generated and installed six 1024x1024 watercolor food PNGs:
-  - `public/images/food/apple.png`
-  - `public/images/food/banana.png`
-  - `public/images/food/bread.png`
-  - `public/images/food/milk.png`
-  - `public/images/food/egg.png`
-  - `public/images/food/rice.png`
+- Expanded the visible course registry to 10 regular courses:
+  - `food`
+  - `colors`
+  - `sports`
+  - `animals`
+  - `family`
+  - `toys`
+  - `clothes`
+  - `weather`
+  - `body`
+  - `shapes`
+- Completed the course content contract for every regular course:
+  - 12 `word` cards
+  - 4 `sentence` cards
+  - 4 child-sayable target sentences
+  - `repeat-after-me` quiz items mapped to the matching sentence cards
+- Generated and installed all 120 word-card PNG assets under
+  `public/images/<courseId>/<wordCardId>.png` with Codex built-in `image_gen`.
+  Sentence cards reuse the image URL for the target teaching word; no
+  `sentence-*.png` assets are generated.
+- Moved generated project assets out of `.codex/generated_images/...` and
+  removed the scratch source files after each asset was installed.
 
 ## L1 Machine Checks
 
@@ -59,11 +74,22 @@ Branch: `feature/cc-ui-refresh`
   - `pnpm build`: pass
   - `pnpm run smoke` with `SMOKE_PORT=59427`: pass
   - `git diff --check`: pass
+- After the 10-course expansion and ImageGen asset completion:
+  - `pnpm course:image-audit`: pass, `expected=120 existing=120 missing=0 tiny=0 extra=0`
+  - `pnpm test src/data/courses`: pass, 4 files / 13 tests
+  - `pnpm exec tsc --noEmit`: pass
+  - `pnpm test`: pass, 39 files / 170 tests
+  - `pnpm build`: pass
+  - `pnpm run smoke`: pass on `http://localhost:3001`, including the 10-course `/api/courses` catalog check
+  - `git diff --check`: pass
+  - `git grep -n "bunny" src`: no matches
+  - `git grep -n "CourseTheme\|courseTheme\|sceneImage" src`: no matches
+  - legacy component path scan from HANDOFF §8: no tracked files remain
 - `pnpm build`: pass
 - `pnpm run lint`: not a configured lint check yet; it opens Next's ESLint initializer because the repo has no ESLint config or ESLint dependencies.
 - `pnpm run dev`: pass on `http://localhost:3000`
 - `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/`: `200`
-- `curl -s http://localhost:3000/api/courses`: returns the food course with `"tone":"peach"`
+- `curl -s http://localhost:3000/api/courses`: superseded by the course-expansion addendum; current expected result is the 10-course registry, with food still carrying `"tone":"peach"`.
 - Additional live route/API probes returned `200`: `/lesson/food`, `/lesson/food/done`, `/journal`, `/parents`, `/api/progress`, `/api/sessions`, `/api/stats`.
 - `git grep -l "bunny" src/`: no matches
 - `git grep -l "CourseTheme\|courseTheme\|sceneImage" src/`: no matches

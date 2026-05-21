@@ -40,17 +40,18 @@ describe('ReinforceFrame', () => {
     expect(controller.startListening).not.toHaveBeenCalled();
   });
 
-  it('changes the sentence blank from empty peach to filled mint after a correct ASR final', () => {
+  it('marks the sentence picture card correct after a matching ASR final', () => {
     const controller = mockController('awaiting');
     const onAnswer = vi.fn();
-    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
+    const { container } = render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
 
-    expect(screen.getByText('___').className).toContain('bg-peach/50');
+    expect(screen.getAllByText(quiz.targetText).length).toBeGreaterThan(0);
+    expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="listening"]')).toBeTruthy();
     act(() => {
-      controller.handlers.get('asr-final')?.({ text: 'I like apple' });
+      controller.handlers.get('asr-final')?.({ text: quiz.targetText });
     });
 
-    expect(screen.getAllByText('apple').find((node) => node.className.includes('bg-mint'))).toBeTruthy();
-    expect(onAnswer).toHaveBeenCalledWith({ correct: true, said: 'I like apple' });
+    expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="correct"]')).toBeTruthy();
+    expect(onAnswer).toHaveBeenCalledWith({ correct: true, said: quiz.targetText });
   });
 });
