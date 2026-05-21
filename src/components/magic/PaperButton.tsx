@@ -10,7 +10,6 @@ interface PaperButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>,
   color?: PaletteKey;
   size?: PaperButtonSize;
 }
-
 const sizeCx: Record<PaperButtonSize, string> = {
   sm: 'rounded-paper-md px-[18px] py-2 text-base',
   md: 'rounded-[22px] px-[26px] py-3 text-xl',
@@ -46,4 +45,3 @@ export function PaperButton({
     </button>
   );
 }
-

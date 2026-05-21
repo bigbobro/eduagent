@@ -26,4 +26,3 @@ export const palette = {
 } as const;
 
 export type PaletteKey = keyof typeof palette;
-

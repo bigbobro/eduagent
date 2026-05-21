@@ -11,7 +11,6 @@ interface DoneCelebrateFrameProps {
   onHome: () => void;
   onAgain: () => void;
 }
-
 export function DoneCelebrateFrame({
   starsEarned,
   totalStars,
@@ -48,4 +47,3 @@ export function DoneCelebrateFrame({
     </PaperBg>
   );
 }
-

@@ -7,7 +7,6 @@ interface PaperBgProps {
   className?: string;
   style?: CSSProperties;
 }
-
 export function PaperBg({ tone = 'paper', children, className = '', style }: PaperBgProps) {
   return (
     <div className={`paper-bg relative overflow-hidden ${className}`} style={{ background: palette[tone], ...style }}>
@@ -17,4 +16,3 @@ export function PaperBg({ tone = 'paper', children, className = '', style }: Pap
     </div>
   );
 }
-

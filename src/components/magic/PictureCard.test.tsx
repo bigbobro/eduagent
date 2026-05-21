@@ -63,4 +63,3 @@ describe('PictureCard', () => {
     expect(screen.getByText('I like apples.')).toBeTruthy();
   });
 });
-

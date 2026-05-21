@@ -8,7 +8,6 @@ interface StarProps {
   wobble?: boolean;
   className?: string;
 }
-
 export function Star({
   size = 24,
   fill = palette.butter,
@@ -46,4 +45,3 @@ export function Star({
     </svg>
   );
 }
-

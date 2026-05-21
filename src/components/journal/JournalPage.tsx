@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { ProgressSnapshot, CourseProgress } from '@/types/progress';
 import { Cat, PaperBg, PaperButton, PictureCard, Star } from '@/components/magic';
 
@@ -11,7 +12,10 @@ interface JournalPageProps {
 }
 
 export function JournalPage({ snapshot, error = false, onBack, onRetry }: JournalPageProps) {
-  const activeChapter = snapshot?.courses[0] ?? null;
+  const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
+  const hasPractice = snapshot?.courses.some(hasCoursePractice) ?? false;
+  const defaultChapter = snapshot?.courses.find(hasCoursePractice) ?? snapshot?.courses[0] ?? null;
+  const activeChapter = snapshot?.courses.find((course) => course.courseId === selectedCourseId) ?? defaultChapter;
   const totalCollected = snapshot?.totalWordsMastered ?? 0;
 
   return (
@@ -43,7 +47,7 @@ export function JournalPage({ snapshot, error = false, onBack, onRetry }: Journa
           </div>
         )}
 
-        {!error && snapshot && snapshot.totalWordsMastered === 0 && (
+        {!error && snapshot && !hasPractice && (
           <div className="flex h-[calc(100%-72px)] flex-col items-center justify-center gap-5">
             <Cat size={190} mood="idle" />
             <p className="font-zh text-xl">先去大厅上一节课,魔法书就会亮起来。</p>
@@ -51,7 +55,7 @@ export function JournalPage({ snapshot, error = false, onBack, onRetry }: Journa
           </div>
         )}
 
-        {!error && snapshot && snapshot.totalWordsMastered > 0 && activeChapter && (
+        {!error && snapshot && hasPractice && activeChapter && (
           <div className="grid h-[calc(100%-72px)] grid-cols-2 gap-5 py-7">
             <BookPage side="left">
               <div className="mb-5">
@@ -59,7 +63,12 @@ export function JournalPage({ snapshot, error = false, onBack, onRetry }: Journa
                 <div className="mt-1 font-en-script text-lg text-inkSoft">Chapters</div>
               </div>
               {snapshot.courses.map((course) => (
-                <ChapterRow key={course.courseId} course={course} active={course.courseId === activeChapter.courseId} />
+                <ChapterRow
+                  key={course.courseId}
+                  course={course}
+                  active={course.courseId === activeChapter.courseId}
+                  onSelect={() => setSelectedCourseId(course.courseId)}
+                />
               ))}
               <div className="mt-8 rotate-[-1deg] rounded-paper-lg border-2 border-ink bg-butter p-4 shadow-paper">
                 <div className="flex items-center gap-2 font-display text-[22px]">
@@ -108,6 +117,14 @@ export function JournalPage({ snapshot, error = false, onBack, onRetry }: Journa
   );
 }
 
+function hasWordPractice(word: CourseProgress['words'][number]) {
+  return word.attempts > 0 || word.correct > 0 || word.masteryStars > 0 || word.lastPracticed !== null;
+}
+
+function hasCoursePractice(course: CourseProgress) {
+  return course.words.some(hasWordPractice);
+}
+
 function BookPage({ side, children }: { side: 'left' | 'right'; children: React.ReactNode }) {
   const radius = side === 'left' ? 'rounded-l-[24px] rounded-r' : 'rounded-r-[24px] rounded-l';
   const insetShadow = side === 'left' ? 'inset -8px 0 18px -10px rgba(61,51,38,0.18)' : 'inset 8px 0 18px -10px rgba(61,51,38,0.18)';
@@ -121,11 +138,15 @@ function BookPage({ side, children }: { side: 'left' | 'right'; children: React.
   );
 }
 
-function ChapterRow({ course, active }: { course: CourseProgress; active: boolean }) {
+function ChapterRow({ course, active, onSelect }: { course: CourseProgress; active: boolean; onSelect: () => void }) {
   return (
-    <div
+    <button
+      type="button"
+      aria-pressed={active}
+      aria-label={`查看课程:${course.courseTitle}`}
+      onClick={onSelect}
       className={[
-        'mb-3 flex items-center justify-between rounded-paper-md border px-4 py-3',
+        'mb-3 flex w-full items-center justify-between rounded-paper-md border px-4 py-3 text-left',
         active ? 'border-ink bg-peach' : 'border-dashed border-inkPale bg-transparent',
       ].join(' ')}
     >
@@ -134,6 +155,6 @@ function ChapterRow({ course, active }: { course: CourseProgress; active: boolea
         <div className="font-en text-sm text-inkSoft">{course.masteredWords} / {course.totalWords}</div>
       </div>
       <span className="font-en-script text-2xl text-inkSoft">p. {course.masteredWords + 1}</span>
-    </div>
+    </button>
   );
 }

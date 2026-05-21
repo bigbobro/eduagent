@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Course, PhaseName } from '@/types/course';
 import { LessonController } from '@/lib/voice/lesson-controller';
@@ -14,6 +14,10 @@ interface PhasedLessonViewProps {
   course: Course;
 }
 
+interface ProgressSnapshot {
+  clearedCardIds: string[];
+}
+
 export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const router = useRouter();
   const v2Ref = useRef<LessonController | null>(null);
@@ -22,6 +26,10 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const [started, setStarted] = useState(false);
   const [introBusy, setIntroBusy] = useState(false);
   const [introActiveCardId, setIntroActiveCardId] = useState<string | null>(null);
+  const [clearedWordCount, setClearedWordCount] = useState(0);
+  const [lessonRun, setLessonRun] = useState(0);
+  const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
+  const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
 
   useEffect(() => {
     const v2 = new LessonController();
@@ -29,18 +37,23 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     const onPhaseChange = (next: PhaseName) => setPhase(next);
     const onIntroBusyChange = (busy: boolean) => setIntroBusy(busy);
     const onIntroActiveCardChange = (cardId: string | null) => setIntroActiveCardId(cardId);
+    const onProgress = (next: ProgressSnapshot) => {
+      setClearedWordCount(next.clearedCardIds.filter((cardId) => wordCardIds.has(cardId)).length);
+    };
     v2Ref.current = v2;
     phasedRef.current = phased;
+    v2.on('progress', onProgress);
     phased.on('phase-change', onPhaseChange);
     phased.on('intro-busy-change', onIntroBusyChange);
     phased.on('intro-active-card-change', onIntroActiveCardChange);
     return () => {
+      v2.off('progress', onProgress);
       phased.off('phase-change', onPhaseChange);
       phased.off('intro-busy-change', onIntroBusyChange);
       phased.off('intro-active-card-change', onIntroActiveCardChange);
       phased.endLesson().catch(() => {});
     };
-  }, [course]);
+  }, [course, lessonRun, wordCardIds]);
 
   const handleStart = async () => {
     setStarted(true);
@@ -53,9 +66,16 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   };
 
   const handleLeave = () => router.push('/');
+  const handleRestart = () => {
+    setStarted(false);
+    setPhase('intro');
+    setIntroBusy(false);
+    setIntroActiveCardId(null);
+    setClearedWordCount(0);
+    setLessonRun((run) => run + 1);
+  };
   const v2 = v2Ref.current;
   const sessionId = v2?.getSessionId() || '';
-  const wordCount = course.cards.filter((card) => card.kind === 'word').length;
 
   return (
     <main className="w-screen h-screen relative">
@@ -101,11 +121,11 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         )}
         {started && phase === 'done' && (
           <DoneCelebrateFrame
-            starsEarned={Math.min(5, wordCount)}
+            starsEarned={Math.min(5, clearedWordCount)}
             totalStars={5}
-            wordsLearned={wordCount}
+            wordsLearned={clearedWordCount}
             onHome={() => router.push('/')}
-            onAgain={() => router.push(`/lesson/${course.id}`)}
+            onAgain={handleRestart}
           />
         )}
       </div>

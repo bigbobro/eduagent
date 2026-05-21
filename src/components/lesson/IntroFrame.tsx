@@ -12,7 +12,6 @@ interface IntroFrameProps {
   onStart?: () => void;
   started?: boolean;
 }
-
 export function IntroFrame({
   course,
   locked = false,
@@ -72,4 +71,3 @@ export function IntroFrame({
     </div>
   );
 }
-

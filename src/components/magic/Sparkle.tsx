@@ -7,7 +7,6 @@ interface SparkleProps {
   className?: string;
   style?: CSSProperties;
 }
-
 export function Sparkle({ size = 14, color = palette.butterDeep, className = '', style }: SparkleProps) {
   return (
     <svg
@@ -22,4 +21,3 @@ export function Sparkle({ size = 14, color = palette.butterDeep, className = '',
     </svg>
   );
 }
-

@@ -13,7 +13,6 @@ interface IllustrationSlotProps {
   className?: string;
   style?: CSSProperties;
 }
-
 export function IllustrationSlot({
   width = '100%',
   height = '100%',
@@ -68,4 +67,3 @@ export function IllustrationSlot({
     </div>
   );
 }
-

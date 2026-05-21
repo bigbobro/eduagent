@@ -20,4 +20,3 @@ export function toPictureCardData(card: WordCard, tone: PictureCardTone = 'peach
     tone,
   };
 }
-

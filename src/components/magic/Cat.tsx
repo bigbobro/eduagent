@@ -9,7 +9,6 @@ interface CatProps {
   className?: string;
   'aria-label'?: string;
 }
-
 export function Cat({
   variant = 'storybook',
   size = 220,
@@ -102,4 +101,3 @@ export function Cat({
     </svg>
   );
 }
-
