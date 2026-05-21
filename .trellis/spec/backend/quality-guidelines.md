@@ -13,6 +13,10 @@ flow changes.
 - Keep `show_card` as the current-card source of truth. `src/lib/agent/memory.ts`
   applies attempt assessment to the previous current card before syncing a new
   `show_card` action; tests cover this ordering.
+- Normalize LLM `show_card` actions before emitting SSE and committing memory.
+  In interactive teaching, stale actions for cleared cards or non-current
+  targets must be filtered or replaced with the next active word from
+  `teachingHints.newCardIds`; do not rely on prompt wording alone for this.
 - Treat `cleared` as session-local progress only. Do not describe it as durable
   mastery.
 - For provider protocol work, encode/decode with `src/lib/voice/doubao-codec.ts`

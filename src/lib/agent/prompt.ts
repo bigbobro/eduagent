@@ -83,8 +83,11 @@ const PHASE_INTRO_PROMPT = `
 const PHASE_INTERACTIVE_PROMPT = `
 ## 当前阶段:interactive 阶段
 - 你正在做"AI 互动",目标是让孩子开口尝试目标词
-- 先练目标词,再自然带一个 objectives.sentences 里的核心短句
-- show_card 只能切换目标词卡,不要用 sentence_* 短句图卡承载 interactive 进度
+- 严格按"当前目标控制"里的 word card 学习顺序推进,不要回跳已通过的 word card
+- 默认只练"当前应练习的 word card";如果当前卡还没通过,继续围绕它示范、拆音、鼓励跟读
+- 如果你自然带出 objectives.sentences 里的短句,只能使用"当前应练习的 word card"对应的 sentence_* 短句图卡;必须先 show_card 该 sentence_* 图卡
+- 如果当前 word 没有对应 sentence_* 图卡,不要使用其它短句,避免回跳已通过词卡
+- sentence_* 短句只做一次轻量桥接,不要把 word card 的通过判定绑定到 sentence_* 卡
 - 完整使用本课程默认教学循环(P0 教学硬约束 + ASR 容错判定)
 `;
 
@@ -130,10 +133,26 @@ ${sentenceList}
 - 结束语: ${course.teachingHints.closing}`;
 }
 
-function buildMemoryContext(memory: LessonMemory): string {
+function buildMemoryContext(memory: LessonMemory, course: Course): string {
   const progressEntries = Object.entries(memory.cardProgress);
   const cardsByState = (state: string) =>
     progressEntries.filter(([, value]) => value === state).map(([id]) => id).join(', ') || '(无)';
+  const wordCardIds = new Set(course.cards.filter((card) => card.kind === 'word').map((card) => card.id));
+  const wordCardById = new Map(course.cards.filter((card) => card.kind === 'word').map((card) => [card.id, card]));
+  const sentenceCards = course.cards.filter((card) => card.kind === 'sentence');
+  const sentenceCardByText = new Map(
+    sentenceCards.map((card) => [card.english, card.id]),
+  );
+  const wordOrder = course.teachingHints.newCardIds.filter((id) => wordCardIds.has(id));
+  const clearedWordIds = wordOrder.filter((id) => memory.cardProgress[id] === 'cleared');
+  const currentWordCardId = wordCardIds.has(memory.currentCardId) ? memory.currentCardId : '';
+  const currentWordStillActive = currentWordCardId && memory.cardProgress[currentWordCardId] !== 'cleared';
+  const nextWordCardId = wordOrder.find((id) => memory.cardProgress[id] !== 'cleared') || '';
+  const activeWordCardId = currentWordStillActive ? currentWordCardId : nextWordCardId;
+  const activeWordCard = activeWordCardId ? wordCardById.get(activeWordCardId) : undefined;
+  const activeSentenceCard = activeWordCard
+    ? sentenceCards.find((card) => card.id === `sentence_${activeWordCardId}` || card.imageUrl === activeWordCard.imageUrl)
+    : undefined;
   let context = `## 当前课堂状态
 - 当前正在教: ${memory.currentWord || '(未开始)'}
 - 当前卡片: ${memory.currentCardId || '(未建立)'}
@@ -145,6 +164,14 @@ function buildMemoryContext(memory: LessonMemory): string {
 - needs_review cards: ${cardsByState('needs_review')}
 - 需复习: ${memory.wordsToReview.join(', ') || '(无)'}
 - 总交互次数: ${memory.totalInteractions}`;
+
+  context += `\n\n## 当前目标控制
+- word card 学习顺序: ${wordOrder.join(', ')}
+- 当前应练习的 word card: ${activeWordCardId || '(全部完成)'}
+- 当前 word 可用短句图卡: ${activeSentenceCard ? `${activeSentenceCard.id} (${activeSentenceCard.english})` : '(无;不要使用其它 sentence_* 卡)'}
+- 已通过 word cards: ${clearedWordIds.join(', ') || '(无)'}
+- 不要 show_card 已通过 word cards,除非孩子明确要求复习或"再说那一张"
+- 如果要说目标短句,必须 show_card 对应短句图卡: ${course.objectives.sentences.map((sentence) => `${sentence} => ${sentenceCardByText.get(sentence) || '(无对应卡)'}`).join(' | ')}`;
 
   if (memory.interestSignals.length > 0) {
     context += `\n\n## 学生兴趣信号`;
@@ -197,6 +224,6 @@ export function buildSystemPrompt(
     sections.push(PHASE_REINFORCEMENT_PROMPT);
   }
 
-  sections.push(buildMemoryContext(memory));
+  sections.push(buildMemoryContext(memory, course));
   return sections.join('\n\n---\n\n');
 }

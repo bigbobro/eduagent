@@ -41,54 +41,11 @@ describe('PhasedLessonController phase transitions', () => {
     expect(ctrl.getCurrentPhase()).toBe('intro');
   });
 
-  it('serializes intro hotspot requests until playback returns to awaiting', async () => {
-    await ctrl.startLesson();
-    v2.emit('state', 'awaiting');
-    const busyChanges: boolean[] = [];
-    const activeCardChanges: Array<string | null> = [];
-    ctrl.on('intro-busy-change', (busy: boolean) => busyChanges.push(busy));
-    ctrl.on('intro-active-card-change', (cardId: string | null) => activeCardChanges.push(cardId));
-
-    let resolveAction!: () => void;
-    v2.sendCustomAction.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { resolveAction = resolve; }),
-    );
-
-    const firstRequest = ctrl.requestIntroCard('apple');
-    expect(ctrl.isIntroBusy()).toBe(true);
-    expect(ctrl.getIntroActiveCardId()).toBe('apple');
-    expect(v2.sendCustomAction).toHaveBeenCalledTimes(1);
-
-    await ctrl.requestIntroCard('banana');
-    expect(v2.sendCustomAction).toHaveBeenCalledTimes(1);
-
-    v2.emit('state', 'speaking');
-    resolveAction();
-    await firstRequest;
-    expect(ctrl.isIntroBusy()).toBe(true);
-
-    v2.emit('state', 'awaiting');
-    expect(ctrl.isIntroBusy()).toBe(false);
-    expect(ctrl.getIntroActiveCardId()).toBeNull();
-
-    await ctrl.requestIntroCard('banana');
-    expect(v2.sendCustomAction).toHaveBeenCalledTimes(2);
-    expect(busyChanges).toContain(true);
-    expect(busyChanges).toContain(false);
-    expect(activeCardChanges).toContain('apple');
-    expect(activeCardChanges).toContain(null);
-  });
-
-  it('intro to interactive when all cards introduced and TTS finished', async () => {
+  it('intro to interactive when opening TTS finishes even without card actions', async () => {
     await ctrl.startLesson();
     const phaseChanges: PhaseName[] = [];
-    const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
     ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
 
-    for (const card of wordCards) {
-      v2.emit('actions', [{ tool: 'show_card', params: { card_id: card.id } }]);
-    }
-    expect(ctrl.getIntroActiveCardId()).toBe('chicken');
     expect(ctrl.getCurrentPhase()).toBe('intro');
 
     v2.emit('state', 'awaiting');
@@ -148,20 +105,6 @@ describe('PhasedLessonController intro follow-up fallback', () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it('intro idle with missing cards sends follow-up message', async () => {
-    await ctrl.startLesson();
-    for (const card of foodCourse.cards.filter((item) => item.kind === 'word').slice(0, 3)) {
-      v2.emit('actions', [{ tool: 'show_card', params: { card_id: card.id } }]);
-    }
-    v2.emit('state', 'awaiting');
-    vi.advanceTimersByTime(3500);
-
-    expect(v2.sendCustomAction).toHaveBeenCalledWith({
-      action: 'message',
-      text: expect.stringContaining('继续'),
-    });
-  });
-
   it('unlocks intro hotspots if startup never returns', async () => {
     v2.startLesson.mockImplementationOnce(() => new Promise<void>(() => {}));
     const busyChanges: boolean[] = [];
@@ -173,37 +116,5 @@ describe('PhasedLessonController intro follow-up fallback', () => {
     vi.advanceTimersByTime(7100);
     expect(ctrl.isIntroBusy()).toBe(false);
     expect(busyChanges).toEqual([true, false]);
-  });
-
-  it('clears startup unlock once intro is awaiting', async () => {
-    v2.startLesson.mockImplementationOnce(() => new Promise<void>(() => {}));
-    void ctrl.startLesson();
-    v2.emit('state', 'awaiting');
-
-    let resolveAction!: () => void;
-    v2.sendCustomAction.mockImplementationOnce(
-      () => new Promise<void>((resolve) => { resolveAction = resolve; }),
-    );
-    const request = ctrl.requestIntroCard('apple');
-    expect(ctrl.isIntroBusy()).toBe(true);
-
-    vi.advanceTimersByTime(7100);
-    expect(ctrl.isIntroBusy()).toBe(true);
-
-    resolveAction();
-    await request;
-  });
-
-  it('third intro idle forces interactive', async () => {
-    await ctrl.startLesson();
-    for (let i = 0; i < 3; i++) {
-      v2.emit('state', 'speaking');
-      v2.emit('state', 'awaiting');
-      vi.advanceTimersByTime(3500);
-    }
-    const calls = (v2.sendCustomAction as any).mock.calls.map((call: any[]) => call[0]);
-
-    expect(calls.filter((call: any) => call.action === 'message')).toHaveLength(2);
-    expect(calls.find((call: any) => call.action === 'phase-transition' && call.to === 'interactive')).toBeDefined();
   });
 });

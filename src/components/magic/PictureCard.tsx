@@ -23,6 +23,8 @@ interface PictureCardProps {
   size?: CardSize;
   state?: CardState;
   onClick?: () => void;
+  onRepeat?: () => void;
+  repeatDisabled?: boolean;
   dimmed?: boolean;
   badgeKind?: 'locked';
   className?: string;
@@ -49,6 +51,8 @@ export function PictureCard({
   size = 'hero',
   state = 'listening',
   onClick,
+  onRepeat,
+  repeatDisabled = false,
   dimmed = false,
   badgeKind,
   className = '',
@@ -56,7 +60,7 @@ export function PictureCard({
   const style = stateStyles[state];
 
   if (size === 'hero') {
-    return <HeroPictureCard card={card} state={state} stateStyle={style} className={className} />;
+    return <HeroPictureCard card={card} state={state} stateStyle={style} onRepeat={onRepeat} repeatDisabled={repeatDisabled} className={className} />;
   }
 
   if (size === 'tile') {
@@ -70,11 +74,15 @@ function HeroPictureCard({
   card,
   state,
   stateStyle,
+  onRepeat,
+  repeatDisabled,
   className,
 }: {
   card: PictureCardData;
   state: CardState;
   stateStyle: StateStyle;
+  onRepeat?: () => void;
+  repeatDisabled: boolean;
   className: string;
 }) {
   const isSentence = card.kind === 'sentence';
@@ -94,10 +102,13 @@ function HeroPictureCard({
 
       <button
         type="button"
+        onClick={onRepeat}
+        disabled={!onRepeat || repeatDisabled}
         aria-label="请老师再说一遍"
         className={[
           'absolute right-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-paper-pill border-2 px-3 py-1.5 font-zh text-[13px] text-ink shadow-paper transition-all duration-200',
           state === 'tryAgain' ? 'border-peachDeep bg-peach' : 'border-ink bg-paper',
+          !onRepeat || repeatDisabled ? 'opacity-60' : 'hover:-translate-y-0.5',
         ].join(' ')}
       >
         <SpeakerIcon />
@@ -264,4 +275,3 @@ function SpeakerIcon() {
     </svg>
   );
 }
-

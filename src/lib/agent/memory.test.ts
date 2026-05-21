@@ -7,6 +7,7 @@ import {
   commitAssistantStreamResult,
   markWordCorrect,
   markWordIncorrect,
+  normalizeAssistantActions,
 } from './memory';
 
 describe('word performance updates', () => {
@@ -95,6 +96,74 @@ describe('card progress updates', () => {
     expect(next.cardProgress.apple).toBe('cleared');
     expect(next.currentCardId).toBe('milk');
     expect(next.cardProgress.milk).toBe('attempted');
+  });
+
+  it('normalizes a cleared-card show_card to the next active word', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'egg',
+      cardProgress: {
+        ...initializeCardProgress(createMemory(), foodCourse).cardProgress,
+        apple: 'cleared' as const,
+        banana: 'cleared' as const,
+        bread: 'cleared' as const,
+        milk: 'cleared' as const,
+        egg: 'cleared' as const,
+      },
+      clearedCardIds: ['apple', 'banana', 'bread', 'milk', 'egg'],
+    };
+
+    const actions = normalizeAssistantActions(memory, foodCourse, {
+      speech: 'Let us say egg again.',
+      actions: [{ tool: 'show_card', params: { card_id: 'egg' } }],
+      state_update: { current_word: 'egg', phase: 'learning' },
+    });
+
+    expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'rice' } }]);
+  });
+
+  it('falls forward when a correct assessment repeats the just-cleared card', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'egg',
+      cardProgress: {
+        ...initializeCardProgress(createMemory(), foodCourse).cardProgress,
+        apple: 'cleared' as const,
+        banana: 'cleared' as const,
+        bread: 'cleared' as const,
+        milk: 'cleared' as const,
+      },
+      clearedCardIds: ['apple', 'banana', 'bread', 'milk'],
+    };
+
+    const actions = normalizeAssistantActions(memory, foodCourse, {
+      speech: 'Good egg. Next one.',
+      actions: [{ tool: 'show_card', params: { card_id: 'egg' } }],
+      state_update: {
+        current_word: 'egg',
+        phase: 'learning',
+        attempt_assessment: {
+          card_id: 'egg',
+          result: 'correct',
+          should_advance: true,
+          evidence: 'The student said egg.',
+        },
+      },
+    });
+    const next = commitAssistantStreamResult(memory, 'Good egg. Next one.', actions, {
+      current_word: 'egg',
+      phase: 'learning',
+      attempt_assessment: {
+        card_id: 'egg',
+        result: 'correct',
+        should_advance: true,
+        evidence: 'The student said egg.',
+      },
+    });
+
+    expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'rice' } }]);
+    expect(next.cardProgress.egg).toBe('cleared');
+    expect(next.currentCardId).toBe('rice');
   });
 
 

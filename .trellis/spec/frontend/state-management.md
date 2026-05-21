@@ -28,10 +28,91 @@ aggregates.
   plus `ending`.
 - `PhasedLessonController` owns the outer course phase:
   `intro -> interactive -> reinforcement -> done`.
+- Intro is a short opening gate only. When the opening greeting finishes and
+  `LessonController` returns to `awaiting`, `PhasedLessonController` should
+  immediately transition to `interactive`; do not wait for every word card to be
+  introduced during intro.
+- Interactive card display must follow `show_card` for both word cards and
+  `sentence_*` cards. If the teacher speaks a target sentence, the hero card
+  must switch to the matching sentence card; progress counters and phase
+  advancement still count word cards only.
+- `show_card` actions are normalized on the server before SSE emission. The UI
+  should still ignore any action that points at an already cleared word card,
+  including a `sentence_*` card mapped to that cleared word, so a stale action
+  cannot visually jump back to completed material.
+- The interactive prompt must carry a deterministic current-target rule:
+  continue the current uncleared word card, otherwise move to the first
+  uncleared word in `teachingHints.newCardIds`; do not jump back to cleared word
+  cards unless the learner explicitly asks to review.
 - `PhasedLessonView` stores controller instances in refs and mirrors emitted
   phase/busy/active-card state into React.
 - `LessonMandalaV2` mirrors lesson state, subtitle, and current card from
   controller events. It should not duplicate ASR/TTS state-machine logic.
+
+## Scenario: Interactive `show_card` Target Guard
+
+### 1. Scope / Trigger
+
+- Trigger: interactive lesson turns span LLM output, server memory, SSE actions,
+  controller events, and `LessonMandalaV2` display. Prompt text alone is not a
+  sufficient guard against stale or off-order card switches.
+
+### 2. Signatures
+
+- Server helper: `normalizeAssistantActions(memory, course, response): ToolAction[]`.
+- SSE event: `{ type: 'actions', actions: ToolAction[], state_update }`.
+- Tool action: `{ tool: 'show_card', params: { card_id: string } }`.
+
+### 3. Contracts
+
+- In interactive teaching, the active word is the current uncleared word card,
+  otherwise the first uncleared word in `course.teachingHints.newCardIds`.
+- Server must emit and commit normalized `show_card` actions only. Cleared word
+  cards and non-current targets are filtered or replaced with the active word.
+- Sentence cards are display-only in interactive progress. A sentence card is
+  valid only when it maps to the active word by `sentence_<wordId>` or shared
+  word image.
+- UI must ignore any received `show_card` whose owning word card is already in
+  `clearedCardIds`.
+
+### 4. Validation & Error Matrix
+
+- Unknown `card_id` -> ignore action.
+- Cleared word card -> replace with active word on server; ignore in UI if it
+  still reaches the component.
+- Sentence for cleared/non-current word -> replace with active word on server;
+  ignore in UI if it still reaches the component.
+- Correct assessment with missing or stale `show_card` -> server appends the
+  next active word card.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `egg` is correct and next active word is `rice`; stale `show_card egg`
+  becomes `show_card rice`.
+- Base: active word is `milk`; `show_card sentence_milk` displays the sentence
+  card while word progress remains word-only.
+- Bad: after `egg` is cleared, a later `show_card egg` must not move the hero
+  card back to egg.
+
+### 6. Tests Required
+
+- Unit test `normalizeAssistantActions` for cleared-card replacement and
+  correct-assessment fallback.
+- Component test `LessonMandalaV2` for ignoring a `show_card` targeting an
+  already cleared word.
+- Prompt test verifying current target and sentence-card mapping remain present
+  in the interactive prompt.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+Let every LLM `show_card` directly update `currentCardId` and the hero card.
+
+#### Correct
+
+Normalize `show_card` against session progress before SSE/commit, then keep a
+small UI guard using the latest progress snapshot.
 
 ## Server And Durable State Boundaries
 

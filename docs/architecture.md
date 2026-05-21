@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院 + food 仍为唯一可见课程(2026-05-20)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院 + 10 门常规课程 registry(2026-05-21)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -126,8 +126,8 @@ ASR final 到达 client
        ├─ POST /api/chat { action:'message', sessionId, text, asrResult }
        │   server: add raw ASR user message
        │           → streamLLM (MiMo, prompt 含 currentCardId/cardProgress/drillParts)
-       │           → SpeechExtractor 状态机 → SSE
-       │           → commit attempt_assessment + show_card 到 cardProgress/clearedCardIds
+       │           → SpeechExtractor 状态机 → normalize show_card(过滤/替换已通过或非当前目标卡) → SSE
+       │           → commit attempt_assessment + 归一化后的 show_card 到 cardProgress/clearedCardIds
        │           → token_usage 记录 LLM + ASR + TTS 字符数
        │            speech-delta × N + actions + done
        └─ consumeSSE:
@@ -139,8 +139,8 @@ ASR final 到达 client
                                               (state guard:listening/thinking 时丢弃)
               ◀── TTSSentenceStart (event=350) → tts.on('subtitle') → emit subtitle
             actions:
-              emit('actions') → PhasedLessonController 累计 introducedCardIds;LessonMandalaV2 从最后一条 show_card 提取 card_id → PictureCard 切换当前卡片
-              server 同步使用 show_card 作为 currentCardId 的事实来源
+              emit('actions') → LessonMandalaV2 从最后一条有效 show_card 提取 card_id → PictureCard 切换当前卡片(word 或 sentence_* 均可;已通过 word/sentence 回跳会被 UI 忽略)
+              server 同步使用归一化后的 show_card 作为 currentCardId 的事实来源
             done → tts.finishSession (event=102)
               ◀── SessionFinished (event=152) → setState('awaiting')
 ```
@@ -204,10 +204,11 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
   └────── endLesson(任意 phase 都能立刻退出)──────────────────────────────────────┘
 ```
 
-- 切1:`introducedWordCardIds.size === wordCards.length` 且底层 `LessonController` 回到 `awaiting`;sentence cards 不参与 intro 完成度。
+- 切1:开场介绍 TTS 播放结束,底层 `LessonController` 回到 `awaiting` 后立刻切到 `interactive`;intro 不等待全部 word cards 都被 `show_card` 介绍。
 - 切2:`clearedWordCardIds.size === wordCards.length` 或 `totalAttempts >= 3 × wordCards.length`,且底层回到 `awaiting`;sentence cards 只在 reinforcement 使用。
 - 切3:reinforcement 所有 quizzes 答完。
 - phase 切换由 `PhasedLessonController` 判定,LLM 不输出 phase transition。
+- interactive 阶段的主目标由 prompt 中的"当前目标控制"约束:继续当前未通过 word card,否则切到 `teachingHints.newCardIds` 里的第一个未通过 word card。若老师说短句,必须 `show_card` 对应 `sentence_*` 卡;进度计数仍只按 word cards。server 在 SSE/commit 前归一化 `show_card`,把已通过或非当前目标的回跳替换为当前应练习的 word card。
 - `LessonController` 仍是唯一 ASR/TTS/SSE 管线;旧 `LessonView` fallback 已删除。
 
 ---
@@ -263,7 +264,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
-| 新标准唯一化 | 当前只暴露 food;旧 `transportation` / `timeNumbers` 数据与 `LessonView` fallback 已退役 | 避免长期维护两套课程路径 |
+| 新标准唯一化 | 当前通过 registry 暴露 10 门常规课程;旧 `transportation` / `timeNumbers` 数据与 `LessonView` fallback 已退役 | 避免长期维护两套课程路径 |
 | LessonController 定位 | 继续复用 ASR/TTS/SSE 管线,不作为独立 lesson UI 入口 | 降低重写音频链路风险 |
 
 ---

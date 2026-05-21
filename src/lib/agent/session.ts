@@ -8,6 +8,7 @@ import {
   getMessagesForLLM,
   commitAssistantStreamResult,
   initializeCardProgress,
+  normalizeAssistantActions,
 } from './memory';
 import { buildSystemPrompt } from './prompt';
 import { streamLLM } from '@/lib/mimo/llm';
@@ -143,9 +144,14 @@ export async function* streamUserInput(
   }
 
   const result = extractor.finalize();
+  const normalizedActions = normalizeAssistantActions(session.memory, session.course, {
+    speech: result.speech,
+    actions: result.actions,
+    state_update: result.state_update,
+  });
   yield {
     type: 'actions',
-    actions: result.actions,
+    actions: normalizedActions,
     state_update: result.state_update,
   };
 
@@ -154,7 +160,7 @@ export async function* streamUserInput(
   session.memory = commitAssistantStreamResult(
     session.memory,
     result.speech,
-    result.actions,
+    normalizedActions,
     result.state_update
   );
   const assessment = result.state_update.attempt_assessment;
@@ -179,7 +185,7 @@ export async function* streamUserInput(
     timestamp: new Date(),
     userInput: userText,
     aiResponse: result.speech,
-    actions: result.actions,
+    actions: normalizedActions,
     modelCalls: {
       asr: asrResult,
       llm: { latency: llmLatency, inputTokens, outputTokens },
