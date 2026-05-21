@@ -144,3 +144,36 @@ Fixed PR review issues: repeat-after-me ASR-only quiz flow, completion restart r
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Fix PR behavior blockers
+
+**Date**: 2026-05-22
+**Task**: Fix PR behavior blockers
+**Branch**: `feature/cc-ui-refresh`
+
+### Summary
+
+Fixed the three PR behavior blockers: Journal now opens practiced courses and uses activity-based empty state; lesson done page now restarts locally and reports cleared progress. Verified test, type-check, build, smoke, and diff-check.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c94c33d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
