@@ -44,3 +44,37 @@ Filled repo-backed backend and frontend Trellis specs, verified tests/type-check
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Complete CC lesson catalog and assets
+
+**Date**: 2026-05-21
+**Task**: Complete CC lesson catalog and assets
+**Branch**: `feature/cc-ui-refresh`
+
+### Summary
+
+Completed the CC UI/course iteration with 10 visible courses, 120 project-local ImageGen word assets, sentence cards reusing word images, course-authoring specs, audits, tests, type-check, build, and smoke verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c2a2d62` | (see git log) |
+| `84793d9` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
