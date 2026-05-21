@@ -54,6 +54,8 @@ Pillow/canvas/SVG placeholder drawing when producing real course resources.
 - Generate word-card art with Codex built-in `image_gen`.
 - Use one clean single-subject image per word card and save the final selected
   image to `public/images/<courseId>/<wordCardId>.png`.
+- Optimize/downscale the final checked-in PNG before commit. Course PNGs must
+  be at or below 512px on each side and 800000 bytes per file.
 - Do not generate separate sentence-card scene images. Each sentence card must
   reuse the image URL of the target word used in the sentence.
 - Do not burn English or Chinese text into the image.
@@ -70,7 +72,8 @@ Pillow/canvas/SVG placeholder drawing when producing real course resources.
   the actual generation still happens through Codex built-in `image_gen`.
   Add `--missing-only` only for incremental repair.
 - Use `pnpm course:image-audit` before final verification. It must report no
-  missing, tiny, or unreferenced course PNGs.
+  missing, tiny, oversized, over-dimensioned, invalid, or unreferenced course
+  PNGs.
 
 Prompt baseline:
 

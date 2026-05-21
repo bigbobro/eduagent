@@ -48,6 +48,11 @@ aggregates.
   phase/busy/active-card state into React.
 - `LessonMandalaV2` mirrors lesson state, subtitle, and current card from
   controller events. It should not duplicate ASR/TTS state-machine logic.
+- Reinforcement `repeat-after-me` quizzes reuse `LessonController` recording,
+  but call `startListening({ routeToChat: false })`. This still emits
+  `asr-final` for local quiz scoring, then returns to `awaiting` without
+  sending the utterance through `/api/chat?action=message`. Interactive lesson
+  recording should keep the default chat-routed behavior.
 
 ## Scenario: Interactive `show_card` Target Guard
 

@@ -22,6 +22,10 @@ type EventName =
 
 type Listener<T = any> = (data: T) => void;
 
+interface StartListeningOptions {
+  routeToChat?: boolean;
+}
+
 export class LessonController {
   private state: LessonStateName = 'idle';
   private listeners = new Map<EventName, Set<Listener>>();
@@ -37,6 +41,7 @@ export class LessonController {
   private listenStartedAt = 0;
   private listenStoppedAt = 0;
   private speechStreamFinished = false;
+  private routeCurrentAsrToChat = true;
   private static readonly SPEECH_FINISH_FALLBACK_MS = 1500;
 
   constructor() {
@@ -112,6 +117,7 @@ export class LessonController {
     await this.stopRecording();
     this.player.stop();
     this.speechStreamFinished = false;
+    this.routeCurrentAsrToChat = true;
     this.tts.close();
     if (this.sessionId) {
       try {
@@ -151,10 +157,11 @@ export class LessonController {
 
   // ─── 录音流程(空格键 / 长按按钮 调用)────────────────────────────
 
-  async startListening(): Promise<void> {
+  async startListening(options: StartListeningOptions = {}): Promise<void> {
     if (this.state === 'listening') return;
     if (this.state !== 'awaiting') return; // speaking 时不打断 — 老师说完才能再说
 
+    this.routeCurrentAsrToChat = options.routeToChat ?? true;
     this.setState('listening');
     this.emit('subtitle-clear');
     this.listenStartedAt = performance.now();
@@ -167,6 +174,7 @@ export class LessonController {
       this.handleAsrFinal(text);
     });
     this.asr.on('error', (err: { message: string }) => {
+      this.routeCurrentAsrToChat = true;
       this.emit('error', err);
       this.setState('awaiting');
     });
@@ -179,6 +187,7 @@ export class LessonController {
         onChunk: (pcm) => this.asr?.sendPcm(pcm),
       });
     } catch (e) {
+      this.routeCurrentAsrToChat = true;
       this.emit('error', { message: '麦克风开不了哦,请允许权限' });
       this.setState('awaiting');
       return;
@@ -186,6 +195,7 @@ export class LessonController {
     try {
       await this.asr.open();
     } catch {
+      this.routeCurrentAsrToChat = true;
       this.emit('error', { message: 'ASR 连接失败,请重试' });
       // 录音也得清干净
       try { (await recorderPromise).stop(); } catch {}
@@ -195,6 +205,7 @@ export class LessonController {
     try {
       this.recorder = await recorderPromise;
     } catch (e) {
+      this.routeCurrentAsrToChat = true;
       this.emit('error', { message: '麦克风开不了哦,请允许权限' });
       this.asr?.close();
       this.asr = null;
@@ -210,6 +221,7 @@ export class LessonController {
       await this.stopRecording();
       try { this.asr?.close(); } catch {}
       this.asr = null;
+      this.routeCurrentAsrToChat = true;
       this.emit('subtitle-clear');
       this.emit('error', { message: '太短啦~按住多说一会儿' });
       this.setState('awaiting');
@@ -229,6 +241,7 @@ export class LessonController {
       this.emit('error', { message: '没听清呢~再说一次' });
       try { this.asr?.close(); } catch {}
       this.asr = null;
+      this.routeCurrentAsrToChat = true;
       this.setState('awaiting');
     }, 5000);
     // ASR final 事件会触发 handleAsrFinal → /api/chat;handleAsrFinal 末尾再 close ASR WS。
@@ -245,6 +258,8 @@ export class LessonController {
 
   private async handleAsrFinal(text: string): Promise<void> {
     if (!this.sessionId) return;
+    const routeToChat = this.routeCurrentAsrToChat;
+    this.routeCurrentAsrToChat = true;
     // 清兜底超时
     if (this.asrFinalTimer) {
       clearTimeout(this.asrFinalTimer);
@@ -260,6 +275,10 @@ export class LessonController {
     }
     this.emit('subtitle', { text, source: 'user' });
     this.emit('asr-final', { text });
+    if (!routeToChat) {
+      this.setState('awaiting');
+      return;
+    }
     const asrLatency = this.listenStoppedAt > 0
       ? Math.round(performance.now() - this.listenStoppedAt)
       : 0;

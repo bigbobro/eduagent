@@ -45,7 +45,7 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
   const start = () => {
     if (!canHold) return;
     setListening(true);
-    controller.startListening();
+    controller.startListening({ routeToChat: false });
   };
   const stop = () => {
     setListening(false);

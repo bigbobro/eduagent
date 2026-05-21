@@ -39,10 +39,11 @@ Codex may use ImageGen for course artwork, but generated images are assets, not 
 - Do not generate sentence-scene images. A sentence card's `imageUrl` must reuse the image for the target teaching word used in that sentence.
 - Do not burn English or Chinese text into generated images.
 - Keep single-card art centered, simple, child-friendly, and visually consistent.
+- Optimize/downscale final PNGs before commit. Checked-in course PNGs must stay at or below 512px on each side and 800000 bytes per file.
 - The introduction phase does not require a scene asset. It uses course text plus card metadata; word-card PNGs are enough.
 - Do not add hotspot-only scene contracts to new courses unless a future task reintroduces structured scene interaction.
 - Use `pnpm course:image-jobs -- --course <courseId>` to turn word-card course data into a JSONL prompt queue for Codex built-in `image_gen`.
-- Use `pnpm course:image-audit` to list missing PNGs, tiny placeholder-sized PNGs, and unreferenced course PNGs.
+- Use `pnpm course:image-audit` to list missing PNGs, tiny placeholder-sized PNGs, oversized PNGs, over-dimensioned PNGs, invalid PNGs, and unreferenced course PNGs.
 - Generate each queued prompt through Codex built-in `image_gen`; after moving the selected output into `public/images/<courseId>/`, delete the corresponding `.codex/generated_images/...` scratch source so local generated-image storage does not accumulate.
 - Do not add an API key, CLI batch, sub-agent, or fallback generation path for course assets.
 
@@ -73,7 +74,7 @@ Before a course is considered ready:
 
 - `pnpm exec tsc --noEmit`
 - `pnpm test src/data/courses`
-- `pnpm course:image-audit` reports zero missing, tiny, and unreferenced PNGs.
+- `pnpm course:image-audit` reports zero missing, tiny, oversized, over-dimensioned, invalid, and unreferenced PNGs.
 - Course tests confirm each course has 12 word cards, 4 sentence cards, 4 target sentences, card ids are unique, target sentences use course words, sentence cards reuse the matching target word image, quiz references are valid, PNG card images exist, and the introduction phase has usable `sceneCaption` / `narrationHint` content.
 - `/api/courses` returns the new course.
 - `/lesson/<courseId>` can enter `introduction` and render `<IntroFrame>` with Mochi plus the locked card chip grid.

@@ -145,6 +145,12 @@ ASR final 到达 client
               ◀── SessionFinished (event=152) → setState('awaiting')
 ```
 
+强化巩固里的 `repeat-after-me` 复用同一套 ASR 录音管线,但调用
+`LessonController.startListening({ routeToChat:false })`。这类录音仍会 emit
+`asr-final` 给 `ReinforceFrame` 做本地短句判定并由
+`ReinforcementFlow` 记录 `quiz-answer`,但不会再进入 `/api/chat?action=message`
+触发额外 LLM/TTS 回合。
+
 ### 3.3 结束课程
 
 ```

@@ -27,7 +27,7 @@ describe('ReinforceFrame', () => {
     render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
 
     fireEvent.pointerDown(screen.getByRole('button', { name: '按住 Space' }));
-    expect(controller.startListening).toHaveBeenCalledOnce();
+    expect(controller.startListening).toHaveBeenCalledWith({ routeToChat: false });
   });
 
   it('disables recording while controller is speaking', () => {

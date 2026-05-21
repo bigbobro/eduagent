@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DoneCelebrateFrame } from '@/components/lesson/DoneCelebrateFrame';
 import type { ProgressSnapshot } from '@/types/progress';
-import type { Course } from '@/types/course';
 
 interface Props {
   courseId: string;
@@ -12,17 +11,11 @@ interface Props {
 export function LessonDoneClient({ courseId }: Props) {
   const router = useRouter();
   const [snap, setSnap] = useState<ProgressSnapshot | null>(null);
-  const [, setCourse] = useState<Course | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/progress').then((r) => r.json()),
-      fetch('/api/courses').then((r) => r.json()),
-    ])
-      .then(([p, courses]: [ProgressSnapshot, Course[]]) => {
-        setSnap(p);
-        setCourse(courses.find((c) => c.id === courseId) ?? null);
-      })
+    fetch('/api/progress')
+      .then((r) => r.json())
+      .then((p: ProgressSnapshot) => setSnap(p))
       .catch(() => {
         setSnap({ courses: [], totalWordsMastered: 0, generatedAt: '' });
       });

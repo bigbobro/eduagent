@@ -52,7 +52,6 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     void phasedRef.current?.requestIntroCard(cardId);
   };
 
-  const handleDone = () => router.push(`/lesson/${course.id}/done`);
   const handleLeave = () => router.push('/');
   const v2 = v2Ref.current;
   const sessionId = v2?.getSessionId() || '';
@@ -106,7 +105,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
             totalStars={5}
             wordsLearned={wordCount}
             onHome={() => router.push('/')}
-            onAgain={handleDone}
+            onAgain={() => router.push(`/lesson/${course.id}`)}
           />
         )}
       </div>
