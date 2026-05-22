@@ -151,7 +151,7 @@
     { "path": "src/lib/logger.ts", "layer": "shared", "category": "lib_util", "role": "Structured logging shim used across server modules.", "critical": false },
 
     { "path": "src/lib/voice/doubao-codec.ts", "layer": "shared", "category": "voice", "role": "Doubao binary protocol encode/decode shared by ASR + TTS.", "critical": true },
-    { "path": "src/lib/voice/asr-proxy.ts", "layer": "server", "category": "voice", "role": "Server-side ASR WS proxy: PCM buffer during handshake, finish cache, hotword injection from targetWords.", "critical": true },
+    { "path": "src/lib/voice/asr-proxy.ts", "layer": "server", "category": "voice", "role": "Server-side ASR WS proxy: PCM buffer during handshake, finish cache, hotword injection from current/next card window.", "critical": true },
     { "path": "src/lib/voice/tts-proxy.ts", "layer": "server", "category": "voice", "role": "Server-side TTS WS proxy with long-connection reuse (one StartConnection, many sessions).", "critical": true },
     { "path": "src/lib/voice/asr-client.ts", "layer": "browser", "category": "voice", "role": "Browser ASR WS wrapper; finish() control-frame so upstream final lands before close.", "critical": true },
     { "path": "src/lib/voice/tts-client.ts", "layer": "browser", "category": "voice", "role": "Browser TTS WS wrapper; forwards startSession / text-chunk / finishSession / cancel.", "critical": true },

@@ -2,7 +2,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { ToolAction } from '@/types/tools';
-import { AsrClient } from './asr-client';
+import { AsrClient, setAsrSessionContext } from './asr-client';
 import { TtsClient } from './tts-client';
 import { PcmPlayer } from '@/lib/audio/pcm-player';
 import { startRecorder, prewarmRecorder, disposeRecorder, RecorderHandle } from '@/lib/audio/recorder';
@@ -43,6 +43,9 @@ export class LessonController {
   private speechStreamFinished = false;
   private routeCurrentAsrToChat = true;
   private pendingActions: ToolAction[] | null = null;
+  private courseId: string | null = null;
+  private currentAsrCardId: string | null = null;
+  private clearedCardIds: string[] = [];
   private static readonly SPEECH_FINISH_FALLBACK_MS = 1500;
 
   constructor() {
@@ -72,6 +75,10 @@ export class LessonController {
   // ─── 课堂生命周期 ─────────────────────────────────────────────────
 
   async startLesson(courseId: string): Promise<void> {
+    this.courseId = courseId;
+    this.currentAsrCardId = null;
+    this.clearedCardIds = [];
+    this.syncAsrSessionContext();
     this.setState('greeting');
     // 1) 并行启动:TTS 长连 + mic 预热(权限框、AudioContext、Worklet、MediaStream 全提前就绪)
     //    开场白播完用户按住空格那一刻,worklet node 只需 connect 一下,几乎瞬间就能出 PCM。
@@ -116,6 +123,10 @@ export class LessonController {
       this.speechFinishFallbackTimer = null;
     }
     this.pendingActions = null;
+    this.courseId = null;
+    this.currentAsrCardId = null;
+    this.clearedCardIds = [];
+    setAsrSessionContext({});
     await this.stopRecording();
     this.player.stop();
     this.speechStreamFinished = false;
@@ -342,6 +353,7 @@ export class LessonController {
       // Flush buffered actions now that TTS has finished speaking — this ensures
       // the card shown on screen matches the word the teacher just finished saying.
       if (this.pendingActions) {
+        this.syncAsrSessionContextFromActions(this.pendingActions);
         this.emit('actions', this.pendingActions);
         this.pendingActions = null;
       }
@@ -350,6 +362,7 @@ export class LessonController {
     this.tts.on('error', (err: { message: string }) => {
       // On TTS error, release any buffered actions so the UI doesn't stay stale.
       if (this.pendingActions) {
+        this.syncAsrSessionContextFromActions(this.pendingActions);
         this.emit('actions', this.pendingActions);
         this.pendingActions = null;
       }
@@ -430,6 +443,10 @@ export class LessonController {
         this.pendingActions = payload.actions || [];
         break;
       case 'progress_snapshot':
+        if (Array.isArray(payload.clearedCardIds)) {
+          this.clearedCardIds = payload.clearedCardIds.filter(Boolean);
+          this.syncAsrSessionContext();
+        }
         this.emit('progress', payload);
         break;
       case 'done':
@@ -457,5 +474,21 @@ export class LessonController {
       this.speechStreamFinished = true;
       this.maybeReturnToAwaiting();
     }, LessonController.SPEECH_FINISH_FALLBACK_MS);
+  }
+
+  private syncAsrSessionContextFromActions(actions: ToolAction[]): void {
+    const lastShowCard = [...actions].reverse().find((action) => action.tool === 'show_card' && action.params.card_id);
+    if (lastShowCard) {
+      this.currentAsrCardId = lastShowCard.params.card_id;
+    }
+    this.syncAsrSessionContext();
+  }
+
+  private syncAsrSessionContext(): void {
+    setAsrSessionContext({
+      ...(this.courseId ? { courseId: this.courseId } : {}),
+      ...(this.currentAsrCardId ? { cardId: this.currentAsrCardId } : {}),
+      ...(this.clearedCardIds.length > 0 ? { clearedCardIds: this.clearedCardIds } : {}),
+    });
   }
 }

@@ -5,6 +5,7 @@ export interface AsrClientSessionContext {
   courseId?: string;
   targetWords?: string[];
   cardId?: string;
+  clearedCardIds?: string[];
 }
 
 interface AsrPartial { type: 'partial'; text: string }
@@ -19,6 +20,7 @@ export function setAsrSessionContext(context: AsrClientSessionContext): void {
   sessionContext = {
     ...context,
     targetWords: context.targetWords?.filter(Boolean),
+    clearedCardIds: context.clearedCardIds?.filter(Boolean),
   };
 }
 
@@ -84,7 +86,7 @@ export class AsrClient {
   }
 }
 
-function buildAsrUrl(context: AsrClientSessionContext): string {
+export function buildAsrUrl(context: AsrClientSessionContext): string {
   const base =
     (typeof window !== 'undefined'
       ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`
@@ -94,6 +96,9 @@ function buildAsrUrl(context: AsrClientSessionContext): string {
   if (context.cardId) params.set('cardId', context.cardId);
   if (context.targetWords && context.targetWords.length > 0) {
     params.set('targetWords', context.targetWords.join(','));
+  }
+  if (context.clearedCardIds && context.clearedCardIds.length > 0) {
+    params.set('clearedCardIds', context.clearedCardIds.join(','));
   }
   const query = params.toString();
   return query ? `${base}?${query}` : base;

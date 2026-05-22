@@ -37,6 +37,58 @@ Stale `pendingActions` from one turn must never leak into the next turn.
 
 ---
 
+## Scenario: ASR hot_words window follows lesson card progress
+
+### 1. Scope / Trigger
+- Trigger: changing ASR session context or `LessonController` action/progress timing.
+- Scope: browser `LessonController` + `AsrClient` query fields + server `asr-proxy` hot_words payload.
+
+### 2. Signatures
+- `setAsrSessionContext({ courseId?, cardId?, clearedCardIds?, targetWords? })`
+- ASR WebSocket URL: `/api/voice/asr?courseId=<id>&cardId=<id>&clearedCardIds=<comma-list>`
+- Server payload: `buildAsrRequestPayload(session).request.corpus.context`
+
+### 3. Contracts
+- `courseId` is set in `LessonController.startLesson(courseId)` before the first ASR turn.
+- `cardId` is updated only when buffered `show_card` actions flush after TTS finishes, so the ASR bias matches the card visible for the next user utterance.
+- `clearedCardIds` is updated from `progress_snapshot` and sent with the next ASR connection.
+- When `cardId` is present and valid, server hot_words must be `{ currentCard.english, next uncleared wordCard.english }`.
+- When `cardId` is absent or stale, server falls back to explicit `targetWords` or all course word cards.
+- Doubao wire format remains `request.corpus.context = JSON.stringify({ hotwords: [{ word }] })`.
+
+### 4. Validation & Error Matrix
+- Missing `courseId` -> no course-derived hot_words; omit `corpus` unless explicit target words exist.
+- Stale `cardId` -> ignore the W2 window and fallback to target words/course words.
+- `clearedCardIds` contains the immediate next card -> skip it and choose the next uncleared word card.
+- TTS error/endLesson -> do not leave stale ASR context; if buffered actions are emitted on error, sync context from those actions; if the lesson ends, clear context with the lesson.
+
+### 5. Good/Base/Bad Cases
+- Good: visible card `dog`, cleared `cat` -> ASR hot_words `dog`, `bird`.
+- Base: lesson just started, no visible card yet -> ASR hot_words all course word cards.
+- Bad: using full 12-word course list after `show_card: dog` -> weakens short-word bias and can repeat the cat/frog failure class.
+
+### 6. Tests Required
+- `asr-client` test: session context URL includes `courseId`, omits `cardId` when unset, and includes `clearedCardIds` when present.
+- `asr-proxy` test: W2 window overrides full `targetWords`, skips cleared next cards, and stale `cardId` falls back.
+- `lesson-controller` test: `progress_snapshot` + flushed `show_card` updates ASR context after TTS session-finished.
+- Real regression: `pnpm run voice:asr-hotwords` when Doubao credentials/network are available; assert avgDiff >= 30pp and no baseline-passing case regresses.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```ts
+// Builds a broad list for every turn; short words compete with the whole course.
+setAsrSessionContext({ courseId, targetWords: allCourseWords });
+```
+
+#### Correct
+```ts
+// Course fallback first, then visible-card W2 once show_card flushes.
+setAsrSessionContext({ courseId, cardId, clearedCardIds });
+```
+
+---
+
 ## Memory: attempt assessment contracts
 
 ### Contract: `applyAttemptAssessment(memory, assessment, rawAsrText?)`

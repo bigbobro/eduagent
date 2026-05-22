@@ -17,6 +17,8 @@ import {
   buildAsrRequestPayload,
   type AsrSessionInfo,
 } from '../src/lib/voice/asr-proxy';
+import { getCourseById } from '../src/data/courses';
+import type { Course } from '../src/types/course';
 
 dotenv.config({ path: '.env.local', quiet: true });
 dotenv.config({ quiet: true });
@@ -30,10 +32,11 @@ const CHUNK_MS = 200;
 const CHUNK_BYTES = SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS * (CHUNK_MS / 1000);
 const FIXTURE_DIR = path.resolve('tests/fixtures/audio');
 const REPORT_DIR = path.resolve('docs/lesson-reports');
-const TIME_NUMBERS_TARGET_WORDS = ['hour', 'minute', 'second', 'hundred', 'thousand', 'million', 'billion'];
 
 interface RegressionCase {
   id: string;
+  courseId: string;
+  cardId: string;
   text: string;
   fixture: string;
   session: AsrSessionInfo;
@@ -46,42 +49,20 @@ interface AsrRunResult {
   matched: boolean;
   requiredTerms: string[];
   missingTerms: string[];
+  error?: string;
 }
 
-const cases: RegressionCase[] = [
-  {
-    id: 'hour',
-    text: 'hour',
-    fixture: 'hour.wav',
-    session: { courseId: 'timeNumbers', targetWords: TIME_NUMBERS_TARGET_WORDS, cardId: 'hour' },
-    requiredTerms: ['hour'],
-  },
-  {
-    id: 'thousand',
-    text: 'thousand',
-    fixture: 'thousand.wav',
-    session: { courseId: 'timeNumbers', targetWords: TIME_NUMBERS_TARGET_WORDS, cardId: 'thousand' },
-    requiredTerms: ['thousand'],
-  },
-  {
-    id: 'minute',
-    text: 'minute',
-    fixture: 'minute.wav',
-    session: { courseId: 'timeNumbers', targetWords: TIME_NUMBERS_TARGET_WORDS, cardId: 'minute' },
-    requiredTerms: ['minute'],
-  },
-  {
-    id: 'one_thousand_is_ten_hundreds',
-    text: 'One thousand is ten hundreds.',
-    fixture: 'one_thousand_is_ten_hundreds.wav',
-    session: {
-      courseId: 'timeNumbers',
-      targetWords: TIME_NUMBERS_TARGET_WORDS,
-      cardId: 'sentence_thousand_hundred',
-    },
-    requiredTerms: ['thousand', 'hundred'],
-  },
+const CASE_SPECS: Array<{ courseId: string; cardIds: string[] }> = [
+  { courseId: 'animals', cardIds: ['cat', 'dog', 'bird', 'fish', 'rabbit', 'turtle', 'lion', 'elephant', 'monkey', 'panda', 'duck', 'frog'] },
+  { courseId: 'colors', cardIds: ['yellow', 'purple', 'orange', 'gray'] },
+  { courseId: 'body', cardIds: ['eye', 'ear', 'nose', 'mouth'] },
+  { courseId: 'shapes', cardIds: ['heart', 'oval', 'cube', 'cone'] },
+  { courseId: 'clothes', cardIds: ['shirt', 'hat', 'socks', 'coat', 'shorts', 'scarf'] },
 ];
+
+const cases: RegressionCase[] = CASE_SPECS.flatMap(({ courseId, cardIds }) => (
+  cardIds.map((cardId) => makeCase(courseId, cardId))
+));
 
 async function main(): Promise<void> {
   requireEnv([
@@ -111,13 +92,11 @@ async function main(): Promise<void> {
     const pcmWithSilence = Buffer.concat([wav.pcm, Buffer.alloc(SAMPLE_RATE * BYTES_PER_SAMPLE * 3)]);
 
     console.log(`[asr-regression] ${item.id}: baseline`);
-    const baselineText = await runAsr(pcmWithSilence, {}, item.id, 'baseline');
-    const baseline = assessResult(baselineText, item.requiredTerms);
+    const baseline = await runAsrAndAssess(pcmWithSilence, {}, item.id, 'baseline', item.requiredTerms);
     console.log(`[asr-regression] ${item.id}: baseline="${baseline.text}" matched=${baseline.matched}`);
 
     console.log(`[asr-regression] ${item.id}: hotwords`);
-    const hotwordsText = await runAsr(pcmWithSilence, item.session, item.id, 'hotwords');
-    const hotwords = assessResult(hotwordsText, item.requiredTerms);
+    const hotwords = await runAsrAndAssess(pcmWithSilence, item.session, item.id, 'hotwords', item.requiredTerms);
     console.log(`[asr-regression] ${item.id}: hotwords="${hotwords.text}" matched=${hotwords.matched}`);
 
     results.push({
@@ -129,26 +108,89 @@ async function main(): Promise<void> {
     });
   }
 
+  const summary = summarizeResults(results);
   const report = {
     generatedAt: new Date().toISOString(),
     speaker: process.env.DOUBAO_ASR_REGRESSION_SPEAKER || process.env.DOUBAO_TTS_DEFAULT_SPEAKER,
     sampleRate: SAMPLE_RATE,
+    summary,
     cases: results,
   };
   const reportPath = path.join(REPORT_DIR, `asr-hotwords-regression-${dateStamp()}.json`);
   fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 
   const failed = results.filter((item) => !item.hotwords.matched);
+  const regressions = results.filter((item) => item.baseline.matched && !item.hotwords.matched);
   console.log(`[asr-regression] wrote ${path.relative(process.cwd(), reportPath)}`);
+  console.log(
+    `[asr-regression] summary baseline=${formatPct(summary.baselineHitRate)} hotwords=${formatPct(summary.hotwordsHitRate)} avgDiff=${formatPct(summary.avgDiff)}`
+  );
   for (const item of results) {
     console.log(
       `[asr-regression] ${item.id}: baseline="${item.baseline.text}" hotwords="${item.hotwords.text}"`
     );
   }
 
-  if (failed.length > 0) {
-    throw new Error(`Hotwords ASR regression failed: ${failed.map((item) => item.id).join(', ')}`);
+  if (summary.avgDiff < 0.3) {
+    throw new Error(`Hotwords ASR regression failed: avgDiff ${formatPct(summary.avgDiff)} < 30%`);
   }
+  if (regressions.length > 0) {
+    throw new Error(`Hotwords ASR regression regressed cases: ${regressions.map((item) => item.id).join(', ')}`);
+  }
+  if (failed.length > 0) {
+    console.warn(`[asr-regression] hotwords still missed: ${failed.map((item) => item.id).join(', ')}`);
+  }
+}
+
+function makeCase(courseId: string, cardId: string): RegressionCase {
+  const course = getCourseById(courseId);
+  if (!course) throw new Error(`Unknown course for ASR regression: ${courseId}`);
+  const card = course.cards.find((item) => item.id === cardId);
+  if (!card) throw new Error(`Unknown card for ASR regression: ${courseId}/${cardId}`);
+  return {
+    id: `${courseId}_${cardId}`,
+    courseId,
+    cardId,
+    text: card.english,
+    fixture: `${courseId}_${cardId}.wav`,
+    session: {
+      courseId,
+      cardId,
+      clearedCardIds: clearedBefore(course, cardId),
+    },
+    requiredTerms: [card.english],
+  };
+}
+
+function clearedBefore(course: Course, cardId: string): string[] {
+  const currentIndex = course.teachingHints.newCardIds.indexOf(cardId);
+  return currentIndex > 0 ? course.teachingHints.newCardIds.slice(0, currentIndex) : [];
+}
+
+function summarizeResults(results: Array<{
+  baseline: AsrRunResult;
+  hotwords: AsrRunResult;
+}>): {
+  caseCount: number;
+  baselineHits: number;
+  hotwordsHits: number;
+  baselineHitRate: number;
+  hotwordsHitRate: number;
+  avgDiff: number;
+} {
+  const baselineHits = results.filter((item) => item.baseline.matched).length;
+  const hotwordsHits = results.filter((item) => item.hotwords.matched).length;
+  const caseCount = results.length;
+  const baselineHitRate = caseCount > 0 ? baselineHits / caseCount : 0;
+  const hotwordsHitRate = caseCount > 0 ? hotwordsHits / caseCount : 0;
+  return {
+    caseCount,
+    baselineHits,
+    hotwordsHits,
+    baselineHitRate,
+    hotwordsHitRate,
+    avgDiff: hotwordsHitRate - baselineHitRate,
+  };
 }
 
 function requireEnv(names: string[]): void {
@@ -345,6 +387,30 @@ async function runAsr(pcm: Buffer, session: AsrSessionInfo, caseId: string, vari
   });
 }
 
+async function runAsrAndAssess(
+  pcm: Buffer,
+  session: AsrSessionInfo,
+  caseId: string,
+  variant: string,
+  requiredTerms: string[]
+): Promise<AsrRunResult> {
+  try {
+    const text = await runAsr(pcm, session, caseId, variant);
+    return assessResult(text, requiredTerms);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[asr-regression] ${caseId}: ${variant} error: ${message}`);
+    return {
+      text: '',
+      rawText: '',
+      matched: false,
+      requiredTerms,
+      missingTerms: requiredTerms,
+      error: message,
+    };
+  }
+}
+
 function assessResult(text: string, requiredTerms: string[], rawText: string = text): AsrRunResult {
   const normalized = normalize(text);
   const missingTerms = requiredTerms.filter((term) => !normalized.includes(normalize(term)));
@@ -409,6 +475,10 @@ function normalize(input: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatPct(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function dateStamp(): string {

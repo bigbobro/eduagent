@@ -8,6 +8,7 @@ const asrInstances = vi.hoisted(() => [] as Array<{
   finish: ReturnType<typeof vi.fn>;
   sendPcm: ReturnType<typeof vi.fn>;
 }>);
+const setAsrSessionContextMock = vi.hoisted(() => vi.fn());
 
 vi.mock('./asr-client', () => {
   class AsrClient {
@@ -26,7 +27,7 @@ vi.mock('./asr-client', () => {
     }
   }
 
-  return { AsrClient };
+  return { AsrClient, setAsrSessionContext: setAsrSessionContextMock };
 });
 
 const ttsInstances = vi.hoisted(() => [] as Array<{
@@ -94,6 +95,7 @@ describe('LessonController', () => {
   beforeEach(() => {
     asrInstances.length = 0;
     ttsInstances.length = 0;
+    setAsrSessionContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
   });
 
@@ -139,6 +141,7 @@ describe('R1: actions buffered until TTS session-finished', () => {
   beforeEach(() => {
     asrInstances.length = 0;
     ttsInstances.length = 0;
+    setAsrSessionContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
   });
 
@@ -205,6 +208,28 @@ describe('R1: actions buffered until TTS session-finished', () => {
     expect(actionsReceived).toHaveLength(1);
     expect(actionsReceived[0]).toEqual([{ tool: 'show_card', params: { card_id: 'apple' } }]);
     expect((controller as any).pendingActions).toBeNull();
+  });
+
+  it('syncs ASR context from progress snapshots and flushed show_card actions', async () => {
+    const frames =
+      'event: actions\ndata: {"actions":[{"tool":"show_card","params":{"card_id":"dog"}}]}\n\n' +
+      'event: progress_snapshot\ndata: {"clearedCardIds":["cat"],"totalAttempts":1,"currentPhase":"interactive"}\n\n' +
+      'event: done\ndata: {}\n\n';
+    vi.stubGlobal('fetch', vi.fn(async () => makeSseResponse(frames)));
+
+    const controller = new LessonController();
+    (controller as any).bindTtsHandlers();
+    (controller as any).courseId = 'animals';
+
+    const res = await fetch('/api/chat', { method: 'POST', body: '{}' });
+    await (controller as any).consumeSSE((res as any).body, () => {});
+    ttsInstances[0].emit('session-finished');
+
+    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({
+      courseId: 'animals',
+      cardId: 'dog',
+      clearedCardIds: ['cat'],
+    });
   });
 
   it('clears pendingActions on endLesson without emitting', async () => {

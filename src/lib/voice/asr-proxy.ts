@@ -20,6 +20,7 @@ export interface AsrSessionInfo {
   courseId?: string;
   targetWords?: string[];
   cardId?: string;
+  clearedCardIds?: string[];
 }
 
 interface AsrRequestPayload {
@@ -56,12 +57,18 @@ export function parseAsrSessionInfoFromUrl(reqUrl: string | undefined): AsrSessi
     .flatMap(splitWords)
     .map(cleanWord)
     .filter((word): word is string => Boolean(word));
+  const clearedCardIds = url.searchParams
+    .getAll('clearedCardIds')
+    .flatMap(splitWords)
+    .map(cleanWord)
+    .filter((word): word is string => Boolean(word));
   const courseTargetWords = courseId ? getCourseTargetWords(courseId) : [];
   const targetWords = dedupeWords(queryTargetWords.length > 0 ? queryTargetWords : courseTargetWords);
   return {
     ...(courseId ? { courseId } : {}),
     ...(targetWords.length > 0 ? { targetWords } : {}),
     ...(cardId ? { cardId } : {}),
+    ...(clearedCardIds.length > 0 ? { clearedCardIds: dedupeWords(clearedCardIds) } : {}),
   };
 }
 
@@ -92,9 +99,8 @@ export function buildAsrRequestPayload(session: AsrSessionInfo = {}, uid: string
 }
 
 function buildHotWords(session: AsrSessionInfo): string[] {
-  const words = [...(session.targetWords || [])];
-  const cardWord = getCardHotWord(session.courseId, session.cardId);
-  if (cardWord) words.push(cardWord);
+  const windowWords = getCardWindowHotWords(session.courseId, session.cardId, session.clearedCardIds || []);
+  const words = windowWords.length > 0 ? windowWords : [...(session.targetWords || [])];
   return dedupeWords(words.map(cleanWord).filter((word): word is string => Boolean(word)));
 }
 
@@ -106,11 +112,31 @@ function getCourseTargetWords(courseId: string): string[] {
     .map((card) => card.english);
 }
 
-function getCardHotWord(courseId: string | undefined, cardId: string | undefined): string | null {
-  if (!courseId || !cardId) return null;
+function getCardWindowHotWords(
+  courseId: string | undefined,
+  cardId: string | undefined,
+  clearedCardIds: string[]
+): string[] {
+  if (!courseId || !cardId) return [];
   const course = getCourseById(courseId);
-  const card = course?.cards.find((item) => item.id === cardId);
-  return card?.english || null;
+  if (!course) return [];
+  const cardById = new Map(course.cards.map((card) => [card.id, card]));
+  const words: string[] = [];
+  const currentCard = cardById.get(cardId);
+  if (!currentCard) return [];
+  if (currentCard?.english) words.push(currentCard.english);
+  const currentWordId = currentCard?.kind === 'word' ? currentCard.id : '';
+  const cleared = new Set(clearedCardIds);
+  const newWordIds = course.teachingHints.newCardIds.filter((id) => {
+    const card = cardById.get(id);
+    return card?.kind === 'word';
+  });
+  const currentIndex = currentWordId ? newWordIds.indexOf(currentWordId) : -1;
+  const candidates = currentIndex >= 0 ? newWordIds.slice(currentIndex + 1) : newWordIds;
+  const nextWordId = candidates.find((id) => id !== currentWordId && !cleared.has(id));
+  const nextCard = nextWordId ? cardById.get(nextWordId) : undefined;
+  if (nextCard?.english) words.push(nextCard.english);
+  return dedupeWords(words);
 }
 
 function splitWords(value: string): string[] {

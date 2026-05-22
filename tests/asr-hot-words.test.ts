@@ -7,7 +7,7 @@ import {
 } from '@/lib/voice/asr-proxy';
 
 describe('ASR hot words', () => {
-  it('injects target words as Doubao corpus context hotwords', () => {
+  it('uses the current-card W2 window instead of the full targetWords set', () => {
     const payload = buildAsrRequestPayload({
       courseId: 'food',
       targetWords: ['apple', 'milk', 'apple'],
@@ -17,23 +17,47 @@ describe('ASR hot words', () => {
     expect(payload.request.corpus).toBeDefined();
     const context = JSON.parse(payload.request.corpus!.context);
     expect(context.hotwords).toEqual([
-      { word: 'apple' },
-      { word: 'milk' },
       { word: 'rice' },
+      { word: 'water' },
     ]);
   });
 
-  it('derives course target words and current card from the websocket query', () => {
+  it('derives course context from the websocket query and skips cleared next words', () => {
     const session = parseAsrSessionInfoFromUrl(
-      '/api/voice/asr?courseId=food&targetWords=apple,milk&cardId=banana'
+      '/api/voice/asr?courseId=food&targetWords=apple,milk&cardId=banana&clearedCardIds=bread,milk'
     );
     const payload = buildAsrRequestPayload(session);
     const context = JSON.parse(payload.request.corpus!.context);
 
     expect(context.hotwords).toEqual([
-      { word: 'apple' },
-      { word: 'milk' },
       { word: 'banana' },
+      { word: 'egg' },
+    ]);
+  });
+
+  it('falls back to course target words when no current card is available yet', () => {
+    const session = parseAsrSessionInfoFromUrl('/api/voice/asr?courseId=animals');
+    const payload = buildAsrRequestPayload(session);
+    const context = JSON.parse(payload.request.corpus!.context);
+
+    expect(context.hotwords.slice(0, 3)).toEqual([
+      { word: 'cat' },
+      { word: 'dog' },
+      { word: 'bird' },
+    ]);
+  });
+
+  it('falls back to explicit targetWords when cardId is stale', () => {
+    const payload = buildAsrRequestPayload({
+      courseId: 'animals',
+      targetWords: ['cat', 'dog'],
+      cardId: 'missing-card',
+    });
+    const context = JSON.parse(payload.request.corpus!.context);
+
+    expect(context.hotwords).toEqual([
+      { word: 'cat' },
+      { word: 'dog' },
     ]);
   });
 
