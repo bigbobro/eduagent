@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
+- **Total Sessions**: 7
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~212 | Active |
+| `journal-1.md` | ~245 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-05-22 | Refresh docs/TODO.md after CC UI + 10-course rollout | `4d7d669` | `main` |
 | 6 | 2026-05-22 | Docs consolidation after Trellis migration | `58042a1` | `main` |
 | 5 | 2026-05-22 | Fix PR behavior blockers | `c94c33d` | `feature/cc-ui-refresh` |
 | 4 | 2026-05-22 | Address PR review findings | `eeb098d` | `feature/cc-ui-refresh` |

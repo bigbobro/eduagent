@@ -210,3 +210,36 @@ Fixed the three PR behavior blockers: Journal now opens practiced courses and us
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Refresh docs/TODO.md after CC UI + 10-course rollout
+
+**Date**: 2026-05-22
+**Task**: Refresh docs/TODO.md after CC UI + 10-course rollout
+**Branch**: `main`
+
+### Summary
+
+对齐 TODO.md 到 CC 重构 + 10 课现状:删 6 项已完成/退役条目,刷新 Hybrid 触发条件,顶部加'实测驱动'说明,行数 144→71。同时讨论了 docs/TODO.md(战略 backlog)与 .trellis/tasks/(战术执行单元)的边界:并存,角色不同;TODO 决定方向,task 承载具体改动 + commit + 归档。下一步等用户跑 1-2 节实测 + /lesson-report 决定老师 Agent 是 prompt 工程能解决还是要上 Hybrid 重构。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4d7d669` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
