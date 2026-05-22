@@ -29,7 +29,7 @@ const sentenceFixtureCourse: Course = {
 };
 
 describe('buildSystemPrompt P0 guardrails', () => {
-  it('tells the model to summarize only learned words', () => {
+  it('tells the model to summarize only learned words (closing phase)', () => {
     const memory = {
       ...createMemory(),
       phase: 'closing' as const,
@@ -40,6 +40,34 @@ describe('buildSystemPrompt P0 guardrails', () => {
 
     expect(prompt).toContain('只能总结本节已通过词汇');
     expect(prompt).toContain('car, bus');
+  });
+
+  it('R4: injects summary constraint even in learning phase (not just closing)', () => {
+    // With R4, the summary constraint is always injected regardless of phase.
+    const memory = {
+      ...createMemory(),
+      phase: 'learning' as const,
+      wordsLearned: ['apple'],
+    };
+
+    const prompt = buildSystemPrompt(foodCourse, memory);
+
+    expect(prompt).toContain('总结约束');
+    expect(prompt).toContain('只能总结本节已通过词汇');
+    expect(prompt).toContain('apple');
+  });
+
+  it('R4: summary constraint is present even when no words learned yet', () => {
+    const memory = {
+      ...createMemory(),
+      phase: 'opening' as const,
+      wordsLearned: [],
+    };
+
+    const prompt = buildSystemPrompt(foodCourse, memory);
+
+    expect(prompt).toContain('总结约束');
+    expect(prompt).toContain('(无)');
   });
 
   it('tells the model to switch strategy after three misses', () => {

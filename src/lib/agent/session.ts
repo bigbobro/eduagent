@@ -144,11 +144,29 @@ export async function* streamUserInput(
   }
 
   const result = extractor.finalize();
+
+  // R4: closing guard — if LLM speech contains any course target word that has NOT been
+  // learned this session, replace the entire speech with a safe template before emitting.
+  const wordsLearned = session.memory.wordsLearned;
+  const targetWords = session.course.cards
+    .filter((c) => c.kind === 'word')
+    .map((c) => c.english);
+  const unlearnedMentioned = targetWords.filter((w) => {
+    if (wordsLearned.includes(w)) return false;
+    const token = w.toLowerCase().replace(/[.,!?;]/g, '');
+    return token.length > 0 && new RegExp(`\\b${token}\\b`, 'i').test(result.speech);
+  });
+  if (unlearnedMentioned.length > 0) {
+    console.warn('[session] closing guard: LLM mentioned unlearned words', unlearnedMentioned, '— overriding speech');
+    const learnedDisplay = wordsLearned.length > 0 ? wordsLearned.join('、') : '一些新词';
+    result.speech = `今天我们一起练了 ${learnedDisplay},你说得很努力！下次再来玩吧。`;
+  }
+
   const normalizedActions = normalizeAssistantActions(session.memory, session.course, {
     speech: result.speech,
     actions: result.actions,
     state_update: result.state_update,
-  });
+  }, userText);
   yield {
     type: 'actions',
     actions: normalizedActions,
@@ -161,7 +179,8 @@ export async function* streamUserInput(
     session.memory,
     result.speech,
     normalizedActions,
-    result.state_update
+    result.state_update,
+    userText
   );
   const assessment = result.state_update.attempt_assessment;
   if (assessment && result.state_update.current_word) {

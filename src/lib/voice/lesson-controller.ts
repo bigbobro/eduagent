@@ -42,6 +42,7 @@ export class LessonController {
   private listenStoppedAt = 0;
   private speechStreamFinished = false;
   private routeCurrentAsrToChat = true;
+  private pendingActions: ToolAction[] | null = null;
   private static readonly SPEECH_FINISH_FALLBACK_MS = 1500;
 
   constructor() {
@@ -114,6 +115,7 @@ export class LessonController {
       clearTimeout(this.speechFinishFallbackTimer);
       this.speechFinishFallbackTimer = null;
     }
+    this.pendingActions = null;
     await this.stopRecording();
     this.player.stop();
     this.speechStreamFinished = false;
@@ -313,6 +315,7 @@ export class LessonController {
       });
     } catch (e) {
       if ((e as any).name !== 'AbortError') {
+        this.pendingActions = null;
         this.emit('error', { message: '我有点没反应过来…我们再聊一句?' });
         this.setState('awaiting');
       }
@@ -336,9 +339,20 @@ export class LessonController {
         this.speechFinishFallbackTimer = null;
       }
       this.speechStreamFinished = true;
+      // Flush buffered actions now that TTS has finished speaking — this ensures
+      // the card shown on screen matches the word the teacher just finished saying.
+      if (this.pendingActions) {
+        this.emit('actions', this.pendingActions);
+        this.pendingActions = null;
+      }
       this.maybeReturnToAwaiting();
     });
     this.tts.on('error', (err: { message: string }) => {
+      // On TTS error, release any buffered actions so the UI doesn't stay stale.
+      if (this.pendingActions) {
+        this.emit('actions', this.pendingActions);
+        this.pendingActions = null;
+      }
       this.emit('error', err);
     });
   }
@@ -411,7 +425,9 @@ export class LessonController {
         // 不在这里 finishSession,等 actions 也来,然后 done 再 finish
         break;
       case 'actions':
-        this.emit('actions', payload.actions || []);
+        // Buffer actions until TTS session-finished so the UI card change is
+        // in sync with what the teacher is saying, not 2-3 seconds ahead.
+        this.pendingActions = payload.actions || [];
         break;
       case 'progress_snapshot':
         this.emit('progress', payload);

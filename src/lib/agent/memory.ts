@@ -67,7 +67,8 @@ export function addUserMessage(memory: LessonMemory, content: string): LessonMem
 
 export function addAssistantMessage(
   memory: LessonMemory,
-  response: AgentResponse
+  response: AgentResponse,
+  rawAsrText?: string
 ): LessonMemory {
   const message: Message = {
     role: 'assistant',
@@ -79,7 +80,7 @@ export function addAssistantMessage(
   const messages = [...memory.messages, message].slice(-MAX_HISTORY);
 
   const update = response.state_update;
-  const assessedMemory = applyAttemptAssessment(memory, response);
+  const assessedMemory = applyAttemptAssessment(memory, response, rawAsrText);
   const nextCardId = getLastShowCardId(response.actions) || assessedMemory.currentCardId;
   const actionProgress = applyShowCardProgress(assessedMemory.cardProgress, response.actions);
 
@@ -161,17 +162,19 @@ export function commitAssistantStreamResult(
   memory: LessonMemory,
   speech: string,
   actions: AgentResponse['actions'],
-  stateUpdate: AgentResponse['state_update']
+  stateUpdate: AgentResponse['state_update'],
+  rawAsrText?: string
 ): LessonMemory {
-  return addAssistantMessage(memory, { speech, actions, state_update: stateUpdate });
+  return addAssistantMessage(memory, { speech, actions, state_update: stateUpdate }, rawAsrText);
 }
 
 export function normalizeAssistantActions(
   memory: LessonMemory,
   course: Course,
-  response: AgentResponse
+  response: AgentResponse,
+  rawAsrText?: string
 ): ToolAction[] {
-  const assessedMemory = applyAttemptAssessment(memory, response);
+  const assessedMemory = applyAttemptAssessment(memory, response, rawAsrText);
   const activeWordCardId = getActiveWordCardId(assessedMemory, course);
   let rejectedShowCard = false;
   let keptShowCard = false;
@@ -217,9 +220,13 @@ function applyShowCardProgress(
   return next;
 }
 
-function applyAttemptAssessment(memory: LessonMemory, response: AgentResponse): LessonMemory {
+function applyAttemptAssessment(memory: LessonMemory, response: AgentResponse, rawAsrText?: string): LessonMemory {
   const assessment = response.state_update.attempt_assessment;
-  if (!assessment || !assessment.card_id || assessment.card_id !== memory.currentCardId) return memory;
+  if (!assessment || !assessment.card_id) return memory;
+  if (assessment.card_id !== memory.currentCardId) {
+    console.warn('[memory] applyAttemptAssessment: assessment.card_id', assessment.card_id, '!= currentCardId', memory.currentCardId, '— ignoring');
+    return memory;
+  }
 
   const cardId = assessment.card_id;
   const progress = { ...memory.cardProgress };
@@ -228,15 +235,37 @@ function applyAttemptAssessment(memory: LessonMemory, response: AgentResponse): 
   let wordsLearned = memory.wordsLearned;
 
   if (assessment.result === 'correct') {
-    progress[cardId] = 'cleared';
-    streak[cardId] = 0;
-    clearedCardIds = memory.clearedCardIds.includes(cardId)
-      ? memory.clearedCardIds
-      : [...memory.clearedCardIds, cardId];
-    if (response.state_update.current_word) {
-      wordsLearned = mergeUnique(memory.wordsLearned, [response.state_update.current_word]);
+    // R2: ASR literal verify — when LLM says correct, confirm raw ASR actually contains
+    // the target English token. If rawAsrText is available but doesn't match, downgrade
+    // to attempted so the student must say it correctly one more time.
+    const targetToken = (response.state_update.current_word || '').toLowerCase().replace(/[.,!?;]/g, '').trim();
+    const asrNormalized = rawAsrText != null
+      ? rawAsrText.toLowerCase().replace(/[.,!?;]/g, '')
+      : null;
+
+    const literalMatch = asrNormalized == null
+      ? true // no rawAsrText available — fall back to trusting LLM judgment
+      : targetToken.length > 0 && asrNormalized.includes(targetToken);
+
+    if (literalMatch) {
+      progress[cardId] = 'cleared';
+      streak[cardId] = 0;
+      clearedCardIds = memory.clearedCardIds.includes(cardId)
+        ? memory.clearedCardIds
+        : [...memory.clearedCardIds, cardId];
+      if (response.state_update.current_word) {
+        wordsLearned = mergeUnique(memory.wordsLearned, [response.state_update.current_word]);
+      }
+      memory = updateWordPerformance(memory, response.state_update.current_word, true);
+    } else {
+      // LLM judged correct but raw ASR doesn't contain the target word literal —
+      // downgrade to attempted and keep the streak going.
+      console.warn('[memory] applyAttemptAssessment: LLM correct but ASR "' + rawAsrText + '" lacks target "' + targetToken + '" — downgrading to attempted');
+      const nextStreak = (streak[cardId] || 0) + 1;
+      streak[cardId] = nextStreak;
+      progress[cardId] = nextStreak >= 3 ? 'needs_review' : 'attempted';
+      memory = updateWordPerformance(memory, response.state_update.current_word, false);
     }
-    memory = updateWordPerformance(memory, response.state_update.current_word, true);
   } else if (assessment.result === 'close' || assessment.result === 'wrong') {
     const nextStreak = (streak[cardId] || 0) + 1;
     streak[cardId] = nextStreak;
@@ -274,12 +303,18 @@ function getActiveWordCardId(memory: LessonMemory, course: Course): string {
 }
 
 function canShowCard(cardId: string, memory: LessonMemory, course: Course, activeWordCardId: string): boolean {
-  if (!cardId || !activeWordCardId) return false;
+  if (!cardId) return false;
   const card = course.cards.find((item) => item.id === cardId);
   if (!card) return false;
   if (card.kind === 'word') {
-    return card.id === activeWordCardId && memory.cardProgress[card.id] !== 'cleared';
+    // R3: Accept any word card that has not yet been cleared — this allows LLM to jump
+    // to any untouched card when the student says "go to frog" etc., instead of forcing
+    // sequential order. Cleared cards are still rejected to prevent backward jumps.
+    const state = memory.cardProgress[card.id];
+    return state === 'untouched' || state === 'attempted' || state === 'needs_review';
   }
+  // Sentence cards: still require the associated word card to be active and not cleared.
+  if (!activeWordCardId) return false;
   return getWordCardIdForCard(course, card.id) === activeWordCardId && memory.cardProgress[activeWordCardId] !== 'cleared';
 }
 

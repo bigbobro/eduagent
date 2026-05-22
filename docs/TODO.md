@@ -1,16 +1,18 @@
 # EduAgent TODO
 
-> 2026-05-22 清理版。CC 绘本风 UI + 10 门常规课程铺开后,大量旧条目作废,重新对齐到 master 现状。
+> 2026-05-22 更新版。CC 绘本风 UI + 10 门常规课程铺开后,真实 animals 课 2 节实测(bd78d967 + 8bb58baa),P0 UX bug 已修复(R1-R4)。
 > 历史完成项参考 `docs/architecture.md` §9「文件演进历史」,本文件不复述。
 
-## 下一步:实测驱动
+## 下一步:第二轮实测
 
-10 门课程已就位、CC UI 已替换、教学循环 v1.1 已生效;**老师 Agent 真实表现的数据缺口大**(最近一次 `lesson-report` 在 2026-05-05,对应课程已退役)。下一步是上 1-2 节真实测,根据报告决定:
+P0 修复已落地。下一步是再跑 1 节真实 animals 课,对比 bd78d967 报告的 5 条 ground truth:
+- #1 #4:切卡时机是否与 ai speech 一致(R1)
+- #2 #3:show_card 与 LLM speech 错位是否消失(R1 + R3)
+- closing:总结不再列出未学词(R4)
 
-- 失败模式属于 **prompt 工程**(话术循环、收敛差、风格机械) → 调 prompt + system message,轻量迭代
-- 失败模式属于 **架构层瓶颈**(首音频延迟、话术随机、token 高) → 启动下方"Hybrid 预渲染重构"
-
-在此之前**不要**急着扩内容或改架构。
+结果决定:
+- 如果 LLM 话术质量仍是主要瓶颈 → 进入 Hybrid 预渲染重构(R5/R6/R7 等)
+- 如果 session resume / 进度选择是主要痛点 → 启动 R5(SQLite session 持久化)
 
 ---
 
@@ -42,9 +44,9 @@
 - 错音诊断分 3 档还是 5 档(决定 hint 池规模与作课成本)
 - 课程作者写课成本:每卡 5-7 段台词,需要工具/模板支持
 
-### 2. Actions 与 TTS 时序 *(CC 重构后需重新验证)*
+### ~~2. Actions 与 TTS 时序~~ — **已完成(R1 2026-05-22)**
 
-旧 transportation 实测里 `show_card` 跳得比讲解快 ~3s;CC 重构后整套 UI 换成 `PictureCard` + `LessonMandalaV2`,旧观察未必成立。等实测重新出现再升级。
+bd78d967 + 8bb58baa 实测报告确认 UX 杀手;`pendingActions` 机制已落地。
 
 ---
 
@@ -69,3 +71,4 @@
 - 2026-05-15 — lesson-structure-refactor:三阶段课程结构 + food 示范课 + PhasedLessonController;旧 LessonView fallback 删除
 - 2026-05-20 — CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院,`theme` 改 `tone`
 - 2026-05-21 — 课程 registry 扩到 10 门常规课程,合同收紧为 12 word + 4 sentence cards
+- 2026-05-22 — **Teacher Agent UX P0 四项修复(R1-R4)**:actions/TTS 时序、ASR 字面 verify、normalize 放宽(允许跳卡)、closing guard 始终注入 + 服务端 speech 扫描替换

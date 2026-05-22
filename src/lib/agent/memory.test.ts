@@ -9,6 +9,7 @@ import {
   markWordIncorrect,
   normalizeAssistantActions,
 } from './memory';
+import { allCourses } from '@/data/courses/index';
 
 describe('word performance updates', () => {
   it('tracks correct and incorrect attempts without double-counting assistant turns', () => {
@@ -233,6 +234,178 @@ describe('card progress updates', () => {
     });
 
     expect(next.phase).toBe('learning');
+  });
+});
+
+describe('R2: ASR literal verify in applyAttemptAssessment', () => {
+  it('clears card when LLM says correct AND raw ASR contains the target word', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'apple',
+    };
+
+    const next = commitAssistantStreamResult(memory, 'Great job!', [], {
+      current_word: 'apple',
+      phase: 'learning',
+      attempt_assessment: {
+        card_id: 'apple',
+        result: 'correct',
+        should_advance: true,
+        evidence: 'heard apple',
+      },
+    }, 'Apple.');
+
+    expect(next.cardProgress.apple).toBe('cleared');
+    expect(next.clearedCardIds).toContain('apple');
+    expect(next.wordsLearned).toContain('apple');
+  });
+
+  it('downgrades to attempted when LLM says correct but raw ASR lacks the target word', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'apple',
+    };
+
+    const next = commitAssistantStreamResult(memory, 'Great!', [], {
+      current_word: 'apple',
+      phase: 'learning',
+      attempt_assessment: {
+        card_id: 'apple',
+        result: 'correct',
+        should_advance: true,
+        evidence: 'LLM thinks it sounds like apple',
+      },
+    }, 'Kite.');  // ASR "Kite." does not contain "apple"
+
+    expect(next.cardProgress.apple).toBe('attempted');
+    expect(next.clearedCardIds).not.toContain('apple');
+    expect(next.wordsLearned).not.toContain('apple');
+  });
+
+  it('falls back to LLM judgment (clears) when rawAsrText is undefined', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'apple',
+    };
+
+    const next = commitAssistantStreamResult(memory, 'Great!', [], {
+      current_word: 'apple',
+      phase: 'learning',
+      attempt_assessment: {
+        card_id: 'apple',
+        result: 'correct',
+        should_advance: true,
+        evidence: 'heard apple',
+      },
+    }, undefined);  // no rawAsrText — should trust LLM
+
+    expect(next.cardProgress.apple).toBe('cleared');
+    expect(next.clearedCardIds).toContain('apple');
+  });
+
+  it('ASR matching is case-insensitive and ignores punctuation', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'rice',
+    };
+
+    // Raw ASR: "Rice." — contains "rice" after strip
+    const next = commitAssistantStreamResult(memory, 'Nice!', [], {
+      current_word: 'rice',
+      phase: 'learning',
+      attempt_assessment: {
+        card_id: 'rice',
+        result: 'correct',
+        should_advance: true,
+        evidence: 'heard rice',
+      },
+    }, 'Rice.');
+
+    expect(next.cardProgress.rice).toBe('cleared');
+  });
+
+  it('still marks needs_review after 3 consecutive wrong/close assessments', () => {
+    let memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'apple',
+    };
+
+    // Downgrade path also increments streak
+    for (let i = 0; i < 3; i++) {
+      memory = commitAssistantStreamResult(memory, 'Try again.', [], {
+        current_word: 'apple',
+        phase: 'learning',
+        attempt_assessment: {
+          card_id: 'apple',
+          result: 'correct',
+          should_advance: true,
+          evidence: 'LLM thinks correct but ASR is wrong',
+        },
+      }, 'Kite.');
+    }
+
+    expect(memory.cardProgress.apple).toBe('needs_review');
+    expect(memory.clearedCardIds).not.toContain('apple');
+  });
+});
+
+describe('R3: canShowCard accepts any untouched/attempted word card', () => {
+  it('allows LLM to jump to any untouched word card (non-sequential)', () => {
+    // frog is the last card in animals course; simulate jumping straight to it
+    const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
+    const memory = {
+      ...initializeCardProgress(createMemory(), animalsCourse),
+      currentCardId: 'cat',  // currently on first card
+    };
+
+    const actions = normalizeAssistantActions(memory, animalsCourse, {
+      speech: 'ok, frog time',
+      actions: [{ tool: 'show_card', params: { card_id: 'frog' } }],
+      state_update: { current_word: 'cat', phase: 'learning' },
+    });
+
+    // frog is untouched — should be accepted under R3
+    expect(actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'frog')).toBe(true);
+  });
+
+  it('allows show_card for an attempted word card', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'apple',
+      cardProgress: {
+        ...initializeCardProgress(createMemory(), foodCourse).cardProgress,
+        milk: 'attempted' as const,
+      },
+    };
+
+    const actions = normalizeAssistantActions(memory, foodCourse, {
+      speech: 'Let us try milk again.',
+      actions: [{ tool: 'show_card', params: { card_id: 'milk' } }],
+      state_update: { current_word: 'apple', phase: 'learning' },
+    });
+
+    expect(actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'milk')).toBe(true);
+  });
+
+  it('still rejects show_card for an already cleared word card', () => {
+    const memory = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'apple',
+      cardProgress: {
+        ...initializeCardProgress(createMemory(), foodCourse).cardProgress,
+        banana: 'cleared' as const,
+      },
+      clearedCardIds: ['banana'],
+    };
+
+    const actions = normalizeAssistantActions(memory, foodCourse, {
+      speech: 'Let us revisit banana.',
+      actions: [{ tool: 'show_card', params: { card_id: 'banana' } }],
+      state_update: { current_word: 'apple', phase: 'learning' },
+    });
+
+    // banana is cleared — should be rejected, replaced by next active card
+    expect(actions.every((a) => a.params.card_id !== 'banana')).toBe(true);
   });
 });
 

@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院 + 10 门常规课程 registry(2026-05-21)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:Teacher Agent UX 四项 P0 修复(2026-05-22):actions/TTS 时序同步、ASR 字面 verify、normalize 放宽、closing guard 始终注入。详见 §6 关键设计决策表。上次大改:CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院 + 10 门常规课程 registry(2026-05-21)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -139,7 +139,8 @@ ASR final 到达 client
                                               (state guard:listening/thinking 时丢弃)
               ◀── TTSSentenceStart (event=350) → tts.on('subtitle') → emit subtitle
             actions:
-              emit('actions') → LessonMandalaV2 从最后一条有效 show_card 提取 card_id → PictureCard 切换当前卡片(word 或 sentence_* 均可;已通过 word/sentence 回跳会被 UI 忽略)
+              **缓冲到 TTS session-finished 再 emit**(`pendingActions` in LessonController)
+              → LessonMandalaV2 从最后一条有效 show_card 提取 card_id → PictureCard 切换当前卡片(word 或 sentence_* 均可;已通过 word/sentence 回跳会被 UI 忽略)
               server 同步使用归一化后的 show_card 作为 currentCardId 的事实来源
             done → tts.finishSession (event=102)
               ◀── SessionFinished (event=152) → setState('awaiting')
@@ -156,6 +157,7 @@ ASR final 到达 client
 ```
 controller.endLesson:
   → chatAbort.abort + asrFinalTimer.clear
+  → pendingActions = null (丢弃任何待 emit 的 show_card 动作)
   → recorder.stop / asr.close
   → player.stop + tts.close (FinishConnection event=2)
   → POST /api/chat?action=end
@@ -265,8 +267,10 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | 短按 < 800ms 前端拦截 | 不进 thinking 不空等 | 豆包对 < 1.5s 录音置信度不够,大概率 timeout |
 | 5s 不 9s 的 ASR final 兜底 | 用户更快感知失败 | 9s 太长,影响"再说一次"的连续性 |
 | 不打断(speaking 时空格忽略) | 简化优先 | 实测打断后 inflight PCM 难完全清干净;后续再加 |
-| 字幕领先音频 | 不做时间戳同步 | spec 当时接受;但**实测画布跳得比讲解快 ~3s,见 TODO** |
-| 词汇正确性判定 | 当前目标英文词精确 token 命中 | 保守优先,`train` 算对、`tree` 不算;不做发音相似度猜测 |
+| ~~字幕领先音频~~ → **R1 已修复** | actions(`show_card`)缓冲到 `tts.session-finished` 再 emit | 实测 bd78d967 报告确认 UX 杀手;`pendingActions` in `LessonController` 解决;TTS error 路径也释放 |
+| 词汇正确性判定 | **R2:LLM 判 correct + raw ASR 字面 verify** 双重确认才 cleared;raw ASR 不含目标 token 时降为 attempted | LLM 曾把 "Kite." 判成 cat correct;字面 verify 截断过度容错 |
+| show_card normalize | **R3 放宽**:word card 接受任意 untouched / attempted(不限 activeWordCardId 顺序);cleared 仍拒绝 | 原来锁 newCardIds 顺序导致用户口头跳卡被忽略(frog 案例) |
+| closing 总结约束 | **R4:始终注入**到所有 phase 的 prompt;同时 session.ts 服务端扫 speech 含未学词时替换为安全模板 | 原来只在 phase=closing 注入;LLM 在 learning/opening phase 仍幻觉全词总结 |
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
@@ -294,7 +298,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 ## 8. 已知不足(指向 TODO.md 详情)
 
 - **课程 Session resume**:`sessions` 是 module-level in-memory Map,server 重启 / 刷新 / 断网 = 客户端旧 sessionId 失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。需 SQLite 持久化 + client resume 流程。
-- **actions 与 TTS 时序**:`show_card` 动作领先 AI 讲解,体感跳得太快
+- ~~**actions 与 TTS 时序**~~ — **已修复(R1)**:`pendingActions` 缓冲机制,`show_card` emit 推迟到 `tts.session-finished`
 - **MiMo first-token 4 秒**:首音频延迟主要瓶颈,前端无法优化
 - **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。当前由教学循环 v1.1 的 LLM `attempt_assessment` 基于 raw ASR + currentCardId + drillParts 做课堂内容错判定,真实儿童语音效果等下一节课实测
 - **Token 消耗偏高**:LLM message history 已裁到最近 12 条(约 6 轮),仍未做摘要压缩
@@ -318,6 +322,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - 2026-05-15 — **三阶段 lesson structure refactor** — 新增 food 三阶段课程、ImageGen PNG 单卡资产 + 结构化 `scene.svg`;新增 phase-aware prompt / SSE progress_snapshot / `phase-transition` / `quiz-answer`;新增 `PhasedLessonController` + Intro / Interactive / Reinforce / Quiz 组件;删除旧课程数据与旧 `LessonView` fallback;`Course.phases` 收紧为必填
 - 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
 - 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
+- 2026-05-22 — **Teacher Agent UX P0 四项修复** — R1:actions/TTS 时序(pendingActions 缓冲);R2:ASR 字面 verify(LLM correct + raw ASR 双重确认才 cleared);R3:normalize 放宽(word card 接受任意 untouched/attempted);R4:closing guard 始终注入 + 服务端 speech 扫描替换。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 

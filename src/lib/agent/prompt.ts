@@ -198,12 +198,15 @@ function buildMemoryContext(memory: LessonMemory, course: Course): string {
     });
   }
 
-  if (memory.phase === 'review' || memory.phase === 'closing') {
-    context += `\n\n## 总结约束
+  // R4: Always inject summary constraint regardless of phase.
+  // LLM sometimes generates a closing summary that lists all course words, not just
+  // the words actually practiced this session. This hard-constraint is injected every
+  // turn so the LLM always knows it must not enumerate unlearned words.
+  context += `\n\n## 总结约束（任何阶段均有效）
 - 只能总结本节已通过词汇: ${memory.wordsLearned.join(', ') || '(无)'}
 - 只能说"练过/通过/还要继续练",不要说"学会/掌握"。
-- 如果 untouched cards 不是(无),不得结课。`;
-  }
+- 如果 untouched cards 不是(无),不得结课。
+- 在任何一句话里,绝对不能说出未通过的目标词(上面"(无)"意味着本节没有已通过词汇)。`;
 
   return context;
 }

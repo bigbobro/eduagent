@@ -27,6 +27,7 @@ lesson logs, MiMo LLM streaming, and Doubao ASR/TTS proxy modules.
 | [Error Handling](./error-handling.md) | API, SSE, WebSocket, provider, and client error patterns | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Required tests and review gates for backend changes | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Current console logging style and sensitive-data limits | Filled |
+| [Agent Layer](./agent-layer.md) | memory/session/prompt contracts: actions timing, ASR verify, canShowCard, closing guard | Filled |
 
 ## Quality Check
 
