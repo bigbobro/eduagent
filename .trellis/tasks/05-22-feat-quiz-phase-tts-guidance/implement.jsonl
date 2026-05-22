@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Agent layer contracts including actions/TTS timing — speakStatic must coexist with main-line tts.startSession; understand R1 timing invariant before adding new TTS path."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Frontend component patterns — quiz frames are mount-driven side effects (useEffect), follow existing conventions for state machine + listener binding."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "When in lock state (isPromptPlaying), follow existing patterns for disabling interactions."}
+{"file": "docs/DOUBAO Protocol/tts.md", "reason": "TTS startSession/sendText/finishSession semantics; confirm repeated sid is safe and how event=152 (SessionFinished) maps to our session-finished event."}
+{"file": "docs/lesson-reports/2026-05-22-427f287b.md", "reason": "Report #6 source — n=61-70 all ai='' evidence; AC3 sanity check addresses these turns."}
+{"file": "docs/architecture.md", "reason": "§2 模块清单 QuizPickWordFrame / ReinforceFrame entries to update; §3 data flow may need a reinforcement TTS sub-diagram."}
