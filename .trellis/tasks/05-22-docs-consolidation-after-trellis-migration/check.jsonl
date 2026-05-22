@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/course-authoring.md", "reason": "verify all redirected references point to this canonical path"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "verify the active reference was updated, not the historical-snapshot references in docs/superpowers/"}

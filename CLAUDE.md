@@ -134,7 +134,7 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 
 ## 常见操作速查
 
-- 添加新课程:先读 `docs/course-authoring-standard.md`;在 `src/data/courses/<id>.ts` 新建 `Course` 对象,append 到 `src/data/courses/index.ts` 的 `allCourses` 数组,并补课程专属校验。
+- 添加新课程:先读 `.trellis/spec/frontend/course-authoring.md`;在 `src/data/courses/<id>.ts` 新建 `Course` 对象,append 到 `src/data/courses/index.ts` 的 `allCourses` 数组,并补课程专属校验。
 - 切换音色:改 `.env.local` 的 `DOUBAO_TTS_DEFAULT_SPEAKER`,重启 dev
 - 临时打点测延迟:参考 commit `2ea7b89` 之前的 `[bench]` 字段,验收后必须删
 - 排查"按住说话没识别":先看 dev server 终端 `[asr xxxxxxxx]` 行,看 pcmCount / finalSeen

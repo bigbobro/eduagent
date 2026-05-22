@@ -56,7 +56,7 @@ public/worklets/                   browser AudioWorklet scripts
 - Course card art lives under `public/images/<theme>/<cardId>.png`.
 - Introduction phases do not require `scene.svg`; `IntroFrame` renders
   `sceneCaption` / `narrationHint` plus card chips, per
-  `docs/course-authoring-standard.md`.
+  `.trellis/spec/frontend/course-authoring.md`.
 - Audio worklets live in `public/worklets/` because `AudioWorklet.addModule()`
   loads them by URL.
 

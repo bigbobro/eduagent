@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/course-authoring.md", "reason": "canonical destination for course-authoring references; implementer needs to confirm path before redirecting links"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "contains one active reference to docs/course-authoring-standard.md that must be updated"}

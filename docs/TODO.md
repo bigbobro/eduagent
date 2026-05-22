@@ -23,7 +23,7 @@
 - 新标准唯一化:当前只暴露 food;transportation / timeNumbers 与旧 `LessonView` fallback 已 cleanup。
 - 工具层(放大 / 圈出 / 慢速 / 换问法)是后续独立 epic。
 - 本 epic 已包含并取代下方 P1 §2 "写第 3 节课"(food = 第 3 课 + 示范课)。
-- 下游 Codex 产新课:照 `docs/course-authoring-standard.md` 走;spec §13 只保留入口摘要
+- 下游 Codex 产新课:照 `.trellis/spec/frontend/course-authoring.md` 走;spec §13 只保留入口摘要
 
 ---
 
@@ -115,7 +115,7 @@
    - 图片 loading 态、卡片切换动画属于打磨。
 
 5. **课程产出 SOP / Codex skill**
-   - 标准文档已提前建立:`docs/course-authoring-standard.md`。
+   - 标准文档已提前建立:`.trellis/spec/frontend/course-authoring.md`。
    - 课程产出 v1:课程设计 -> ImageGen 单体图 -> 结构化 `scene.svg` hotspot -> `cards[]` / `objectives.sentences` / quizzes -> 图片引用检查 -> 测试。
    - Codex skill 仍 gated:等课程数 ≥ 3,看标准是否稳定后再产品化。
 
