@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Teacher Agent layer contracts: actions/TTS timing, R1-R4 prior guards, normalize behavior. This task adds R5/R6/R7 — must align with the layered conventions."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required test patterns for backend voice/lesson changes (mini scenario style, state machine boundary)."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "R1 diagnostic [normalize] warn log added in session.ts must follow project logging convention."}
+{"file": "docs/lesson-reports/2026-05-22-427f287b.md", "reason": "Source-of-truth report with turn-level evidence for #1/#2/#3. Acceptance scenarios derive from these turns."}
+{"file": "docs/lesson-reports/2026-05-22-bd78d967.md", "reason": "Prior session that introduced R4 closing guard; explains R4 original intent so R6 fix doesn't regress it."}
+{"file": "docs/architecture.md", "reason": "§6 关键设计决策表 lists R1-R4; this task adds R5/R6/R7 entries. Must be updated as part of DoD."}
