@@ -199,6 +199,11 @@ export class PhasedLessonController {
     this.currentPhase = to;
     this.setIntroBusy(false);
     this.setIntroActiveCardId(null);
+    if (to === 'reinforcement') {
+      await this.v2.sendCustomAction({ action: 'phase-transition', to });
+      this.emit('phase-change', to);
+      return;
+    }
     this.emit('phase-change', to);
     await this.v2.sendCustomAction({ action: 'phase-transition', to });
   }

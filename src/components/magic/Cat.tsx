@@ -1,6 +1,6 @@
 import { palette } from './palette';
 
-export type CatMood = 'idle' | 'happy' | 'cheer' | 'think';
+export type CatMood = 'idle' | 'happy' | 'cheer' | 'think' | 'speaking';
 
 interface CatProps {
   variant?: 'storybook';
@@ -16,8 +16,8 @@ export function Cat({
   className,
   'aria-label': ariaLabel = 'Mochi 麻吉',
 }: CatProps) {
-  const eyeY = mood === 'happy' || mood === 'cheer' ? 56 : 54;
-  const happyEyes = mood === 'happy' || mood === 'cheer';
+  const eyeY = mood === 'happy' || mood === 'cheer' || mood === 'speaking' ? 56 : 54;
+  const happyEyes = mood === 'happy' || mood === 'cheer' || mood === 'speaking';
 
   return (
     <svg
@@ -76,7 +76,13 @@ export function Cat({
       )}
 
       <path d="M97 63 Q100 65 103 63 L100 66 Z" fill={palette.catPink} stroke={palette.ink} strokeWidth="0.8" />
-      <path d="M100 66 Q97 70 94 69 M100 66 Q103 70 106 69" stroke={palette.ink} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+      {mood === 'speaking' ? (
+        <ellipse cx="100" cy="71" rx="4.5" ry="4.6" fill={palette.ink}>
+          <animate attributeName="ry" values="3.2;5.8;3.2" dur="0.45s" repeatCount="indefinite" />
+        </ellipse>
+      ) : (
+        <path d="M100 66 Q97 70 94 69 M100 66 Q103 70 106 69" stroke={palette.ink} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+      )}
 
       <g stroke={palette.ink} strokeWidth="0.8" fill="none" opacity="0.7">
         <path d="M88 67 Q78 67 70 64" />
@@ -87,6 +93,13 @@ export function Cat({
 
       {mood === 'think' && (
         <path d="M142 32 Q151 24 158 31 Q164 38 156 45 Q150 50 150 57" stroke={palette.inkSoft} strokeWidth="2" fill="none" strokeLinecap="round" />
+      )}
+
+      {mood === 'speaking' && (
+        <g stroke={palette.inkSoft} strokeWidth="1.6" fill="none" strokeLinecap="round" opacity="0.75">
+          <path d="M139 42 Q148 50 139 58" />
+          <path d="M147 36 Q162 50 147 64" />
+        </g>
       )}
 
       <ellipse cx="78" cy="166" rx="9" ry="5" fill={palette.catFur} stroke={palette.ink} strokeWidth="1.4" />

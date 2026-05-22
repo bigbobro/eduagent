@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSpacebar } from '@/hooks/useSpacebar';
 import type { Course, Quiz } from '@/types/course';
-import { LessonController, type LessonStateName } from '@/lib/voice/lesson-controller';
+import type { LessonController, LessonStateName } from '@/lib/voice/lesson-controller';
 import { Cat, PaperButton, PictureCard } from '@/components/magic';
 import { toPictureCardData } from '@/components/magic/cardData';
 
@@ -18,12 +18,16 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
   const [state, setState] = useState<LessonStateName>(controller.getState());
   const [listening, setListening] = useState(false);
   const [heardSentence, setHeardSentence] = useState(false);
+  const [hasHeardPrompt, setHasHeardPrompt] = useState(false);
+  const [promptPlaying, setPromptPlaying] = useState(true);
+  const spokenPromptRef = useRef<string | null>(null);
   const card = course.cards.find((item) => item.id === quiz.cardId);
   const targetWords = useMemo(
     () => quiz.targetText.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter((word) => word.length > 2),
     [quiz.targetText],
   );
-  const canHold = state === 'awaiting' || state === 'listening';
+  const canHold = (state === 'awaiting' || state === 'listening') && hasHeardPrompt && !promptPlaying;
+  const catMood = promptPlaying || state === 'quiz-speaking' ? 'speaking' : heardSentence ? 'cheer' : 'happy';
 
   useEffect(() => {
     const onState = (next: LessonStateName) => setState(next);
@@ -41,6 +45,35 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
       controller.off('asr-final', onFinal);
     };
   }, [controller, onAnswer, targetWords]);
+
+  useEffect(() => {
+    spokenPromptRef.current = null;
+    setListening(false);
+    setHeardSentence(false);
+    setHasHeardPrompt(false);
+    setPromptPlaying(true);
+  }, [quiz.id, quiz.targetText]);
+
+  useEffect(() => {
+    if (spokenPromptRef.current === quiz.targetText) return;
+    if (state !== 'awaiting') return;
+
+    let cancelled = false;
+    spokenPromptRef.current = quiz.targetText;
+    setPromptPlaying(true);
+    controller.speakStatic(quiz.targetText)
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setHasHeardPrompt(true);
+          setPromptPlaying(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [controller, quiz.id, quiz.targetText, state]);
 
   const start = () => {
     if (!canHold) return;
@@ -80,7 +113,7 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
       </section>
       <aside className="flex flex-col gap-4">
         <div className="rounded-paper-lg border-2 border-ink bg-paper p-4 shadow-paper">
-          <Cat size={150} mood={heardSentence ? 'cheer' : 'happy'} />
+          <Cat size={150} mood={catMood} />
           <div className="mt-2 rounded-paper-lg border-2 border-ink bg-butter p-3 font-zh text-base leading-snug">跟着图片说出这个短句</div>
         </div>
         <PaperButton

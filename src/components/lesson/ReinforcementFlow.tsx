@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Course } from '@/types/course';
+import type { Course, Quiz } from '@/types/course';
 import type { LessonController } from '@/lib/voice/lesson-controller';
 import { QuizPickWordFrame } from './QuizPickWordFrame';
 import { ReinforceFrame } from './ReinforceFrame';
@@ -45,6 +45,7 @@ export function ReinforcementFlow({ course, controller, sessionId, onAllDone }: 
         setRetries(0);
       }
     } else {
+      await controller.speakStatic(`再听一次: ${getRetryPrompt(current)}`).catch(() => {});
       setRetries((value) => value + 1);
     }
   };
@@ -63,10 +64,14 @@ export function ReinforcementFlow({ course, controller, sessionId, onAllDone }: 
         {idx + 1} / {quizzes.length}
       </div>
       {current.type === 'pick-word' ? (
-        <QuizPickWordFrame quiz={current} course={course} onAnswer={handleAnswer} />
+        <QuizPickWordFrame quiz={current} course={course} controller={controller} onAnswer={handleAnswer} />
       ) : (
         <ReinforceFrame quiz={current} course={course} controller={controller} onAnswer={handleAnswer} />
       )}
     </div>
   );
+}
+
+export function getRetryPrompt(quiz: Quiz): string {
+  return quiz.type === 'pick-word' ? quiz.prompt : quiz.targetText;
 }

@@ -113,7 +113,7 @@
       { "id": "browser_asr_client", "kind": "client", "tier": "browser", "label": "AsrClient", "detail": "Per-turn WebSocket; emits partial/final; sends {type:'finish'} control frame" },
       { "id": "browser_tts_client", "kind": "client", "tier": "browser", "label": "TtsClient", "detail": "Long-lived WebSocket; multiplexes startSession/text-chunk/finishSession/cancel" },
       { "id": "browser_pcm_player", "kind": "client", "tier": "browser", "label": "PcmPlayer", "detail": "24kHz queued PCM playback; stop() silences immediately" },
-      { "id": "browser_lesson_controller", "kind": "client", "tier": "browser", "label": "LessonController", "detail": "7-state FSM orchestrating ASR + SSE + TTS" },
+      { "id": "browser_lesson_controller", "kind": "client", "tier": "browser", "label": "LessonController", "detail": "8-state FSM orchestrating ASR + SSE + TTS + static quiz TTS" },
       { "id": "browser_phased_controller", "kind": "client", "tier": "browser", "label": "PhasedLessonController", "detail": "Outer phase FSM (intro / interactive / reinforcement / done) wrapping LessonController" },
       { "id": "browser_phased_view", "kind": "client", "tier": "browser", "label": "PhasedLessonView UI", "detail": "React surface; routes phase → IntroFrame | LessonMandalaV2 | ReinforcementFlow | DoneCelebrateFrame" },
 
@@ -132,7 +132,7 @@
     "edges": [
       { "from": "browser_worklet", "to": "browser_recorder", "protocol": "messageport", "payload": "Int16 PCM 200ms" },
       { "from": "browser_recorder", "to": "browser_asr_client", "protocol": "callback", "payload": "onChunk(pcm)" },
-      { "from": "browser_asr_client", "to": "server_asr_proxy", "protocol": "ws", "endpoint": "/api/voice/asr?courseId&targetWords&cardId" },
+      { "from": "browser_asr_client", "to": "server_asr_proxy", "protocol": "ws", "endpoint": "/api/voice/asr?courseId&cardId&clearedCardIds" },
       { "from": "server_asr_proxy", "to": "upstream_doubao_asr", "protocol": "ws_binary", "endpoint": "Doubao bigmodel_async ASR" },
       { "from": "browser_lesson_controller", "to": "server_chat_route", "protocol": "http", "endpoint": "POST /api/chat" },
       { "from": "server_chat_route", "to": "upstream_mimo", "protocol": "http", "endpoint": "MiMo /v1/chat/completions" },
@@ -155,7 +155,7 @@
     { "path": "src/lib/voice/tts-proxy.ts", "layer": "server", "category": "voice", "role": "Server-side TTS WS proxy with long-connection reuse (one StartConnection, many sessions).", "critical": true },
     { "path": "src/lib/voice/asr-client.ts", "layer": "browser", "category": "voice", "role": "Browser ASR WS wrapper; finish() control-frame so upstream final lands before close.", "critical": true },
     { "path": "src/lib/voice/tts-client.ts", "layer": "browser", "category": "voice", "role": "Browser TTS WS wrapper; forwards startSession / text-chunk / finishSession / cancel.", "critical": true },
-    { "path": "src/lib/voice/lesson-controller.ts", "layer": "browser", "category": "voice", "role": "Browser orchestrator — 7-state FSM that unifies ASR + SSE + TTS for one turn.", "critical": true },
+    { "path": "src/lib/voice/lesson-controller.ts", "layer": "browser", "category": "voice", "role": "Browser orchestrator — 8-state FSM that unifies ASR + SSE + TTS for one turn and static quiz prompts.", "critical": true },
     { "path": "src/lib/voice/phased-lesson-controller.ts", "layer": "browser", "category": "voice", "role": "Outer phase FSM wrapping LessonController; rules drive intro → interactive → reinforcement → done.", "critical": true },
 
     { "path": "src/lib/agent/orchestrator.ts", "layer": "server", "category": "agent", "role": "Wraps streamUserInput into an SSE ReadableStream for /api/chat.", "critical": true },
@@ -176,9 +176,9 @@
     { "path": "src/components/lesson/PhasedLessonView.tsx", "layer": "browser", "category": "lesson_ui", "role": "Top-level lesson UI; switches by currentPhase between Intro / Interactive / Reinforce / Done.", "critical": true },
     { "path": "src/components/lesson/IntroFrame.tsx", "layer": "browser", "category": "lesson_ui", "role": "Theme intro: Mochi greeting plus locked word-card preview grid.", "critical": false },
     { "path": "src/components/lesson/LessonMandalaV2.tsx", "layer": "browser", "category": "lesson_ui", "role": "Interactive follow-read mandala; reuses LessonController ASR/TTS pipeline.", "critical": true },
-    { "path": "src/components/lesson/ReinforcementFlow.tsx", "layer": "browser", "category": "lesson_ui", "role": "Reinforcement flow orchestration over pick-word / repeat-after-me quizzes.", "critical": false },
-    { "path": "src/components/lesson/QuizPickWordFrame.tsx", "layer": "browser", "category": "lesson_ui", "role": "Quiz: hear prompt, pick the right PictureCard.", "critical": false },
-    { "path": "src/components/lesson/ReinforceFrame.tsx", "layer": "browser", "category": "lesson_ui", "role": "Quiz: sentence fill plus repeat-after-me recording.", "critical": false },
+    { "path": "src/components/lesson/ReinforcementFlow.tsx", "layer": "browser", "category": "lesson_ui", "role": "Reinforcement flow orchestration over pick-word / repeat-after-me quizzes; wrong retry speaks a static hint.", "critical": false },
+    { "path": "src/components/lesson/QuizPickWordFrame.tsx", "layer": "browser", "category": "lesson_ui", "role": "Quiz: speak prompt plus correct English word, lock PictureCard picks until playback finishes.", "critical": false },
+    { "path": "src/components/lesson/ReinforceFrame.tsx", "layer": "browser", "category": "lesson_ui", "role": "Quiz: speak targetText, then unlock repeat-after-me recording and local ASR scoring.", "critical": false },
     { "path": "src/components/lesson/DoneCelebrateFrame.tsx", "layer": "browser", "category": "lesson_ui", "role": "Lesson completion celebration with stars, counts, and CTAs.", "critical": false },
 
     { "path": "src/components/home/HomeStudy.tsx", "layer": "browser", "category": "home_ui", "role": "Magic Academy home surface; renders all registry courses plus journal/parents CTAs.", "critical": false },
@@ -220,7 +220,7 @@
   "state_machines": {
     "lesson_controller": {
       "owner_file": "src/lib/voice/lesson-controller.ts",
-      "purpose": "Single-turn voice orchestration: greeting → listen → think → speak → wait.",
+      "purpose": "Single-turn voice orchestration: greeting → listen → think → speak → wait, plus static quiz speech.",
       "states": [
         { "name": "idle", "is_initial": true, "description": "Lesson not started." },
         { "name": "greeting", "description": "Opening monologue playing." },
@@ -228,6 +228,7 @@
         { "name": "listening", "description": "Recording PCM, streaming to ASR." },
         { "name": "thinking", "description": "Waiting for ASR final + LLM first token." },
         { "name": "speaking", "description": "Streaming TTS audio to the user." },
+        { "name": "quiz-speaking", "description": "Playing deterministic reinforcement quiz prompt or retry hint through the existing TTS connection." },
         { "name": "ending", "description": "Tearing down; transitions to idle.", "is_terminal": true }
       ],
       "transitions": [
@@ -239,6 +240,8 @@
         { "from": "thinking", "to": "awaiting", "on": "5s timeout || ASR final empty", "kind": "timer" },
         { "from": "thinking", "to": "speaking", "on": "first speech-delta (onFirstSpeech)", "kind": "upstream_event" },
         { "from": "speaking", "to": "awaiting", "on": "TTS session-finished", "kind": "upstream_event" },
+        { "from": "awaiting", "to": "quiz-speaking", "on": "speakStatic(text)", "kind": "manual_trigger", "note": "Used only for deterministic reinforcement quiz prompts and retry hints; no /api/chat call." },
+        { "from": "quiz-speaking", "to": "awaiting", "on": "TTS session-finished or TTS error", "kind": "upstream_event" },
         { "from": "*", "to": "ending", "on": "endLesson", "kind": "manual_trigger" },
         { "from": "ending", "to": "idle", "on": "teardown complete", "kind": "rule_evaluation" }
       ]
@@ -257,7 +260,7 @@
       "transitions": [
         { "from": "idle", "to": "intro", "on": "startLesson", "kind": "manual_trigger" },
         { "from": "intro", "to": "interactive", "on": "opening greeting finished && controller awaiting", "kind": "rule_evaluation", "note": "Intro must not wait for every word card to be introduced." },
-        { "from": "interactive", "to": "reinforcement", "on": "clearedCardIds.size === cards.length OR totalAttempts >= 3×cards.length, then controller awaiting", "kind": "rule_evaluation" },
+        { "from": "interactive", "to": "reinforcement", "on": "clearedCardIds.size === cards.length OR totalAttempts >= 3×cards.length, then controller awaiting", "kind": "rule_evaluation", "note": "Phase-change is emitted after phase-transition TTS finishes so the first quiz prompt cannot collide with transition speech." },
         { "from": "reinforcement", "to": "done", "on": "all reinforcement quizzes answered", "kind": "rule_evaluation" },
         { "from": "*", "to": "idle", "on": "endLesson", "kind": "manual_trigger" }
       ]
@@ -303,6 +306,18 @@
       ]
     },
     {
+      "name": "Reinforcement static TTS",
+      "description": "Quiz prompts are deterministic course data and reuse the long-lived TTS connection without an LLM turn.",
+      "steps": [
+        { "actor": "browser_phased_controller", "action": "When entering reinforcement, await /api/chat?action=phase-transition TTS before emitting phase-change." },
+        { "actor": "browser_phased_view", "action": "Mount ReinforcementFlow after the transition voice finishes." },
+        { "actor": "browser_lesson_controller", "action": "speakStatic(text) requires state=awaiting, starts a TTS session, sets state=quiz-speaking, and resolves after SessionFinished." },
+        { "actor": "browser_phased_view", "action": "QuizPickWordFrame speaks prompt + correct English word and locks PictureCard buttons until playback finishes." },
+        { "actor": "browser_phased_view", "action": "ReinforceFrame speaks targetText and locks spacebar recording until playback finishes." },
+        { "actor": "browser_phased_view", "action": "Wrong answers with retries remaining speak '再听一次: ...' before the next attempt." }
+      ]
+    },
+    {
       "name": "End lesson",
       "description": "User taps end → tear down WS + audio + recorder; reset to idle.",
       "steps": [
@@ -334,6 +349,7 @@
     { "topic": "ASR/TTS usage accounting", "choice": "Count requests + recognized text length (ASR) and speech chars (TTS).", "rationale": "Provider-native tokens not exposed; this still surfaces meaningful cost signal in lesson reports.", "category": "performance" },
     { "topic": "Canvas aspect ratio", "choice": "1:1 square; 75% image (4:3 1024×768), 25% text.", "rationale": "For young learners: image is the protagonist, text is the anchor.", "category": "ux" },
     { "topic": "Phase switching is rule-driven", "choice": "PhasedLessonController evaluates conditions; LLM does not emit phase transitions.", "rationale": "LLM-driven transitions are unpredictable; rules are testable and reversible.", "category": "reliability" },
+    { "topic": "Reinforcement quiz static TTS", "choice": "Quiz prompts and retry hints call LessonController.speakStatic over the existing TTS connection.", "rationale": "Reinforcement guidance is deterministic course data; no extra LLM turn or unpredictable wording is needed.", "category": "simplicity" },
     { "topic": "Only food course is visible", "choice": "Retire transportation / timeNumbers data and the old LessonView fallback.", "rationale": "Avoid maintaining two parallel course paths at user-count = 1.", "category": "scope" },
     { "topic": "Keep LessonController under PhasedLessonController", "choice": "Reuse ASR/TTS/SSE pipeline rather than rewriting per phase.", "rationale": "Lower risk than rewriting the audio path.", "category": "scope" }
   ],
@@ -379,7 +395,8 @@
     { "date": "2026-05-10", "kind": "feature", "title": "Teaching loop v1.1 — in-lesson progress engine + drillParts", "impact": "Every card requires drillParts; server uses show_card to sync currentCardId; LLM emits attempt_assessment; memory tracks cardProgress / clearedCardIds; history trimmed to 12." },
     { "date": "2026-05-14", "kind": "refactor", "title": "Front-end refactor — Bunny's yard (5 spaces, 5 pages)", "impact": "Bunny upgraded to pose × mood full-body component; SceneFrame + LetterCard + WordBook + BloomButton + StickerWord; storage + attic added; client-side PIN gate; /api/{progress,sessions,stats}." },
     { "date": "2026-05-15", "kind": "feature", "title": "Three-phase lesson structure refactor", "impact": "Added food three-phase course + ImageGen PNG + structured scene.svg; phase-aware prompt / SSE progress_snapshot / phase-transition / quiz-answer; PhasedLessonController + Intro / Interactive / Reinforce / Quiz components; old courses + LessonView fallback retired; Course.phases is now required." },
-    { "date": "2026-05-21", "kind": "feature", "title": "Course registry expansion", "impact": "Expanded visible catalog to 10 courses; regular course contract is 12 word cards + 4 sentence cards; repeat-after-me binds to sentence cards; word-card images are produced with Codex built-in image_gen and sentence cards reuse the target word image." }
+    { "date": "2026-05-21", "kind": "feature", "title": "Course registry expansion", "impact": "Expanded visible catalog to 10 courses; regular course contract is 12 word cards + 4 sentence cards; repeat-after-me binds to sentence cards; word-card images are produced with Codex built-in image_gen and sentence cards reuse the target word image." },
+    { "date": "2026-05-22", "kind": "feature", "title": "Reinforcement quiz static TTS guidance", "impact": "Added LessonController.speakStatic and quiz-speaking; pick-word and repeat-after-me prompts now play over TTS before unlocking UI, wrong retries play static hints, and reinforcement UI waits until transition TTS finishes." }
   ],
 
   "protocols": {

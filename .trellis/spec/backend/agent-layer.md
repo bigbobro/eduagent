@@ -30,10 +30,46 @@ the audio still says "where is the elephant".
 
 **Release rules** — `pendingActions` must be cleared on ALL exit paths:
 - Normal: `tts.on('session-finished')` → emit, then null
-- TTS error: null (discard, no flip)
+- TTS error: sync ASR context from buffered actions, emit them so the UI does not freeze, then null
 - AbortError / `endLesson`: null (lesson over)
 
 Stale `pendingActions` from one turn must never leak into the next turn.
+
+---
+
+## Static quiz TTS via LessonController
+
+### Convention: reinforcement prompts do not call the LLM
+
+`LessonController.speakStatic(text)` is the browser contract for deterministic
+reinforcement quiz speech. It must reuse the existing TTS long connection,
+start a normal TTS session, set state to `quiz-speaking`, and resolve only after
+the TTS session has finished and the player is idle.
+
+Contracts:
+- Call only from `awaiting`; reject if the controller is listening, thinking,
+  speaking, greeting, or already running another static speech.
+- Do not POST to `/api/chat` and do not consume SSE.
+- Empty text is a no-op.
+- TTS error, timeout, or `endLesson` must reject the pending promise and clear
+  the pending static-speech slot.
+- UI callers must treat `quiz-speaking` as locked input state.
+
+Usage rules:
+- `QuizPickWordFrame` speaks `prompt + correct English word` before accepting
+  PictureCard picks.
+- `ReinforceFrame` speaks `targetText` before enabling repeat-after-me
+  recording.
+- Wrong answers with retry attempts remaining speak
+  `再听一次: ${prompt || targetText}` before the next attempt.
+- `PhasedLessonController` emits reinforcement `phase-change` after
+  `phase-transition` TTS finishes, so the first static quiz prompt does not
+  collide with transition speech on the one-session TTS connection.
+
+Tests required:
+- `lesson-controller` covers `speakStatic` happy path, TTS error rejection, and
+  concurrent-call dedup.
+- Quiz frame tests cover static prompt construction and locked input.
 
 ---
 

@@ -25,6 +25,7 @@ interface PictureCardProps {
   onClick?: () => void;
   onRepeat?: () => void;
   repeatDisabled?: boolean;
+  disabled?: boolean;
   dimmed?: boolean;
   badgeKind?: 'locked';
   className?: string;
@@ -53,6 +54,7 @@ export function PictureCard({
   onClick,
   onRepeat,
   repeatDisabled = false,
+  disabled = false,
   dimmed = false,
   badgeKind,
   className = '',
@@ -64,7 +66,7 @@ export function PictureCard({
   }
 
   if (size === 'tile') {
-    return <TilePictureCard card={card} state={state} stateStyle={style} onClick={onClick} badgeKind={badgeKind} className={className} />;
+    return <TilePictureCard card={card} state={state} stateStyle={style} onClick={onClick} disabled={disabled} badgeKind={badgeKind} className={className} />;
   }
 
   return <ChipPictureCard card={card} state={state} stateStyle={style} dimmed={dimmed} badgeKind={badgeKind} className={className} />;
@@ -165,6 +167,7 @@ function TilePictureCard({
   state,
   stateStyle,
   onClick,
+  disabled,
   badgeKind,
   className,
 }: {
@@ -172,6 +175,7 @@ function TilePictureCard({
   state: CardState;
   stateStyle: StateStyle;
   onClick?: () => void;
+  disabled: boolean;
   badgeKind?: 'locked';
   className: string;
 }) {
@@ -179,7 +183,8 @@ function TilePictureCard({
     <button
       type="button"
       onClick={onClick}
-      className={`relative flex flex-col items-stretch gap-2.5 rounded-[22px] bg-paperDeep p-3 text-left transition-all duration-200 ${className}`}
+      disabled={disabled}
+      className={`relative flex flex-col items-stretch gap-2.5 rounded-[22px] bg-paperDeep p-3 text-left transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-70 ${className}`}
       data-picture-card-size="tile"
       data-picture-card-state={state}
       style={{

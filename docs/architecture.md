@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:Teacher Agent state sync 三项修复(2026-05-22):R5 show_card 严格白名单 `{currentCard, nextCard}`、R6 closing guard 加 currentWord 白名单、R7 correct 后服务端硬推 nextCard。详见 §6 关键设计决策表。上次大改:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。再上次:CC 手绘绘本风 UI 接入(2026-05-21)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:reinforcement quiz 静态 TTS 引导(2026-05-22):`LessonController.speakStatic` 复用长连 TTS,quiz prompt / repeat-after-me prompt 播完前锁 UI。上次大改:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -44,7 +44,7 @@
 | `src/lib/voice/tts-proxy.ts` | server 端 TTS 代理,**长连复用**(StartConnection 一次,session 多次) |
 | `src/lib/voice/asr-client.ts` | 浏览器 ASR WS 包装,`finish()` 通知 proxy 录音结束 |
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
-| `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,7 状态机,统一编排 ASR + SSE + TTS** |
+| `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,8 状态机,统一编排 ASR + SSE + TTS + 静态 quiz TTS** |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
 | `src/lib/agent/session.ts` | LLM 一轮对话:词汇尝试判定 → 取 history → 调 streamLLM → 收 chunk → 记录 usage |
 | `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta;导出 `sanitizeSpeech` 剥离 `xxx_yyy` 这种 card_id token,防止 TTS 把 `_` 读成"下划线 / underscore"** |
@@ -62,9 +62,9 @@
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
 | `src/components/lesson/IntroFrame.tsx` | 主题导入:麻吉 + 锁定 chip 网格,不再依赖 scene.svg |
 | `src/components/lesson/LessonMandalaV2.tsx` | 跟读练习法阵,保留 `LessonController` ASR/TTS 管线 |
-| `src/components/lesson/QuizPickWordFrame.tsx` | quiz:听 prompt 选正确 PictureCard |
-| `src/components/lesson/ReinforceFrame.tsx` | quiz:句型空填 + repeat-after-me |
-| `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes |
+| `src/components/lesson/QuizPickWordFrame.tsx` | quiz:静态 TTS 播 prompt + 正确英文词,播完前锁 PictureCard 选择 |
+| `src/components/lesson/ReinforceFrame.tsx` | quiz:静态 TTS 播 targetText,播完前锁 repeat-after-me 录音 |
+| `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes,错答时播静态 retry hint |
 | `src/components/lesson/DoneCelebrateFrame.tsx` | 下课庆祝页,星星 + 数据 + 双 CTA |
 | `src/components/journal/JournalPage.tsx` | 魔法书双页,展示 progress 聚合的词卡 |
 | `src/components/parents/PINGateFrame.tsx` / `ParentsPage.tsx` | 家长阁楼 PIN 解锁 + stats/session dashboard |
@@ -152,6 +152,12 @@ ASR final 到达 client
 `ReinforcementFlow` 记录 `quiz-answer`,但不会再进入 `/api/chat?action=message`
 触发额外 LLM/TTS 回合。
 
+强化巩固的 quiz 引导不走 LLM。`QuizPickWordFrame` mount 后调用
+`LessonController.speakStatic(prompt + correctEnglish)`,`ReinforceFrame` mount 后
+调用 `speakStatic(targetText)`;两者都等 `state=awaiting` 才发起静态 TTS,播放中进入
+`quiz-speaking` 并锁住选择/录音。错答且仍可重试时,`ReinforcementFlow` 播
+`再听一次: ${prompt || targetText}` 后再允许下一次作答。
+
 ### 3.3 结束课程
 
 ```
@@ -191,6 +197,10 @@ controller.endLesson:
                                 │ speech-delta(第一个)
                                 ▼         │
                               speaking ───┘
+                                ▲
+                                │ speakStatic(quiz prompt / targetText)
+                                │
+                            quiz-speaking
 ```
 
 转移说明:
@@ -202,6 +212,7 @@ controller.endLesson:
 - `thinking → awaiting`:5 秒兜底超时,或 final text 为空
 - `thinking → speaking`:收到第一个 speech-delta(`onFirstSpeech`)
 - `speaking → awaiting`:TTS session-finished
+- `awaiting → quiz-speaking → awaiting`:reinforcement 静态 quiz TTS 播放,不经过 `/api/chat` 与 LLM
 - 任意 → ending → idle:用户点"结束课堂"
 
 ### 4b. PhasedLessonController phase 轴(课程 registry)
@@ -213,7 +224,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 ```
 
 - 切1:开场介绍 TTS 播放结束,底层 `LessonController` 回到 `awaiting` 后立刻切到 `interactive`;intro 不等待全部 word cards 都被 `show_card` 介绍。
-- 切2:`clearedWordCardIds.size === wordCards.length` 或 `totalAttempts >= 3 × wordCards.length`,且底层回到 `awaiting`;sentence cards 只在 reinforcement 使用。
+- 切2:`clearedWordCardIds.size === wordCards.length` 或 `totalAttempts >= 3 × wordCards.length`,且底层回到 `awaiting`;进入 reinforcement 前先播 `/api/chat?action=phase-transition` 返回的过渡 TTS,播完再 emit phase-change,避免第一道 quiz 静态 TTS 与过渡语音抢同一个长连 session。sentence cards 只在 reinforcement 使用。
 - 切3:reinforcement 所有 quizzes 答完。
 - phase 切换由 `PhasedLessonController` 判定,LLM 不输出 phase transition。
 - interactive 阶段的主目标由 prompt 中的"当前目标控制"约束:继续当前未通过 word card,否则切到 `teachingHints.newCardIds` 里的第一个未通过 word card。若老师说短句,必须 `show_card` 对应 `sentence_*` 卡;进度计数仍只按 word cards。server 在 SSE/commit 前归一化 `show_card`,把已通过或非当前目标的回跳替换为当前应练习的 word card。
@@ -275,6 +286,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
+| reinforcement 静态 TTS | quiz prompt / retry hint 由 `LessonController.speakStatic` 走既有长连 TTS,不调 LLM | 强化阶段提示语是课程数据里的确定文本,复用音频链路即可,避免额外 LLM 延迟与不可预测文案 |
 | 新标准唯一化 | 当前通过 registry 暴露 10 门常规课程;旧 `transportation` / `timeNumbers` 数据与 `LessonView` fallback 已退役 | 避免长期维护两套课程路径 |
 | LessonController 定位 | 继续复用 ASR/TTS/SSE 管线,不作为独立 lesson UI 入口 | 降低重写音频链路风险 |
 
@@ -325,6 +337,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
 - 2026-05-22 — **Teacher Agent UX P0 四项修复** — R1:actions/TTS 时序(pendingActions 缓冲);R2:ASR 字面 verify(LLM correct + raw ASR 双重确认才 cleared);R3:normalize 放宽(word card 接受任意 untouched/attempted);R4:closing guard 始终注入 + 服务端 speech 扫描替换。
 - 2026-05-22 — **Teacher Agent state sync 三项修复**(从 05-22 实测课报告) — R5:show_card 严格白名单 `{currentCard, nextCard}`(R3 收紧,防 LLM 回跳已通过卡);R6:closing guard 加 `currentWord` 白名单(防教学中误触发整句替换);R7:correct 后服务端自动 push `show_card: nextCard`(防 LLM 命中后不推进)。新增 `getNextWordCardId(memory, course)` helper;prompt 加 "show_card.card_id 必须 ∈ {current, next}" 硬约束。
+- 2026-05-22 — **reinforcement quiz 静态 TTS 引导** — 新增 `LessonController.speakStatic` 与 `quiz-speaking` state;pick-word 播 prompt + correct English,repetition 播 targetText;播完前锁 UI,错答播 retry hint;reinforcement phase-change 等过渡 TTS 完成后再显示 quiz。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 

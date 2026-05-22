@@ -135,6 +135,49 @@ describe('LessonController', () => {
       }));
     });
   });
+
+  it('speaks static quiz text through the existing TTS session path', async () => {
+    const controller = new LessonController();
+    const states: string[] = [];
+    (controller as any).setState('awaiting');
+    controller.on('state', (state) => states.push(state));
+
+    const spoken = controller.speakStatic('  Find the milk. milk.  ');
+
+    expect(ttsInstances[0].startSession).toHaveBeenCalledOnce();
+    expect(ttsInstances[0].sendText).toHaveBeenCalledWith('Find the milk. milk.');
+    expect(ttsInstances[0].finishSession).toHaveBeenCalledOnce();
+    expect(states).toContain('quiz-speaking');
+
+    ttsInstances[0].emit('session-finished');
+
+    await expect(spoken).resolves.toBeUndefined();
+    expect(controller.getState()).toBe('awaiting');
+  });
+
+  it('rejects static quiz text when TTS errors', async () => {
+    const controller = new LessonController();
+    (controller as any).setState('awaiting');
+
+    const spoken = controller.speakStatic('apple');
+    const rejected = expect(spoken).rejects.toThrow('TTS failed');
+    ttsInstances[0].emit('error', { message: 'TTS failed' });
+
+    await rejected;
+    expect(controller.getState()).toBe('awaiting');
+  });
+
+  it('deduplicates concurrent static quiz speech', async () => {
+    const controller = new LessonController();
+    (controller as any).setState('awaiting');
+
+    const first = controller.speakStatic('apple');
+
+    await expect(controller.speakStatic('milk')).rejects.toThrow('Static TTS already in progress');
+
+    ttsInstances[0].emit('session-finished');
+    await expect(first).resolves.toBeUndefined();
+  });
 });
 
 describe('R1: actions buffered until TTS session-finished', () => {

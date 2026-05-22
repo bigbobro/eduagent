@@ -91,6 +91,31 @@ describe('PhasedLessonController phase transitions', () => {
 
     expect(phaseChanges).toContain('reinforcement');
   });
+
+  it('waits for reinforcement transition speech before showing reinforcement UI', async () => {
+    await ctrl.startLesson();
+    (ctrl as any).currentPhase = 'interactive';
+    let resolveTransition!: () => void;
+    v2.sendCustomAction.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveTransition = resolve;
+    }));
+    const phaseChanges: PhaseName[] = [];
+    const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
+    ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
+
+    v2.emit('progress', {
+      clearedCardIds: wordCards.map((card) => card.id),
+      totalAttempts: 6,
+      currentPhase: 'interactive',
+    });
+    v2.emit('state', 'awaiting');
+    await Promise.resolve();
+
+    expect(phaseChanges).not.toContain('reinforcement');
+
+    resolveTransition();
+    await vi.waitFor(() => expect(phaseChanges).toContain('reinforcement'));
+  });
 });
 
 describe('PhasedLessonController intro follow-up fallback', () => {

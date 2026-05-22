@@ -45,6 +45,7 @@ vi.mock('@/lib/voice/lesson-controller', () => {
     }
 
     async sendCustomAction() {}
+    async speakStatic() {}
     async endLesson() {}
     async startListening() {}
     async stopListening() {}

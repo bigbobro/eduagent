@@ -8,7 +8,7 @@ import { PcmPlayer } from '@/lib/audio/pcm-player';
 import { startRecorder, prewarmRecorder, disposeRecorder, RecorderHandle } from '@/lib/audio/recorder';
 
 export type LessonStateName =
-  | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'ending';
+  | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending';
 
 type EventName =
   | 'state'
@@ -46,7 +46,14 @@ export class LessonController {
   private courseId: string | null = null;
   private currentAsrCardId: string | null = null;
   private clearedCardIds: string[] = [];
+  private ttsHandlersBound = false;
+  private staticSpeech: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  } | null = null;
   private static readonly SPEECH_FINISH_FALLBACK_MS = 1500;
+  private static readonly STATIC_SPEECH_TIMEOUT_MS = 10000;
 
   constructor() {
     this.player.onIdle(() => this.maybeReturnToAwaiting());
@@ -131,6 +138,7 @@ export class LessonController {
     this.player.stop();
     this.speechStreamFinished = false;
     this.routeCurrentAsrToChat = true;
+    this.failStaticSpeech(new Error('Lesson ended'));
     this.tts.close();
     if (this.sessionId) {
       try {
@@ -166,6 +174,35 @@ export class LessonController {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  async speakStatic(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    if (this.staticSpeech) {
+      throw new Error('Static TTS already in progress');
+    }
+    if (this.state !== 'awaiting') {
+      throw new Error('Static TTS requires awaiting state');
+    }
+
+    this.bindTtsHandlers();
+    this.speechStreamFinished = false;
+    this.setState('quiz-speaking');
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.failStaticSpeech(new Error('Static TTS timed out'));
+      }, LessonController.STATIC_SPEECH_TIMEOUT_MS);
+      this.staticSpeech = { resolve, reject, timeout };
+      try {
+        this.tts.startSession(uuidv4());
+        this.tts.sendText(trimmed);
+        this.tts.finishSession();
+      } catch (error) {
+        this.failStaticSpeech(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
   }
 
   // ─── 录音流程(空格键 / 长按按钮 调用)────────────────────────────
@@ -334,6 +371,8 @@ export class LessonController {
   }
 
   private bindTtsHandlers(): void {
+    if (this.ttsHandlersBound) return;
+    this.ttsHandlersBound = true;
     this.tts.on('subtitle', (text: string) => {
       this.emit('subtitle', { text, source: 'ai' });
     });
@@ -366,6 +405,7 @@ export class LessonController {
         this.emit('actions', this.pendingActions);
         this.pendingActions = null;
       }
+      this.failStaticSpeech(new Error(err.message || 'TTS failed'));
       this.emit('error', err);
     });
   }
@@ -462,9 +502,10 @@ export class LessonController {
   private maybeReturnToAwaiting(): void {
     if (!this.speechStreamFinished) return;
     if (!this.player.isIdle()) return;
-    if (this.state === 'speaking' || this.state === 'greeting') {
+    if (this.state === 'speaking' || this.state === 'greeting' || this.state === 'quiz-speaking') {
       this.setState('awaiting');
     }
+    this.resolveStaticSpeech();
   }
 
   private armSpeechFinishFallback(): void {
@@ -490,5 +531,26 @@ export class LessonController {
       ...(this.currentAsrCardId ? { cardId: this.currentAsrCardId } : {}),
       ...(this.clearedCardIds.length > 0 ? { clearedCardIds: this.clearedCardIds } : {}),
     });
+  }
+
+  private resolveStaticSpeech(): void {
+    if (!this.staticSpeech) return;
+    const pending = this.staticSpeech;
+    this.staticSpeech = null;
+    clearTimeout(pending.timeout);
+    pending.resolve();
+  }
+
+  private failStaticSpeech(error: Error): void {
+    if (!this.staticSpeech) return;
+    const pending = this.staticSpeech;
+    this.staticSpeech = null;
+    clearTimeout(pending.timeout);
+    this.speechStreamFinished = true;
+    this.player.stop();
+    if (this.state === 'quiz-speaking') {
+      this.setState('awaiting');
+    }
+    pending.reject(error);
   }
 }
