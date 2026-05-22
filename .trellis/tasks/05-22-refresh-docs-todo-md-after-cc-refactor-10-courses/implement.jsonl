@@ -1,0 +1,3 @@
+{"file": "docs/architecture.md", "reason": "Living doc 反映 master 真实现状,用来核对哪些 TODO 项已经被实施(food / 10 课 / CC 重构 / Tina老师2.0 等)"}
+{"file": "CLAUDE.md", "reason": "项目文档同步规则:文档同步是 commit 的一部分,不是后置 task;living doc 是当前架构事实"}
+{"file": "docs/TODO.md", "reason": "本次唯一被修改的目标文件,需要按 prd.md 决策表重写"}
