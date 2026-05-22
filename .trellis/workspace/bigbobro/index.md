@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
+- **Total Sessions**: 9
 - **Last Active**: 2026-05-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~278 | Active |
+| `journal-1.md` | ~311 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-05-22 | R5/R6/R7 Teacher state sync from 2026-05-22 real-test | `bbcd83d` | `main` |
 | 8 | 2026-05-22 | Teacher Agent UX fixes R1-R4 (05-22 real-test) | `5a4d120` | `main` |
 | 7 | 2026-05-22 | Refresh docs/TODO.md after CC UI + 10-course rollout | `4d7d669` | `main` |
 | 6 | 2026-05-22 | Docs consolidation after Trellis migration | `58042a1` | `main` |

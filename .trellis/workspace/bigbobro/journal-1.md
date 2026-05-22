@@ -276,3 +276,36 @@ Fixed 4 P0 UX bugs from 05-22 real lesson (35-round bd78d967 + 8-round 8bb58baa)
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: R5/R6/R7 Teacher state sync from 2026-05-22 real-test
+
+**Date**: 2026-05-22
+**Task**: R5/R6/R7 Teacher state sync from 2026-05-22 real-test
+**Branch**: `main`
+
+### Summary
+
+Fixed three state-sync bugs surfaced by 2026-05-22 animals lesson real-test: R5 tightens canShowCard whitelist to {currentCard, nextCard} (was 'any non-cleared'); R6 makes closing guard exempt currentWord so teaching 'cat' doesn't trigger wrap-up; R7 adds server-side hard auto-advance via show_card to nextCard when current card is freshly cleared. Caught and fixed a hidden state-desync bug in R7 (must trigger on assessedMemory.cardProgress, not raw assessment.result, to respect R2 literal-verify downgrade). Inline-fixed #5 TTS reading card_id underscores aloud via sanitizeSpeech with streaming carry buffer. Spec (agent-layer.md) sediments R5/R6/R7 + the cross-cutting 'normalize must use assessedMemory' invariant. Out of scope and deferred: #3 ASR hot_words, #4 systemPrompt token compaction, #6 quiz-phase static TTS guidance.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bbcd83d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
