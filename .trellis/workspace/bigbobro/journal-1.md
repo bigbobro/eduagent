@@ -243,3 +243,36 @@ Fixed the three PR behavior blockers: Journal now opens practiced courses and us
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Teacher Agent UX fixes R1-R4 (05-22 real-test)
+
+**Date**: 2026-05-22
+**Task**: Teacher Agent UX fixes R1-R4 (05-22 real-test)
+**Branch**: `main`
+
+### Summary
+
+Fixed 4 P0 UX bugs from 05-22 real lesson (35-round bd78d967 + 8-round 8bb58baa): R1 buffered show_card actions until TTS session-finished so card flips sync with teacher audio; R2 added ASR literal verify in applyAttemptAssessment to downgrade LLM 'correct' when raw ASR token absent; R3 relaxed canShowCard to accept any non-cleared word card enabling LLM non-sequential jumps; R4 closing guard always injects summary constraint in prompt + server-side speech scan replaces hallucinated unlearned words with safe template. 17 new vitest tests (198/198 pass), docs/architecture.md + docs/TODO.md synced, new .trellis/spec/backend/agent-layer.md.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5a4d120` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
