@@ -177,3 +177,36 @@ Fixed the three PR behavior blockers: Journal now opens practiced courses and us
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Docs consolidation after Trellis migration
+
+**Date**: 2026-05-22
+**Task**: Docs consolidation after Trellis migration
+**Branch**: `main`
+
+### Summary
+
+把 docs/course-authoring-standard.md 收敛到 .trellis/spec/frontend/course-authoring.md(5 处 active 引用迁移),并删除已落地 epic 的 docs/handoff/。docs/superpowers/ 历史快照保持不动。pnpm test 181/181 + tsc 通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `58042a1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
