@@ -171,6 +171,7 @@ function buildMemoryContext(memory: LessonMemory, course: Course): string {
 - 当前 word 可用短句图卡: ${activeSentenceCard ? `${activeSentenceCard.id} (${activeSentenceCard.english})` : '(无;不要使用其它 sentence_* 卡)'}
 - 已通过 word cards: ${clearedWordIds.join(', ') || '(无)'}
 - 不要 show_card 已通过 word cards,除非孩子明确要求复习或"再说那一张"
+- show_card.card_id 必须 ∈ {当前应练习的 word card, 下一张未通过 word card};服务端会拒绝其他切卡。
 - 如果要说目标短句,必须 show_card 对应短句图卡: ${course.objectives.sentences.map((sentence) => `${sentence} => ${sentenceCardByText.get(sentence) || '(无对应卡)'}`).join(' | ')}`;
 
   if (memory.interestSignals.length > 0) {
@@ -206,7 +207,7 @@ function buildMemoryContext(memory: LessonMemory, course: Course): string {
 - 只能总结本节已通过词汇: ${memory.wordsLearned.join(', ') || '(无)'}
 - 只能说"练过/通过/还要继续练",不要说"学会/掌握"。
 - 如果 untouched cards 不是(无),不得结课。
-- 在任何一句话里,绝对不能说出未通过的目标词(上面"(无)"意味着本节没有已通过词汇)。`;
+- 在任何一句话里,绝对不能说出未通过且不是当前正在教的目标词(上面"(无)"意味着本节没有已通过词汇)。`;
 
   return context;
 }

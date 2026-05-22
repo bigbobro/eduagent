@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { StreamingSpeechExtractor } from './speech-extractor';
+import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 
 function feedAll(extractor: StreamingSpeechExtractor, chunks: string[]): string {
   let speech = '';
@@ -81,5 +81,30 @@ describe('StreamingSpeechExtractor', () => {
       if (r.complete) complete = true;
     }
     expect(complete).toBe(true);
+  });
+});
+
+describe('sanitizeSpeech', () => {
+  it('replaces card_id-style tokens with a space', () => {
+    expect(sanitizeSpeech('看 sentence_cat 这张图')).toBe('看   这张图');
+    expect(sanitizeSpeech('sentence_apple is here')).toBe('  is here');
+  });
+
+  it('leaves normal English words and single words untouched', () => {
+    expect(sanitizeSpeech('cat is here')).toBe('cat is here');
+    expect(sanitizeSpeech('Hello! Look at this.')).toBe('Hello! Look at this.');
+  });
+
+  it('does not strip Chinese or punctuation', () => {
+    expect(sanitizeSpeech('我们一起读 cat。')).toBe('我们一起读 cat。');
+  });
+
+  it('handles multiple underscores in one id', () => {
+    expect(sanitizeSpeech('show word_apple_red please')).toBe('show   please');
+  });
+
+  it('strips leading-of-string and end-of-string tokens', () => {
+    expect(sanitizeSpeech('sentence_cat')).toBe(' ');
+    expect(sanitizeSpeech('开始 sentence_cat')).toBe('开始  ');
   });
 });

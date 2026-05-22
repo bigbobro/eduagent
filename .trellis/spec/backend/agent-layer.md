@@ -70,32 +70,128 @@ Never infer `rawAsrText` from a re-processed field. Pass the original string.
 
 ---
 
-## Memory: canShowCard contracts
+## Memory: canShowCard contracts (R5 — current)
 
-### Contract: word card showability
+> **Supersedes R3** (2026-05-22). The old "any non-cleared word card is showable"
+> rule was too permissive: in the 2026-05-22 实测课 the LLM repeatedly emitted
+> `show_card: cat` long after cat passed, and the gate let it through whenever
+> cat happened to still be `attempted`. See `docs/lesson-reports/2026-05-22-427f287b.md`.
 
-A word card is showable if and only if its `CardProgressState` is
-`'untouched'`, `'attempted'`, or `'needs_review'`.
+### Contract: word card whitelist `{currentCard, nextCard}`
+
+A word card is showable **iff** its id is either `memory.currentCardId` (when
+that card is not itself cleared) or `getNextWordCardId(memory, course)`.
 
 ```ts
-// WRONG — only allows activeWordCardId
-card.id === activeWordCardId && cardProgress[card.id] !== 'cleared'
-
-// CORRECT — any non-cleared word card is valid
-const state = cardProgress[card.id] ?? 'untouched';
+// WRONG — pre-R5, any non-cleared word card passed
 state === 'untouched' || state === 'attempted' || state === 'needs_review'
+
+// CORRECT — R5 whitelist
+const isCurrent = cardId === memory.currentCardId;
+const isCurrentCleared = memory.cardProgress[memory.currentCardId] === 'cleared';
+const isNext = cardId === getNextWordCardId(memory, course);
+return (isCurrent && !isCurrentCleared) || isNext;
 ```
 
-**Why**: `activeWordCardId` enforces strict sequential order from `newCardIds`.
-When a user explicitly asks "can we do frog?" the LLM outputs `show_card: frog`
-but the old gate silently rewrites it back to `cat`. The new rule lets LLM card
-selection stand as long as the card hasn't been cleared.
+**Why**:
+- The "currentCard is itself cleared" branch defends against stale state where
+  R7 (below) hasn't yet replaced `currentCardId` but the card has already been
+  promoted to cleared. Allowing show_card on a cleared current re-runs drill.
+- Anything other than current/next is either a backward jump (regression) or a
+  forward skip; both are wrong by lesson design.
+- Sentence cards (`sentence_*`) keep their pre-R5 rule: must be tied to the
+  active word card and that word card must not be cleared.
 
-**Cleared cards**: still rejected — `cleared` means the child already mastered
-that word this session; showing it again would be regression.
+**Trade-off accepted**: students who say "再说一次 cat" cannot trigger a
+show_card back to cleared cat. Prompt does not advertise this affordance.
 
-**getActiveWordCardId**: kept as fallback for turns where LLM doesn't specify
-a card.
+### Helper: `getNextWordCardId(memory, course)`
+
+```ts
+export function getNextWordCardId(memory: LessonMemory, course: Course): string {
+  const wordCardIds = new Set(course.cards.filter(c => c.kind === 'word').map(c => c.id));
+  const currentId = memory.currentCardId;
+  return course.teachingHints.newCardIds.find(
+    id => wordCardIds.has(id)
+       && id !== currentId
+       && memory.cardProgress[id] !== 'cleared'
+  ) || '';
+}
+```
+
+Empty string is a valid result (all cards cleared). All callers must handle
+empty-string nextCard as no-op.
+
+---
+
+## Memory: mastered auto-advance (R7)
+
+### Contract: server-side hard push when LLM forgets to advance
+
+When the current card is **freshly cleared this turn**,
+`normalizeAssistantActions` appends `show_card: nextCardId` if the LLM didn't
+already emit one. This prevents the 2026-05-22 turtle bug (n=30-35) where the
+student said "Turtle" correctly 6 times in a row but the LLM kept drilling.
+
+### **CRITICAL INVARIANT — trigger MUST read assessedMemory, NOT raw assessment**
+
+```ts
+// WRONG — uses raw LLM judgment, ignores R2 literal-verify downgrade
+if (response.state_update.attempt_assessment?.result === 'correct') {
+  push(show_card: nextCard);  // fires even when R2 downgraded "correct" → attempted
+}
+
+// CORRECT — uses post-assessment cardProgress
+const originalCurrentId = memory.currentCardId;
+const wasNotCleared = memory.cardProgress[originalCurrentId] !== 'cleared';
+const isNowCleared  = assessedMemory.cardProgress[originalCurrentId] === 'cleared';
+if (wasNotCleared && isNowCleared) {
+  push(show_card: getNextWordCardId(assessedMemory, course));
+}
+```
+
+**Why it matters**: R2 (ASR literal verify) downgrades LLM-self-reported
+`correct → attempted` when raw ASR doesn't contain the target word literal.
+If R7 fired on raw assessment, the card UI would flip forward while
+`cardProgress` still reads `attempted` — exactly the **state desync** R7
+is supposed to *prevent*. Always derive R7's trigger from the same
+`assessedMemory` that downstream commit will use.
+
+### Dedup
+
+If LLM already emitted `show_card: nextCardId`, R7 must not push a duplicate.
+Check `normalizedActions.some(a => a.tool === 'show_card' && a.params.card_id === nextCardId)`
+before appending.
+
+---
+
+## Cross-cutting invariant: normalize uses assessedMemory, not memory
+
+Three normalize branches (R5 whitelist filter, R7 mastered push, R1 fallback
+push when LLM emitted nothing showable) **must all see the same memory**:
+
+```ts
+// In normalizeAssistantActions:
+const assessedMemory = applyAttemptAssessment(memory, response, rawAsrText);
+// ↑ This is the source of truth for THIS turn's progress.
+
+const nextCardId = getNextWordCardId(assessedMemory, course);  // ← uses assessed
+const filtered = response.actions.filter(a => canShowCard(a, assessedMemory));
+//                                                          ↑ uses assessed
+// R7 push, R1 fallback — both use assessedMemory + nextCardId computed above.
+```
+
+**Why**: if any branch reads stale `memory.cardProgress`, you get:
+- whitelist passes a card that's actually been cleared this turn
+- nextCard returns the just-cleared card itself
+- fallback pushes a card the assessment already promoted out
+
+This is the same class of bug as R7 reading raw assessment. The fix is the
+same shape: always anchor to `assessedMemory`.
+
+---
+
+## Prompt: closing guard (R4 + R6 — two-layer defense)
 
 ---
 
@@ -117,27 +213,48 @@ if (phase === 'review' || phase === 'closing') {
 lines.push('总结约束（任何阶段均有效）: ...');
 ```
 
-### Layer 2 — server-side speech scan before commit
+### Layer 2 — server-side speech scan before commit (R4 + R6)
 
 After LLM stream completes, before `commitAssistantStreamResult`, scan
 `result.speech` for any course `targetWords` not in `memory.wordsLearned`.
 
+**R6 (2026-05-22)** — the unlearned filter must exempt **both** sides of the
+"current word" signal:
+
 ```ts
-const unlearnedMentioned = course.targetWords.filter(
-  w => !memory.wordsLearned.includes(w) && speechContainsWord(result.speech, w)
-);
+const llmCurrentWord    = (result.state_update.current_word || '').toLowerCase();
+const memoryCurrentWord = (memory.currentWord || '').toLowerCase();
+
+const unlearnedMentioned = course.targetWords.filter(w => {
+  if (memory.wordsLearned.includes(w)) return false;
+  const wLower = w.toLowerCase();
+  if (wLower === llmCurrentWord || wLower === memoryCurrentWord) return false;  // R6
+  return speechContainsWord(result.speech, w);
+});
 if (unlearnedMentioned.length > 0) {
   result.speech = `今天我们一起练了 ${memory.wordsLearned.join('、') || '一些新词'},你说得很努力!下次再来玩吧。`;
 }
 ```
 
+**Why R6 is necessary**: pre-R6, teaching cat would trigger Layer 2 every turn
+(cat ∈ targetWords, cat ∉ wordsLearned, LLM speech says "cat") and the entire
+turn's speech got replaced with the wrap-up template. In the 2026-05-22 实测课
+this fired ~40/70 turns. The currently-being-taught word is a legitimate
+mention; only OTHER unlearned words are hallucinations to block.
+
+**Why OR (memory + LLM) instead of just one**: `memory.currentWord` reflects
+**last turn's** committed state; `state_update.current_word` is what the LLM
+*claims* this turn. Trusting only one creates a one-turn gap when the lesson
+advances to a new card. OR-of-both closes the gap.
+
 **Scope**: only overwrites server-side memory + DB. Client already received
 streaming audio for this turn — that is acceptable. The replacement ensures
 lesson-report and next-turn LLM history are clean.
 
-**Why Layer 2 is necessary**: even with Layer 1, LLM hallucinates target words
-from its training data (e.g. lists "giraffe" in a closing when only "cat" and
-"dog" were covered). Prompt alone is insufficient.
+**Why Layer 2 is still necessary (post-R6)**: even with R6 whitelisting the
+current word, LLM still hallucinates OTHER target words (e.g. lists "giraffe"
+in a closing when only "cat" and "dog" were covered). Prompt alone is
+insufficient.
 
 ---
 
@@ -149,6 +266,16 @@ from its training data (e.g. lists "giraffe" in a closing when only "cat" and
 | R2 ASR verify — match | `memory.test.ts` | rawAsrText containing token → `cleared` |
 | R2 ASR verify — mismatch | `memory.test.ts` | rawAsrText without token → `attempted` + streak+1 |
 | R2 ASR verify — undefined | `memory.test.ts` | undefined rawAsrText → trust LLM, no block |
-| R3 non-sequential jump | `memory.test.ts` | LLM show_card for non-active untouched card → accepted |
-| R3 cleared rejected | `memory.test.ts` | LLM show_card for cleared card → rejected |
+| ~~R3~~ | superseded by R5 (see below) | — |
 | R4 closing override | `closing-guard.test.ts` | speech containing unlearned word → replaced with template |
+| R5 whitelist accept current | `memory.test.ts` | `canShowCard(currentCard, ...)` when not cleared → true |
+| R5 whitelist accept next | `memory.test.ts` | `canShowCard(getNextWordCardId(...), ...)` → true |
+| R5 whitelist reject jump | `memory.test.ts` | `canShowCard(frog when current=dog, next=bird)` → false; output falls back to current/next |
+| R5 whitelist reject cleared current | `memory.test.ts` | `canShowCard(currentCard when itself cleared)` → false |
+| R6 currentWord exempt | `closing-guard.test.ts` | speech contains currentWord (not in learned) → NOT replaced |
+| R6 other unlearned still caught | `closing-guard.test.ts` | speech contains currentWord + other unlearned word → replaced |
+| R7 mastered auto-advance | `memory.test.ts` | LLM emits `correct` + empty `actions` → output contains `show_card: nextCard` |
+| R7 dedup | `memory.test.ts` | LLM emits `correct` + `show_card: nextCard` → output has exactly one `show_card: nextCard` |
+| R7 last card no-op | `memory.test.ts` | clearing the last word card → no extra `show_card` appended |
+| **R7 assessedMemory invariant** | `memory.test.ts` | LLM `correct` but ASR literal mismatch (R2 downgrade) → no auto-advance |
+| R7 + R5 integration (turtle 2026-05-22) | `memory.test.ts` | replay turn n=30-style state → output advances to lion |

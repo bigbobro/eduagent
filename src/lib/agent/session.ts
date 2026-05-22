@@ -12,7 +12,7 @@ import {
 } from './memory';
 import { buildSystemPrompt } from './prompt';
 import { streamLLM } from '@/lib/mimo/llm';
-import { StreamingSpeechExtractor } from './speech-extractor';
+import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 import { createLessonLog, finishLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
 
 export interface Session {
@@ -115,6 +115,8 @@ export async function* streamUserInput(
   let inputTokens = 0;
   let outputTokens = 0;
   let llmLatency = 0;
+  // 用于跨 chunk 拼回完整的字母数字下划线 token,避免 "sent" + "ence_cat" 这种切片漏过 sanitize。
+  let sanitizeCarry = '';
 
   try {
     for await (const ev of streamLLM(systemPrompt, messages, signal)) {
@@ -126,9 +128,19 @@ export async function* streamUserInput(
       }
       const out = extractor.feed(ev.delta);
       if (out.speechDelta) {
-        yield { type: 'speech-delta', text: out.speechDelta };
+        const buf = sanitizeCarry + out.speechDelta;
+        const tailMatch = buf.match(/[A-Za-z0-9_]+$/);
+        const flushable = tailMatch ? buf.slice(0, buf.length - tailMatch[0].length) : buf;
+        sanitizeCarry = tailMatch ? tailMatch[0] : '';
+        if (flushable) {
+          yield { type: 'speech-delta', text: sanitizeSpeech(flushable) };
+        }
       }
       if (out.complete && !speechClosed) {
+        if (sanitizeCarry) {
+          yield { type: 'speech-delta', text: sanitizeSpeech(sanitizeCarry) };
+          sanitizeCarry = '';
+        }
         speechClosed = true;
         yield { type: 'speech-end' };
       }
@@ -140,20 +152,32 @@ export async function* streamUserInput(
 
   if (!speechClosed) {
     // 兜底:LLM 没正常关闭 speech 字段(畸形)
+    if (sanitizeCarry) {
+      yield { type: 'speech-delta', text: sanitizeSpeech(sanitizeCarry) };
+      sanitizeCarry = '';
+    }
     yield { type: 'speech-end' };
   }
 
   const result = extractor.finalize();
+  result.speech = sanitizeSpeech(result.speech);
 
-  // R4: closing guard — if LLM speech contains any course target word that has NOT been
-  // learned this session, replace the entire speech with a safe template before emitting.
+  // R4 + R6: closing guard — if LLM speech contains any course target word that has NOT
+  // been learned this session, replace the entire speech with a safe template.
+  // R6: but exclude `memory.currentWord` and LLM-reported `state_update.current_word`
+  // from the unlearned check, because mentioning the word being actively taught is
+  // legitimate; otherwise teaching "cat" would always trigger override.
   const wordsLearned = session.memory.wordsLearned;
   const targetWords = session.course.cards
     .filter((c) => c.kind === 'word')
     .map((c) => c.english);
+  const memoryCurrentWord = (session.memory.currentWord || '').toLowerCase();
+  const llmCurrentWord = (result.state_update.current_word || '').toLowerCase();
   const unlearnedMentioned = targetWords.filter((w) => {
     if (wordsLearned.includes(w)) return false;
-    const token = w.toLowerCase().replace(/[.,!?;]/g, '');
+    const wLower = w.toLowerCase();
+    if (wLower === memoryCurrentWord || wLower === llmCurrentWord) return false;
+    const token = wLower.replace(/[.,!?;]/g, '');
     return token.length > 0 && new RegExp(`\\b${token}\\b`, 'i').test(result.speech);
   });
   if (unlearnedMentioned.length > 0) {

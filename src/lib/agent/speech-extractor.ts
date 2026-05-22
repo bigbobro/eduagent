@@ -206,3 +206,10 @@ function decodeSimpleEscape(c: string): string {
     default: return c;
   }
 }
+
+// 剥离 card_id 风格的下划线 token(sentence_cat / word_apple 等),
+// 防止 TTS 直接把 _ 读成"underscore / 下划线"。
+// 替换成空格而非删空,避免相邻词被粘连。
+export function sanitizeSpeech(text: string): string {
+  return text.replace(/(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+(?![A-Za-z0-9])/g, ' ');
+}

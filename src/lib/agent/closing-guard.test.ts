@@ -85,6 +85,54 @@ describe('R4: closing guard in streamUserInput', () => {
     endSession(session.id);
   });
 
+  it('R6 AC3/AC9: does NOT override when speech mentions currentWord being taught (not yet learned)', async () => {
+    const session = createSession(foodCourse);
+    // We are currently teaching apple; apple is not yet in wordsLearned
+    session.memory.wordsLearned = [];
+    session.memory.currentWord = 'apple';
+    session.memory.currentCardId = 'apple';
+    // LLM speech mentions apple (the active teaching word) — should NOT trigger override
+    mockStreamLLM.mockReturnValue(asyncMakeStreamEvents(
+      '我们一起说 apple,跟我读 apple。',
+      [{ tool: 'show_card', params: { card_id: 'apple' } }],
+      { current_word: 'apple', phase: 'learning' }
+    ));
+
+    const events: any[] = [];
+    for await (const ev of streamUserInput(session.id, 'apple')) {
+      events.push(ev);
+    }
+
+    const lastInteraction = session.memory.messages[session.memory.messages.length - 1];
+    // speech should still contain apple (not replaced)
+    expect(lastInteraction.content).toContain('apple');
+    expect(lastInteraction.content).not.toContain('下次再来玩吧');
+    endSession(session.id);
+  });
+
+  it('R6 AC10: overrides when speech mentions currentWord AND a different unlearned word', async () => {
+    const session = createSession(foodCourse);
+    session.memory.wordsLearned = [];
+    session.memory.currentWord = 'apple';
+    session.memory.currentCardId = 'apple';
+    // LLM mentions apple (current, exempt) AND banana (unlearned, not current) → still override
+    mockStreamLLM.mockReturnValue(asyncMakeStreamEvents(
+      '我们说 apple,还有 banana 等着我们。',
+      [],
+      { current_word: 'apple', phase: 'closing' }
+    ));
+
+    const events: any[] = [];
+    for await (const ev of streamUserInput(session.id, '(结束)')) {
+      events.push(ev);
+    }
+
+    const lastInteraction = session.memory.messages[session.memory.messages.length - 1];
+    expect(lastInteraction.content).toContain('下次再来玩吧');
+    expect(lastInteraction.content).not.toContain('banana');
+    endSession(session.id);
+  });
+
   it('overrides speech when LLM mentions only some unlearned words', async () => {
     const session = createSession(foodCourse);
     // apple is learned, but banana is not

@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:Teacher Agent UX 四项 P0 修复(2026-05-22):actions/TTS 时序同步、ASR 字面 verify、normalize 放宽、closing guard 始终注入。详见 §6 关键设计决策表。上次大改:CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院 + 10 门常规课程 registry(2026-05-21)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:Teacher Agent state sync 三项修复(2026-05-22):R5 show_card 严格白名单 `{currentCard, nextCard}`、R6 closing guard 加 currentWord 白名单、R7 correct 后服务端硬推 nextCard。详见 §6 关键设计决策表。上次大改:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。再上次:CC 手绘绘本风 UI 接入(2026-05-21)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -47,7 +47,7 @@
 | `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,7 状态机,统一编排 ASR + SSE + TTS** |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
 | `src/lib/agent/session.ts` | LLM 一轮对话:词汇尝试判定 → 取 history → 调 streamLLM → 收 chunk → 记录 usage |
-| `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta** |
+| `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta;导出 `sanitizeSpeech` 剥离 `xxx_yyy` 这种 card_id token,防止 TTS 把 `_` 读成"下划线 / underscore"** |
 | `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史、当前词精确尝试判定 |
 | `src/lib/agent/prompt.ts` | 课堂 system prompt 拼装,包含已学词总结与连续失败切策略约束 |
 | `src/lib/mimo/llm.ts` | MiMo 调用,`streamLLM` 异步生成 token delta + final usage |
@@ -269,8 +269,9 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | 不打断(speaking 时空格忽略) | 简化优先 | 实测打断后 inflight PCM 难完全清干净;后续再加 |
 | ~~字幕领先音频~~ → **R1 已修复** | actions(`show_card`)缓冲到 `tts.session-finished` 再 emit | 实测 bd78d967 报告确认 UX 杀手;`pendingActions` in `LessonController` 解决;TTS error 路径也释放 |
 | 词汇正确性判定 | **R2:LLM 判 correct + raw ASR 字面 verify** 双重确认才 cleared;raw ASR 不含目标 token 时降为 attempted | LLM 曾把 "Kite." 判成 cat correct;字面 verify 截断过度容错 |
-| show_card normalize | **R3 放宽**:word card 接受任意 untouched / attempted(不限 activeWordCardId 顺序);cleared 仍拒绝 | 原来锁 newCardIds 顺序导致用户口头跳卡被忽略(frog 案例) |
-| closing 总结约束 | **R4:始终注入**到所有 phase 的 prompt;同时 session.ts 服务端扫 speech 含未学词时替换为安全模板 | 原来只在 phase=closing 注入;LLM 在 learning/opening phase 仍幻觉全词总结 |
+| ~~show_card normalize (R3 放宽)~~ → **R5 严格白名单** | word card 必须 ∈ `{currentCard, nextCard}`;currentCard 若已 cleared 也拒绝;rejected 时 fallback push `activeWordCardId` | R3 过宽导致 LLM 在 cat 已通过后仍 show_card 回 cat(2026-05-22 实测 70 轮里 7 次);严格白名单 + nextCard 计算确保只能切到目标顺序的下一张 |
+| closing 总结约束 | **R4 始终注入** + **R6 currentWord 白名单**:扫 speech 含未学词时替换为安全模板,但 `memory.currentWord` 与 `state_update.current_word` 不算未学词 | R4 原意防 LLM 结课时枚举全部 12 词;R6 修正:教 cat 时说"cat"不算 unlearned,否则每轮都触发整句替换 |
+| mastered 自动推进 | **R7:`assessment.result=correct` 且当前卡通过时,normalize 自动 push `show_card: nextCard`**(若 LLM 未主动 emit) | 不能依赖 LLM 自主推进:2026-05-22 实测 turtle 命中后 LLM 仍循环 5 轮不切卡,prompt 硬规则 unreliable |
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
@@ -323,6 +324,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
 - 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
 - 2026-05-22 — **Teacher Agent UX P0 四项修复** — R1:actions/TTS 时序(pendingActions 缓冲);R2:ASR 字面 verify(LLM correct + raw ASR 双重确认才 cleared);R3:normalize 放宽(word card 接受任意 untouched/attempted);R4:closing guard 始终注入 + 服务端 speech 扫描替换。
+- 2026-05-22 — **Teacher Agent state sync 三项修复**(从 05-22 实测课报告) — R5:show_card 严格白名单 `{currentCard, nextCard}`(R3 收紧,防 LLM 回跳已通过卡);R6:closing guard 加 `currentWord` 白名单(防教学中误触发整句替换);R7:correct 后服务端自动 push `show_card: nextCard`(防 LLM 命中后不推进)。新增 `getNextWordCardId(memory, course)` helper;prompt 加 "show_card.card_id 必须 ∈ {current, next}" 硬约束。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 

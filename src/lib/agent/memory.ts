@@ -168,6 +168,18 @@ export function commitAssistantStreamResult(
   return addAssistantMessage(memory, { speech, actions, state_update: stateUpdate }, rawAsrText);
 }
 
+export function getNextWordCardId(memory: LessonMemory, course: Course): string {
+  const wordCardIds = new Set(
+    course.cards.filter((c) => c.kind === 'word').map((c) => c.id)
+  );
+  const currentId = memory.currentCardId;
+  return course.teachingHints.newCardIds.find(
+    (id) => wordCardIds.has(id)
+      && id !== currentId
+      && memory.cardProgress[id] !== 'cleared'
+  ) || '';
+}
+
 export function normalizeAssistantActions(
   memory: LessonMemory,
   course: Course,
@@ -176,21 +188,56 @@ export function normalizeAssistantActions(
 ): ToolAction[] {
   const assessedMemory = applyAttemptAssessment(memory, response, rawAsrText);
   const activeWordCardId = getActiveWordCardId(assessedMemory, course);
+  const nextCardId = getNextWordCardId(assessedMemory, course);
+  const currentCardId = assessedMemory.currentCardId;
   let rejectedShowCard = false;
   let keptShowCard = false;
 
   const actions = response.actions.filter((action) => {
     if (action.tool !== 'show_card') return false;
-    if (canShowCard(action.params.card_id, assessedMemory, course, activeWordCardId)) {
+    if (canShowCard(action.params.card_id, assessedMemory, course, activeWordCardId, nextCardId)) {
       keptShowCard = true;
       return true;
     }
+    console.warn('[normalize] show_card rejected', {
+      rejectedCardId: action.params.card_id,
+      currentCardId,
+      nextCardId,
+      reason: 'not in {current,next} whitelist or sentence card mismatch',
+    });
     rejectedShowCard = true;
     return false;
   });
 
   if (!keptShowCard && activeWordCardId && (rejectedShowCard || didClearCurrentCard(memory, response))) {
+    console.warn('[normalize] fallback push', {
+      pushed: activeWordCardId,
+      reason: 'no_kept_show_card_after_filter',
+    });
     actions.push({ tool: 'show_card', params: { card_id: activeWordCardId } });
+  }
+
+  // R7: mastered auto-advance — when current card was just cleared in *assessedMemory*
+  // (i.e. LLM said correct AND ASR literal-verified per R2) and LLM did not emit a
+  // show_card to nextCard, the server hard-pushes it so the UI advances even if the LLM
+  // speech still encourages the current word. We check assessedMemory rather than the
+  // raw response so R2 ASR-mismatch downgrades correctly suppress the auto-advance.
+  const originalCurrentId = memory.currentCardId;
+  const justCleared =
+    originalCurrentId !== ''
+    && memory.cardProgress[originalCurrentId] !== 'cleared'
+    && assessedMemory.cardProgress[originalCurrentId] === 'cleared';
+  if (justCleared && nextCardId) {
+    const alreadyAdvancing = actions.some(
+      (a) => a.tool === 'show_card' && a.params.card_id === nextCardId
+    );
+    if (!alreadyAdvancing) {
+      console.warn('[normalize] mastered auto-advance', {
+        from: originalCurrentId,
+        to: nextCardId,
+      });
+      actions.push({ tool: 'show_card', params: { card_id: nextCardId } });
+    }
   }
 
   return actions;
@@ -302,16 +349,26 @@ function getActiveWordCardId(memory: LessonMemory, course: Course): string {
   return course.teachingHints.newCardIds.find((id) => wordCardIds.has(id) && memory.cardProgress[id] !== 'cleared') || '';
 }
 
-function canShowCard(cardId: string, memory: LessonMemory, course: Course, activeWordCardId: string): boolean {
+function canShowCard(
+  cardId: string,
+  memory: LessonMemory,
+  course: Course,
+  activeWordCardId: string,
+  nextCardId: string
+): boolean {
   if (!cardId) return false;
   const card = course.cards.find((item) => item.id === cardId);
   if (!card) return false;
   if (card.kind === 'word') {
-    // R3: Accept any word card that has not yet been cleared — this allows LLM to jump
-    // to any untouched card when the student says "go to frog" etc., instead of forcing
-    // sequential order. Cleared cards are still rejected to prevent backward jumps.
-    const state = memory.cardProgress[card.id];
-    return state === 'untouched' || state === 'attempted' || state === 'needs_review';
+    // R5: word card must be in {currentCard, nextCard} whitelist. This prevents LLM from
+    // (a) jumping back to already-cleared cards (e.g. cat after dog/bird passed) or
+    // (b) skipping ahead non-sequentially out of newCardIds order.
+    // currentCard must NOT already be cleared (stale or just-cleared) — when current is
+    // cleared, server falls back to activeWordCardId / nextCardId so the UI advances.
+    const isCurrent = card.id === memory.currentCardId;
+    const isNext = nextCardId !== '' && card.id === nextCardId;
+    if (isCurrent && memory.cardProgress[card.id] === 'cleared') return false;
+    return isCurrent || isNext;
   }
   // Sentence cards: still require the associated word card to be active and not cleared.
   if (!activeWordCardId) return false;
