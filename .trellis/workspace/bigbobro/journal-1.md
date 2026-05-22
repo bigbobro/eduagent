@@ -309,3 +309,37 @@ Fixed three state-sync bugs surfaced by 2026-05-22 animals lesson real-test: R5 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: ASR hotwords and quiz TTS guidance
+
+**Date**: 2026-05-23
+**Task**: ASR hotwords and quiz TTS guidance
+**Branch**: `main`
+
+### Summary
+
+Completed ASR current-card hotwords injection and static reinforcement quiz TTS guidance with tests, docs, and smoke verification.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b10d96` | (see git log) |
+| `5f83892` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
