@@ -1,0 +1,9 @@
+{"file": "docs/lesson-reports/2026-05-22-bd78d967.md", "reason": "AC 验收的 ground truth 第一份:5 条用户体验对照表,R1/R3 修完应消除 #1 #2 #3 #4 #5 中可工程解的部分"}
+{"file": "docs/lesson-reports/2026-05-22-8bb58baa.md", "reason": "AC 验收的 ground truth 第二份:R4 closing 总结幻觉、R3 跳卡场景验收对照"}
+{"file": "docs/architecture.md", "reason": "改动后 §3 数据流、§4 状态机、§6 关键设计决策表需同步;check 阶段对照是否漏更新"}
+{"file": "CLAUDE.md", "reason": "项目级硬约束:文档同步在 commit 内、严禁真实凭据出现在 docs/spec/plan/commit/PR、测试自动化原则,check 阶段全部要审"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "后端质量准则:单测、类型安全、错误处理覆盖率检查"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "R2 raw ASR 为空 / R4 模板覆盖 / R1 session-finished 异常路径的错误处理是否符合规范"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "R2 console.warn(LLM 判 correct 但 ASR 不含字面)/ R2 console.warn(assessment.card_id 不匹配)落实情况"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "R1 lesson-controller.ts 改动符合前端质量准则"}
+{"file": "docs/TODO.md", "reason": "实施完成后 TODO 反向同步:R1-R4 移到已完成记录,actions/TTS 时序条目从 backlog 删除"}
