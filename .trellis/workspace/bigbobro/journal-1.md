@@ -517,3 +517,36 @@ Updated docs/TODO.md to reflect 2026-05-23 voice stabilization work, marked ligh
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: Codebase cleanup D: extract guard pipeline from streamUserInput
+
+**Date**: 2026-05-24
+**Task**: Codebase cleanup D: extract guard pipeline from streamUserInput
+**Branch**: `main`
+
+### Summary
+
+完成子任务 2 (D)：拆 streamUserInput 的 4 个 inline guard (R4/R6 closing / R-B premature-closing / R-C normalize / speech-card-align) 到 src/lib/agent/guards/ 目录，建立 GuardContext + GuardFn[] pipeline。streamUserInput 从 169 行降到 60 行，拆出 commitTurn helper。行为不变 refactor：兜底模板字面、14 regex 数组、buildCardPrompt 全字节对等；smoke 输出 byte-identical。21 case 新单测覆盖（含 runPipeline 容错语义）。沉淀 R-D 章节到 .trellis/spec/backend/agent-layer.md (+283 行)，含 GuardFn 形状契约 / read-only memory invariant / 顺序敏感性 / normalize 留 memory.ts 的 ADR / 加新 guard pattern。决策：normalize 用薄 wrapper 留 memory.ts（选项 A）；旧 closing-guard.test.ts 保留作 E2E 集成层。整个 codebase-cleanup-and-refactor 工程（A+B+C+D 4 类，2 子任务）2/2 完成，父任务一并 archive。E (PhasedController 收口) 砍掉、F (课程 factory) park 到 TODO，触发条件已记录。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f0278e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
