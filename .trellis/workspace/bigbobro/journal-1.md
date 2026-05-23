@@ -447,3 +447,40 @@ Updated docs/TODO.md to reflect 2026-05-23 voice stabilization work, marked ligh
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 前端优化迭代：字体本地化、数据直传、代码清理、WS重连
+
+**Date**: 2026-05-23
+**Task**: 前端优化迭代：字体本地化、数据直传、代码清理、WS重连
+**Branch**: `main`
+
+### Summary
+
+完成 4 个前端优化 task：(1) 字体加载从 Google Fonts CDN @import 迁移到 next/font/local 自托管 woff2，消除 render-blocking 和外部网络依赖；(2) 课程页改为 Server Component 直接 import 数据，消除客户端全量 fetch；(3) 删除 Pages Router 遗留、清理 21 个 bunny-* 冗余 token、统一 404 页面风格；(4) TTS WebSocket 添加指数退避自动重连。全部通过 tsc、build、239 单元测试、smoke、lesson-smoke 验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eb4fd30` | (see git log) |
+| `7dcd2e9` | (see git log) |
+| `29d667d` | (see git log) |
+| `2357f17` | (see git log) |
+| `beccc85` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

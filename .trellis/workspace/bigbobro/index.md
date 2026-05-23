@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-05-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~449 | Active |
+| `journal-1.md` | ~486 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-05-23 | 前端优化迭代：字体本地化、数据直传、代码清理、WS重连 | `eb4fd30`, `7dcd2e9`, `29d667d`, `2357f17`, `beccc85` | `main` |
 | 13 | 2026-05-23 | Update lesson TODO after voice stabilization | `3f91d18` | `main` |
 | 12 | 2026-05-23 | Fix lesson voice regressions | `8869b0f` | `main` |
 | 11 | 2026-05-23 | R-A → R-B → R-C teaching state machine + lesson-smoke infra (2026-05-23 real-test) | `598c35a`, `739490c`, `52e719a`, `8456270`, `4ad4708`, `9bbcc77` | `main` |
