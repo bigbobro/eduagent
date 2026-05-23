@@ -1,3 +1,5 @@
+import { notFound } from 'next/navigation';
+import { getCourseById } from '@/data/courses';
 import { LessonClient } from './LessonClient';
 
 interface LessonPageProps {
@@ -5,5 +7,7 @@ interface LessonPageProps {
 }
 
 export default function LessonPage({ params }: LessonPageProps) {
-  return <LessonClient courseId={params.id} />;
+  const course = getCourseById(params.id);
+  if (!course) notFound();
+  return <LessonClient course={course} />;
 }
