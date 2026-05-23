@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-05-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~345 | Active |
+| `journal-1.md` | ~383 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-05-23 | R-A → R-B → R-C teaching state machine + lesson-smoke infra (2026-05-23 real-test) | `598c35a`, `739490c`, `52e719a`, `8456270`, `4ad4708`, `9bbcc77` | `main` |
 | 10 | 2026-05-23 | ASR hotwords and quiz TTS guidance | `9b10d96`, `5f83892` | `main` |
 | 9 | 2026-05-22 | R5/R6/R7 Teacher state sync from 2026-05-22 real-test | `bbcd83d` | `main` |
 | 8 | 2026-05-22 | Teacher Agent UX fixes R1-R4 (05-22 real-test) | `5a4d120` | `main` |

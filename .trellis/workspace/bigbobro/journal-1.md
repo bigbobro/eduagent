@@ -343,3 +343,41 @@ Completed ASR current-card hotwords injection and static reinforcement quiz TTS 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: R-A → R-B → R-C teaching state machine + lesson-smoke infra (2026-05-23 real-test)
+
+**Date**: 2026-05-23
+**Task**: R-A → R-B → R-C teaching state machine + lesson-smoke infra (2026-05-23 real-test)
+**Branch**: `main`
+
+### Summary
+
+Diagnosed and fixed 'card flipped but teacher voice lagging' from 2026-05-23 animals real-test via three iteration cycles, plus built reusable lesson-smoke harness. (1) Added per-turn diagnostic logs to /api/chat + orchestrator (chat action, teacher speech, show_card events). (2) R-A celebration-turn stay: deferred force-advance one turn so kid hears 'good job cat!' on cat card before flip. (3) Dev panel: floating phase-jump buttons in PhasedLessonView (NODE_ENV=development), skip past 12-card requirement during testing. (4) scripts/lesson-smoke.ts: text-driven 10-step animals lesson driver, validates show_card sequence + writes docs/lesson-reports/smoke-*.md, manual trigger via 'pnpm smoke:lesson'. CLAUDE.md §C codifies 'big-change boundary': touching src/lib/agent/**, src/lib/voice/**, or /api/chat/route.ts requires smoke pass before delivery. (5) Smoke caught two real bugs on first run: R-B premature-closing (LLM emitting wrap-up summary + show_card→cat after 2 words) and R2 un-clear (R2 downgrade was wiping cleared state when current_word desynced from assessment.card_id). Fixed both. (6) R-C user-locked spec rewrite: card cleared trigger changed from 'LLM correct + R2 verify (1 hit)' to 'server-authoritative raw-ASR literal hit count >= 2'. LLM no longer decides advancement; server forces show_card → currentCard until count=2, then auto-pushes show_card → nextCard with prompt guiding 'OK 你说对了 → 看下一个动物' transition speech. Deleted R-A/R5/R7 dead helpers (canShowCard, getActiveWordCardId, didClearCurrentCard, getWordCardIdForCard). Tests: 231 → 233 vitest pass (added R-C 2-hit / lock / streak-reset coverage). Smoke: 11/11 pass on R-C final state (was 9/11 after R-B, 8/11 before).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `598c35a` | (see git log) |
+| `739490c` | (see git log) |
+| `52e719a` | (see git log) |
+| `8456270` | (see git log) |
+| `4ad4708` | (see git log) |
+| `9bbcc77` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
