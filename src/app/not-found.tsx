@@ -1,10 +1,16 @@
+import { Cat, PaperBg, PaperButton } from '@/components/magic';
+
 export default function NotFound() {
   return (
-    <div className="h-screen flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-gray-800 mb-4">404</h1>
-        <p className="text-gray-500">页面未找到</p>
+    <PaperBg tone="paperDeep" className="h-screen w-screen">
+      <div className="flex h-full flex-col items-center justify-center gap-6">
+        <Cat size={160} mood="happy" />
+        <h1 className="font-display text-4xl text-ink">迷路啦</h1>
+        <p className="font-zh text-lg text-inkSoft">这个页面不存在哦</p>
+        <PaperButton color="butter">
+          <a href="/">回魔法书房</a>
+        </PaperButton>
       </div>
-    </div>
+    </PaperBg>
   );
 }
