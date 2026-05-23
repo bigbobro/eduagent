@@ -414,3 +414,36 @@ Fixed push-to-talk ASR startup and pointer capture regressions, serialized force
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: Update lesson TODO after voice stabilization
+
+**Date**: 2026-05-23
+**Task**: Update lesson TODO after voice stabilization
+**Branch**: `main`
+
+### Summary
+
+Updated docs/TODO.md to reflect 2026-05-23 voice stabilization work, marked lightweight logging diagnostics complete, refreshed next regression checks, and added token-budget slimming plus lint cleanup backlog notes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3f91d18` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
