@@ -190,12 +190,29 @@ export function normalizeAssistantActions(
   const activeWordCardId = getActiveWordCardId(assessedMemory, course);
   const nextCardId = getNextWordCardId(assessedMemory, course);
   const currentCardId = assessedMemory.currentCardId;
+
+  // R-A (2026-05-23): "celebration turn" — when the current card was just cleared this
+  // very turn (LLM said correct AND R2 literal-verify accepted), the teacher speech for
+  // THIS turn was generated around the cleared word ("great, cat! say cat again").
+  // Force-advancing the card mid-celebration creates the desync seen in 2026-05-23
+  // animals real-test (UI flipped to dog while teacher kept saying cat → child read cat
+  // on dog card → 3-turn LLM context lag). Fix: defer the card advance one turn. Allow
+  // show_card → just-cleared-currentCard this turn, and skip both the "push next on
+  // fallback" and the old R7 auto-advance. Next turn LLM naturally produces the
+  // transition ("now next animal!") and we let its show_card → nextCard through.
+  const originalCurrentId = memory.currentCardId;
+  const justClearedCurrent =
+    originalCurrentId !== ''
+    && memory.cardProgress[originalCurrentId] !== 'cleared'
+    && assessedMemory.cardProgress[originalCurrentId] === 'cleared';
+
   let rejectedShowCard = false;
   let keptShowCard = false;
 
   const actions = response.actions.filter((action) => {
     if (action.tool !== 'show_card') return false;
-    if (canShowCard(action.params.card_id, assessedMemory, course, activeWordCardId, nextCardId)) {
+    const isCelebrationStay = justClearedCurrent && action.params.card_id === originalCurrentId;
+    if (isCelebrationStay || canShowCard(action.params.card_id, assessedMemory, course, activeWordCardId, nextCardId)) {
       keptShowCard = true;
       return true;
     }
@@ -209,34 +226,16 @@ export function normalizeAssistantActions(
     return false;
   });
 
-  if (!keptShowCard && activeWordCardId && (rejectedShowCard || didClearCurrentCard(memory, response))) {
-    console.warn('[normalize] fallback push', {
-      pushed: activeWordCardId,
-      reason: 'no_kept_show_card_after_filter',
-    });
-    actions.push({ tool: 'show_card', params: { card_id: activeWordCardId } });
-  }
-
-  // R7: mastered auto-advance — when current card was just cleared in *assessedMemory*
-  // (i.e. LLM said correct AND ASR literal-verified per R2) and LLM did not emit a
-  // show_card to nextCard, the server hard-pushes it so the UI advances even if the LLM
-  // speech still encourages the current word. We check assessedMemory rather than the
-  // raw response so R2 ASR-mismatch downgrades correctly suppress the auto-advance.
-  const originalCurrentId = memory.currentCardId;
-  const justCleared =
-    originalCurrentId !== ''
-    && memory.cardProgress[originalCurrentId] !== 'cleared'
-    && assessedMemory.cardProgress[originalCurrentId] === 'cleared';
-  if (justCleared && nextCardId) {
-    const alreadyAdvancing = actions.some(
-      (a) => a.tool === 'show_card' && a.params.card_id === nextCardId
-    );
-    if (!alreadyAdvancing) {
-      console.warn('[normalize] mastered auto-advance', {
-        from: originalCurrentId,
-        to: nextCardId,
+  if (!keptShowCard && (rejectedShowCard || didClearCurrentCard(memory, response))) {
+    // On the celebration turn keep showing the just-cleared card (R-A); otherwise
+    // fall back to the next active word card so the UI doesn't stall.
+    const pushTarget = justClearedCurrent ? originalCurrentId : activeWordCardId;
+    if (pushTarget) {
+      console.warn('[normalize] fallback push', {
+        pushed: pushTarget,
+        reason: justClearedCurrent ? 'celebration_stay' : 'no_kept_show_card_after_filter',
       });
-      actions.push({ tool: 'show_card', params: { card_id: nextCardId } });
+      actions.push({ tool: 'show_card', params: { card_id: pushTarget } });
     }
   }
 

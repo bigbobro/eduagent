@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:reinforcement quiz 静态 TTS 引导(2026-05-22):`LessonController.speakStatic` 复用长连 TTS,quiz prompt / repeat-after-me prompt 播完前锁 UI。上次大改:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:**R-A celebration-turn stay(2026-05-23)** — 撤销 R7 强制自动翻页,改为"当前卡刚 cleared 这一轮保持显示,让庆祝话术与卡面同步;下一轮 LLM 自然过渡时再翻到 nextCard"。修复 2026-05-23 实测 animals 课"切到下一张但老师还在唠上一张"的卡嘴错位。上次大改:reinforcement quiz 静态 TTS 引导(2026-05-22):`LessonController.speakStatic` 复用长连 TTS,quiz prompt / repeat-after-me prompt 播完前锁 UI。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -282,7 +282,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | 词汇正确性判定 | **R2:LLM 判 correct + raw ASR 字面 verify** 双重确认才 cleared;raw ASR 不含目标 token 时降为 attempted | LLM 曾把 "Kite." 判成 cat correct;字面 verify 截断过度容错 |
 | ~~show_card normalize (R3 放宽)~~ → **R5 严格白名单** | word card 必须 ∈ `{currentCard, nextCard}`;currentCard 若已 cleared 也拒绝;rejected 时 fallback push `activeWordCardId` | R3 过宽导致 LLM 在 cat 已通过后仍 show_card 回 cat(2026-05-22 实测 70 轮里 7 次);严格白名单 + nextCard 计算确保只能切到目标顺序的下一张 |
 | closing 总结约束 | **R4 始终注入** + **R6 currentWord 白名单**:扫 speech 含未学词时替换为安全模板,但 `memory.currentWord` 与 `state_update.current_word` 不算未学词 | R4 原意防 LLM 结课时枚举全部 12 词;R6 修正:教 cat 时说"cat"不算 unlearned,否则每轮都触发整句替换 |
-| mastered 自动推进 | **R7:`assessment.result=correct` 且当前卡通过时,normalize 自动 push `show_card: nextCard`**(若 LLM 未主动 emit) | 不能依赖 LLM 自主推进:2026-05-22 实测 turtle 命中后 LLM 仍循环 5 轮不切卡,prompt 硬规则 unreliable |
+| 庆祝回合卡面策略 | **R-A(2026-05-23,替代 R7):当前卡刚 cleared 这一轮,normalize 保持显示该卡,不强制推进到 nextCard。** LLM 主动 emit `show_card: nextCard` 仍放行(LLM 选择"庆祝+过渡"一气呵成);只是不再服务端强推。fallback push 也改成推 originalCurrentId 而非 activeWordCardId。 | R7 强制推进导致 2026-05-23 animals 实测出现"卡面已 dog,老师仍在让你读 cat"的卡嘴错位:LLM 本轮 speech 围绕 cat-success 生成,服务端单方面翻页 → 孩子跟声音读 cat → LLM 用 cat-context 再卡 3 轮才追上。R-A 牺牲 1 轮翻页延迟换取语音/视觉一致 |
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |

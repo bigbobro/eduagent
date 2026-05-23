@@ -124,7 +124,7 @@ describe('card progress updates', () => {
     expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'rice' } }]);
   });
 
-  it('falls forward when a correct assessment repeats the just-cleared card', () => {
+  it('R-A: stays on just-cleared card for celebration turn even if LLM repeats it', () => {
     const memory = {
       ...initializeCardProgress(createMemory(), foodCourse),
       currentCardId: 'egg',
@@ -163,9 +163,12 @@ describe('card progress updates', () => {
       },
     });
 
-    expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'rice' } }]);
+    // R-A (2026-05-23): celebration turn keeps showing the just-cleared card so the
+    // teacher speech ("good egg!") stays aligned with the visual. Cursor still advances
+    // to rice via commitAssistantStreamResult so next turn LLM gets the new context.
+    expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'egg' } }]);
     expect(next.cardProgress.egg).toBe('cleared');
-    expect(next.currentCardId).toBe('rice');
+    expect(next.currentCardId).toBe('egg');
   });
 
 
@@ -499,8 +502,8 @@ describe('getNextWordCardId helper', () => {
   });
 });
 
-describe('R7: mastered auto-advance', () => {
-  it('AC5: pushes show_card to nextCard when current cleared and LLM did not advance', () => {
+describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
+  it('R-A AC5: stays on just-cleared current card when LLM emits no show_card (celebration)', () => {
     const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
     const memory = {
       ...initializeCardProgress(createMemory(), animalsCourse),
@@ -522,10 +525,12 @@ describe('R7: mastered auto-advance', () => {
       },
     }, 'Cat.');
 
-    expect(actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'dog')).toBe(true);
+    // R-A: must push cat (celebration stay), not dog (was R7 auto-advance)
+    expect(actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'cat')).toBe(true);
+    expect(actions.every((a) => !(a.tool === 'show_card' && a.params.card_id === 'dog'))).toBe(true);
   });
 
-  it('AC6: does not push duplicate when LLM already emits show_card to nextCard', () => {
+  it('AC6: respects LLM explicit advance to nextCard (no celebration stay override)', () => {
     const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
     const memory = {
       ...initializeCardProgress(createMemory(), animalsCourse),
@@ -551,7 +556,7 @@ describe('R7: mastered auto-advance', () => {
     expect(dogPushes).toHaveLength(1);
   });
 
-  it('AC7 scenario: turtle correct + LLM did not switch card → server pushes lion (next animal)', () => {
+  it('R-A AC7: turtle correct + LLM silent → server keeps turtle for celebration (no auto-jump to lion)', () => {
     const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
     // Simulate state where cat,dog,bird,fish,rabbit cleared; current is turtle
     const cleared = ['cat', 'dog', 'bird', 'fish', 'rabbit'];
@@ -579,7 +584,8 @@ describe('R7: mastered auto-advance', () => {
       },
     }, 'Turtle.');
 
-    expect(actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'lion')).toBe(true);
+    expect(actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'turtle')).toBe(true);
+    expect(actions.every((a) => !(a.tool === 'show_card' && a.params.card_id === 'lion'))).toBe(true);
   });
 
   it('AC8 scenario: cat cleared, currentCard=dog, LLM emits show_card cat → no cat, contains dog', () => {
@@ -631,7 +637,7 @@ describe('R7: mastered auto-advance', () => {
     expect(actions.every((a) => !(a.tool === 'show_card' && a.params.card_id === 'dog'))).toBe(true);
   });
 
-  it('R7 safe no-op when nextCardId is empty (all cards cleared)', () => {
+  it('R-A safe when last card cleared (nextCardId empty): celebration stays on last card', () => {
     const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
     const wordCardIds = animalsCourse.cards.filter((c) => c.kind === 'word').map((c) => c.id);
     const cardProgress = { ...initializeCardProgress(createMemory(), animalsCourse).cardProgress };
@@ -659,7 +665,11 @@ describe('R7: mastered auto-advance', () => {
       },
     }, 'Frog.');
 
-    expect(actions.filter((a) => a.tool === 'show_card')).toHaveLength(0);
+    // R-A: celebration stay pushes show_card → frog (the just-cleared last card).
+    // No crash, no jump to an empty nextCardId.
+    const showCards = actions.filter((a) => a.tool === 'show_card');
+    expect(showCards).toHaveLength(1);
+    expect(showCards[0].params.card_id).toBe('frog');
   });
 
   it('AC1: rejects show_card to currentCard when it is itself cleared (stale state)', () => {
