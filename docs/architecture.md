@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:**R-A celebration-turn stay(2026-05-23)** — 撤销 R7 强制自动翻页,改为"当前卡刚 cleared 这一轮保持显示,让庆祝话术与卡面同步;下一轮 LLM 自然过渡时再翻到 nextCard"。修复 2026-05-23 实测 animals 课"切到下一张但老师还在唠上一张"的卡嘴错位。上次大改:reinforcement quiz 静态 TTS 引导(2026-05-22):`LessonController.speakStatic` 复用长连 TTS,quiz prompt / repeat-after-me prompt 播完前锁 UI。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:**R-C 服务端 2-hit 切卡规则(2026-05-23,取代 R-A/R5/R7)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`,LLM 这一轮 speech 应包含"OK 你说对了 → 看下一个动物 → 这是什么?"。修复 2026-05-23 实测"乱序学习"(LLM 凭主观推卡导致 dog cleared 但 cat 没 cleared 的状态错乱)以及"过早结课"。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -282,7 +282,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | 词汇正确性判定 | **R2:LLM 判 correct + raw ASR 字面 verify** 双重确认才 cleared;raw ASR 不含目标 token 时降为 attempted | LLM 曾把 "Kite." 判成 cat correct;字面 verify 截断过度容错 |
 | ~~show_card normalize (R3 放宽)~~ → **R5 严格白名单** | word card 必须 ∈ `{currentCard, nextCard}`;currentCard 若已 cleared 也拒绝;rejected 时 fallback push `activeWordCardId` | R3 过宽导致 LLM 在 cat 已通过后仍 show_card 回 cat(2026-05-22 实测 70 轮里 7 次);严格白名单 + nextCard 计算确保只能切到目标顺序的下一张 |
 | closing 总结约束 | **R4 始终注入** + **R6 currentWord 白名单**:扫 speech 含未学词时替换为安全模板,但 `memory.currentWord` 与 `state_update.current_word` 不算未学词 | R4 原意防 LLM 结课时枚举全部 12 词;R6 修正:教 cat 时说"cat"不算 unlearned,否则每轮都触发整句替换 |
-| 庆祝回合卡面策略 | **R-A(2026-05-23,替代 R7):当前卡刚 cleared 这一轮,normalize 保持显示该卡,不强制推进到 nextCard。** LLM 主动 emit `show_card: nextCard` 仍放行(LLM 选择"庆祝+过渡"一气呵成);只是不再服务端强推。fallback push 也改成推 originalCurrentId 而非 activeWordCardId。 | R7 强制推进导致 2026-05-23 animals 实测出现"卡面已 dog,老师仍在让你读 cat"的卡嘴错位:LLM 本轮 speech 围绕 cat-success 生成,服务端单方面翻页 → 孩子跟声音读 cat → LLM 用 cat-context 再卡 3 轮才追上。R-A 牺牲 1 轮翻页延迟换取语音/视觉一致 |
+| 词卡 cleared 触发 + 切卡 | **R-C(2026-05-23,取代 R-A/R5/R7):服务端权威 — `cardCorrectCount[cardId]` 计 raw ASR 字面命中 target token 的次数,累计 ≥ 2 时 mark `cleared`(锁,不再计数)。** normalize 模式机:(1) 当前卡未 cleared → 强制 `show_card → currentCard`,拒绝任何其它 word card 切换;(2) 当前卡本轮刚 cleared → 强制推进 `show_card → nextCard`,这就是"OK 你说对了 → 看下一个"那一刻;(3) sentence card 只允许 `sentence_<currentCard>`。LLM `attempt_assessment.result` 不再决定 cleared,仅在无 R2 命中时驱动 streak / needs_review。 | LLM 主观判定 close/correct 不稳定:实测同一句 "Cat." 一次判 close 一次判 correct,导致一会儿不推一会儿乱推;且 R7 强推 + LLM speech 滞后产生卡嘴错位,R-A 又造成 LLM 当回合 speech 跟卡面对不齐。R-C 把"是否推卡"完全交给服务器按字面计数判定,LLM 只负责语言反馈;同时 2 次门槛比 1 次更接近真实学习强度(小朋友说对一次可能是巧合,2 次基本能复现) |
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |

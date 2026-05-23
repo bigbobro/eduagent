@@ -42,6 +42,7 @@ describe('card progress updates', () => {
 
     const next = commitAssistantStreamResult(
       memory,
+      foodCourse,
       'Look, apple!',
       [{ tool: 'show_card', params: { card_id: 'apple' } }],
       { current_word: 'apple', phase: 'learning' }
@@ -51,53 +52,52 @@ describe('card progress updates', () => {
     expect(next.cardProgress.apple).toBe('attempted');
   });
 
-  it('marks the current card cleared from a correct assessment', () => {
+  it('R-C: a single R2 hit increments count but does not clear (needs 2)', () => {
     const memory = {
       ...initializeCardProgress(createMemory(), foodCourse),
       currentCardId: 'apple',
     };
 
-    const next = commitAssistantStreamResult(memory, 'Great!', [], {
+    const next = commitAssistantStreamResult(memory, foodCourse, 'Great!', [], {
       current_word: 'apple',
       phase: 'learning',
       attempt_assessment: {
         card_id: 'apple',
         result: 'correct',
         should_advance: true,
-        evidence: 'ASR was close enough to apple',
+        evidence: 'heard apple',
       },
-    });
+    }, 'Apple.');
 
-    expect(next.cardProgress.apple).toBe('cleared');
-    expect(next.clearedCardIds).toContain('apple');
-    expect(next.wordsLearned).toContain('apple');
+    expect(next.cardProgress.apple).toBe('attempted');
+    expect(next.cardCorrectCount.apple).toBe(1);
+    expect(next.clearedCardIds).not.toContain('apple');
   });
 
-  it('applies assessment to the previous current card before syncing a new show_card action', () => {
-    const memory = {
+  it('R-C: two R2 hits clear the card and lock further counting', () => {
+    let memory: any = {
       ...initializeCardProgress(createMemory(), foodCourse),
       currentCardId: 'apple',
     };
+    const assessment = (result: 'correct' | 'close' = 'correct') => ({
+      current_word: 'apple',
+      phase: 'learning' as const,
+      attempt_assessment: { card_id: 'apple', result, should_advance: true, evidence: 'heard apple' },
+    });
 
-    const next = commitAssistantStreamResult(
-      memory,
-      'Great, now look at milk.',
-      [{ tool: 'show_card', params: { card_id: 'milk' } }],
-      {
-        current_word: 'apple',
-        phase: 'learning',
-        attempt_assessment: {
-          card_id: 'apple',
-          result: 'correct',
-          should_advance: true,
-          evidence: 'The student said apple.',
-        },
-      }
-    );
+    memory = commitAssistantStreamResult(memory, foodCourse, 'first try', [], assessment(), 'Apple.');
+    expect(memory.cardCorrectCount.apple).toBe(1);
+    expect(memory.cardProgress.apple).toBe('attempted');
 
-    expect(next.cardProgress.apple).toBe('cleared');
-    expect(next.currentCardId).toBe('milk');
-    expect(next.cardProgress.milk).toBe('attempted');
+    memory = commitAssistantStreamResult(memory, foodCourse, 'second try', [], assessment(), 'Apple.');
+    expect(memory.cardCorrectCount.apple).toBe(2);
+    expect(memory.cardProgress.apple).toBe('cleared');
+    expect(memory.clearedCardIds).toContain('apple');
+    expect(memory.wordsLearned).toContain('apple');
+
+    // Lock: a 3rd hit should not increment further.
+    memory = commitAssistantStreamResult(memory, foodCourse, 'extra try', [], assessment(), 'Apple.');
+    expect(memory.cardCorrectCount.apple).toBe(2);
   });
 
   it('normalizes a cleared-card show_card to the next active word', () => {
@@ -124,7 +124,7 @@ describe('card progress updates', () => {
     expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'rice' } }]);
   });
 
-  it('R-A: stays on just-cleared card for celebration turn even if LLM repeats it', () => {
+  it('R-C: stays on current card while count < 2 even if LLM hits R2 once', () => {
     const memory = {
       ...initializeCardProgress(createMemory(), foodCourse),
       currentCardId: 'egg',
@@ -139,36 +139,17 @@ describe('card progress updates', () => {
     };
 
     const actions = normalizeAssistantActions(memory, foodCourse, {
-      speech: 'Good egg. Next one.',
+      speech: 'Good egg.',
       actions: [{ tool: 'show_card', params: { card_id: 'egg' } }],
       state_update: {
         current_word: 'egg',
         phase: 'learning',
-        attempt_assessment: {
-          card_id: 'egg',
-          result: 'correct',
-          should_advance: true,
-          evidence: 'The student said egg.',
-        },
+        attempt_assessment: { card_id: 'egg', result: 'correct', should_advance: true, evidence: 'said egg' },
       },
-    });
-    const next = commitAssistantStreamResult(memory, 'Good egg. Next one.', actions, {
-      current_word: 'egg',
-      phase: 'learning',
-      attempt_assessment: {
-        card_id: 'egg',
-        result: 'correct',
-        should_advance: true,
-        evidence: 'The student said egg.',
-      },
-    });
+    }, 'Egg.');
 
-    // R-A (2026-05-23): celebration turn keeps showing the just-cleared card so the
-    // teacher speech ("good egg!") stays aligned with the visual. Cursor still advances
-    // to rice via commitAssistantStreamResult so next turn LLM gets the new context.
+    // R-C: only 1 R2 hit — count=1, not cleared. UI stays on egg.
     expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'egg' } }]);
-    expect(next.cardProgress.egg).toBe('cleared');
-    expect(next.currentCardId).toBe('egg');
   });
 
 
@@ -184,17 +165,17 @@ describe('card progress updates', () => {
       evidence: 'ASR did not match',
     };
 
-    memory = commitAssistantStreamResult(memory, 'Try slowly.', [], {
+    memory = commitAssistantStreamResult(memory, foodCourse, 'Try slowly.', [], {
       current_word: 'apple',
       phase: 'learning',
       attempt_assessment: assessment,
     });
-    memory = commitAssistantStreamResult(memory, 'One more slow try.', [], {
+    memory = commitAssistantStreamResult(memory, foodCourse, 'One more slow try.', [], {
       current_word: 'apple',
       phase: 'learning',
       attempt_assessment: assessment,
     });
-    memory = commitAssistantStreamResult(memory, 'We will come back later.', [], {
+    memory = commitAssistantStreamResult(memory, foodCourse, 'We will come back later.', [], {
       current_word: 'apple',
       phase: 'learning',
       attempt_assessment: assessment,
@@ -210,7 +191,7 @@ describe('card progress updates', () => {
       currentCardId: 'apple',
     };
 
-    const next = commitAssistantStreamResult(memory, 'Let us come back to apple.', [], {
+    const next = commitAssistantStreamResult(memory, foodCourse, 'Let us come back to apple.', [], {
       current_word: 'apple',
       phase: 'learning',
       attempt_assessment: {
@@ -221,7 +202,9 @@ describe('card progress updates', () => {
       },
     });
 
-    expect(next.cardProgress.apple).toBe('attempted');
+    // R-C: off_topic produces no state change. apple was untouched, stays untouched.
+    expect(next.cardProgress.apple).toBe('untouched');
+    expect(next.cardCorrectCount.apple || 0).toBe(0);
     expect(next.clearedCardIds).not.toContain('apple');
   });
 
@@ -233,7 +216,7 @@ describe('card progress updates', () => {
       currentCardId: 'apple',
     };
 
-    const next = commitAssistantStreamResult(memory, 'Today is done.', [], {
+    const next = commitAssistantStreamResult(memory, foodCourse, 'Today is done.', [], {
       phase: 'closing',
     });
 
@@ -241,115 +224,85 @@ describe('card progress updates', () => {
   });
 });
 
-describe('R2: ASR literal verify in applyAttemptAssessment', () => {
-  it('clears card when LLM says correct AND raw ASR contains the target word', () => {
-    const memory = {
-      ...initializeCardProgress(createMemory(), foodCourse),
-      currentCardId: 'apple',
-    };
-
-    const next = commitAssistantStreamResult(memory, 'Great job!', [], {
-      current_word: 'apple',
-      phase: 'learning',
-      attempt_assessment: {
-        card_id: 'apple',
-        result: 'correct',
-        should_advance: true,
-        evidence: 'heard apple',
-      },
-    }, 'Apple.');
-
-    expect(next.cardProgress.apple).toBe('cleared');
-    expect(next.clearedCardIds).toContain('apple');
-    expect(next.wordsLearned).toContain('apple');
+describe('R-C: server-authoritative R2 count + 2-hit clearance', () => {
+  const mkAssessment = (result: 'correct' | 'close' | 'wrong' | 'off_topic', word = 'apple') => ({
+    current_word: word,
+    phase: 'learning' as const,
+    attempt_assessment: { card_id: word, result, should_advance: true, evidence: 'evidence' },
   });
 
-  it('downgrades to attempted when LLM says correct but raw ASR lacks the target word', () => {
-    const memory = {
-      ...initializeCardProgress(createMemory(), foodCourse),
-      currentCardId: 'apple',
-    };
+  it('R2 hit increments count, second R2 hit clears + locks', () => {
+    let memory: any = { ...initializeCardProgress(createMemory(), foodCourse), currentCardId: 'apple' };
+    memory = commitAssistantStreamResult(memory, foodCourse, 'a', [], mkAssessment('correct'), 'Apple.');
+    expect(memory.cardCorrectCount.apple).toBe(1);
+    expect(memory.cardProgress.apple).toBe('attempted');
 
-    const next = commitAssistantStreamResult(memory, 'Great!', [], {
-      current_word: 'apple',
-      phase: 'learning',
-      attempt_assessment: {
-        card_id: 'apple',
-        result: 'correct',
-        should_advance: true,
-        evidence: 'LLM thinks it sounds like apple',
-      },
-    }, 'Kite.');  // ASR "Kite." does not contain "apple"
+    memory = commitAssistantStreamResult(memory, foodCourse, 'b', [], mkAssessment('correct'), 'Apple.');
+    expect(memory.cardCorrectCount.apple).toBe(2);
+    expect(memory.cardProgress.apple).toBe('cleared');
+    expect(memory.wordsLearned).toContain('apple');
 
-    expect(next.cardProgress.apple).toBe('attempted');
-    expect(next.clearedCardIds).not.toContain('apple');
-    expect(next.wordsLearned).not.toContain('apple');
+    // Lock — further hits ignored.
+    memory = commitAssistantStreamResult(memory, foodCourse, 'c', [], mkAssessment('correct'), 'Apple.');
+    expect(memory.cardCorrectCount.apple).toBe(2);
+    expect(memory.cardProgress.apple).toBe('cleared');
   });
 
-  it('falls back to LLM judgment (clears) when rawAsrText is undefined', () => {
-    const memory = {
-      ...initializeCardProgress(createMemory(), foodCourse),
-      currentCardId: 'apple',
-    };
+  it('R2 hit counts regardless of LLM judgment (server-authoritative)', () => {
+    // LLM says 'close' but raw ASR has 'apple' — still a hit per R-C.
+    let memory: any = { ...initializeCardProgress(createMemory(), foodCourse), currentCardId: 'apple' };
+    memory = commitAssistantStreamResult(memory, foodCourse, 'a', [], mkAssessment('close'), 'Apple.');
+    expect(memory.cardCorrectCount.apple).toBe(1);
+    memory = commitAssistantStreamResult(memory, foodCourse, 'b', [], mkAssessment('close'), 'Apple.');
+    expect(memory.cardProgress.apple).toBe('cleared');
+  });
 
-    const next = commitAssistantStreamResult(memory, 'Great!', [], {
-      current_word: 'apple',
-      phase: 'learning',
-      attempt_assessment: {
-        card_id: 'apple',
-        result: 'correct',
-        should_advance: true,
-        evidence: 'heard apple',
-      },
-    }, undefined);  // no rawAsrText — should trust LLM
+  it('R2 mismatch + LLM correct → no progress credited (no false clear, no downgrade of untouched)', () => {
+    const memory = { ...initializeCardProgress(createMemory(), foodCourse), currentCardId: 'apple' };
+    const next = commitAssistantStreamResult(memory, foodCourse, 'a', [], mkAssessment('correct'), 'Kite.');
+    expect(next.cardProgress.apple).toBe('untouched');
+    expect(next.cardCorrectCount.apple || 0).toBe(0);
+  });
 
-    expect(next.cardProgress.apple).toBe('cleared');
-    expect(next.clearedCardIds).toContain('apple');
+  it('cleared cards are locked: R2 mismatch on cleared keeps cleared', () => {
+    let memory: any = { ...initializeCardProgress(createMemory(), foodCourse), currentCardId: 'apple' };
+    memory = commitAssistantStreamResult(memory, foodCourse, 'a', [], mkAssessment('correct'), 'Apple.');
+    memory = commitAssistantStreamResult(memory, foodCourse, 'b', [], mkAssessment('correct'), 'Apple.');
+    expect(memory.cardProgress.apple).toBe('cleared');
+    // Now a turn where current_word has advanced to 'dog' but assessment.card_id='apple',
+    // ASR='Cat.' — old bug would un-clear cat. R-C keeps cleared lock.
+    memory = commitAssistantStreamResult(memory, foodCourse, 'c', [], {
+      current_word: 'banana',
+      phase: 'learning' as const,
+      attempt_assessment: { card_id: 'apple', result: 'correct', should_advance: true, evidence: '' },
+    }, 'Banana.');  // ASR doesn't contain 'apple'
+    expect(memory.cardProgress.apple).toBe('cleared');
   });
 
   it('ASR matching is case-insensitive and ignores punctuation', () => {
-    const memory = {
-      ...initializeCardProgress(createMemory(), foodCourse),
-      currentCardId: 'rice',
-    };
-
-    // Raw ASR: "Rice." — contains "rice" after strip
-    const next = commitAssistantStreamResult(memory, 'Nice!', [], {
-      current_word: 'rice',
-      phase: 'learning',
-      attempt_assessment: {
-        card_id: 'rice',
-        result: 'correct',
-        should_advance: true,
-        evidence: 'heard rice',
-      },
-    }, 'Rice.');
-
-    expect(next.cardProgress.rice).toBe('cleared');
+    let memory: any = { ...initializeCardProgress(createMemory(), foodCourse), currentCardId: 'rice' };
+    memory = commitAssistantStreamResult(memory, foodCourse, 'a', [], mkAssessment('correct', 'rice'), 'RICE!');
+    memory = commitAssistantStreamResult(memory, foodCourse, 'b', [], mkAssessment('correct', 'rice'), 'rice.');
+    expect(memory.cardProgress.rice).toBe('cleared');
   });
 
-  it('still marks needs_review after 3 consecutive wrong/close assessments', () => {
-    let memory = {
-      ...initializeCardProgress(createMemory(), foodCourse),
-      currentCardId: 'apple',
-    };
-
-    // Downgrade path also increments streak
+  it('streak still marks needs_review on 3 close/wrong with no R2 hits', () => {
+    let memory: any = { ...initializeCardProgress(createMemory(), foodCourse), currentCardId: 'apple' };
     for (let i = 0; i < 3; i++) {
-      memory = commitAssistantStreamResult(memory, 'Try again.', [], {
-        current_word: 'apple',
-        phase: 'learning',
-        attempt_assessment: {
-          card_id: 'apple',
-          result: 'correct',
-          should_advance: true,
-          evidence: 'LLM thinks correct but ASR is wrong',
-        },
-      }, 'Kite.');
+      memory = commitAssistantStreamResult(memory, foodCourse, 'try again', [], mkAssessment('wrong'), 'Kite.');
     }
-
     expect(memory.cardProgress.apple).toBe('needs_review');
-    expect(memory.clearedCardIds).not.toContain('apple');
+    expect(memory.cardCorrectCount.apple || 0).toBe(0);
+  });
+
+  it('a successful R2 hit resets the error streak', () => {
+    let memory: any = { ...initializeCardProgress(createMemory(), foodCourse), currentCardId: 'apple' };
+    memory = commitAssistantStreamResult(memory, foodCourse, '1', [], mkAssessment('wrong'), 'Kite.');
+    memory = commitAssistantStreamResult(memory, foodCourse, '2', [], mkAssessment('wrong'), 'Kite.');
+    expect(memory.cardAttemptStreak.apple).toBe(2);
+    memory = commitAssistantStreamResult(memory, foodCourse, '3', [], mkAssessment('correct'), 'Apple.');
+    expect(memory.cardAttemptStreak.apple).toBe(0);
+    expect(memory.cardCorrectCount.apple).toBe(1);
   });
 });
 
@@ -392,7 +345,9 @@ describe('R5: canShowCard whitelist {currentCard, nextCard}', () => {
     expect(actions.every((a) => a.params.card_id !== 'milk')).toBe(true);
   });
 
-  it('accepts show_card for the nextCard (currentCard=apple, nextCard=banana)', () => {
+  it('R-C: rejects show_card to nextCard while currentCard not yet 2-cleared', () => {
+    // Under R-C, server enforces stay-on-current until count >= 2.
+    // R5 used to allow any show_card → nextCard; R-C tightens this.
     const memory = {
       ...initializeCardProgress(createMemory(), foodCourse),
       currentCardId: 'apple',
@@ -404,7 +359,9 @@ describe('R5: canShowCard whitelist {currentCard, nextCard}', () => {
       state_update: { current_word: 'apple', phase: 'learning' },
     });
 
-    expect(actions.some((a) => a.params.card_id === 'banana')).toBe(true);
+    // apple hasn't been hit twice — server forces stay on apple, banana is rejected.
+    expect(actions.every((a) => a.params.card_id !== 'banana')).toBe(true);
+    expect(actions.some((a) => a.params.card_id === 'apple')).toBe(true);
   });
 
   it('still rejects show_card for an already cleared word card', () => {
@@ -530,30 +487,26 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
     expect(actions.every((a) => !(a.tool === 'show_card' && a.params.card_id === 'dog'))).toBe(true);
   });
 
-  it('AC6: respects LLM explicit advance to nextCard (no celebration stay override)', () => {
+  it('R-C: 1st R2 hit stays on current, LLM advance attempt rejected', () => {
     const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
     const memory = {
       ...initializeCardProgress(createMemory(), animalsCourse),
       currentCardId: 'cat',
     };
 
+    // 1st R2 hit on cat — count=1, not cleared. LLM's premature show_card → dog is rejected.
     const actions = normalizeAssistantActions(memory, animalsCourse, {
       speech: 'Great cat! Now dog.',
       actions: [{ tool: 'show_card', params: { card_id: 'dog' } }],
       state_update: {
         current_word: 'cat',
         phase: 'learning',
-        attempt_assessment: {
-          card_id: 'cat',
-          result: 'correct',
-          should_advance: true,
-          evidence: 'student said cat',
-        },
+        attempt_assessment: { card_id: 'cat', result: 'correct', should_advance: true, evidence: 'said cat' },
       },
     }, 'Cat.');
 
-    const dogPushes = actions.filter((a) => a.tool === 'show_card' && a.params.card_id === 'dog');
-    expect(dogPushes).toHaveLength(1);
+    expect(actions.every((a) => a.params.card_id !== 'dog')).toBe(true);
+    expect(actions.some((a) => a.params.card_id === 'cat')).toBe(true);
   });
 
   it('R-A AC7: turtle correct + LLM silent → server keeps turtle for celebration (no auto-jump to lion)', () => {

@@ -34,6 +34,9 @@ export interface LessonMemory {
   clearedCardIds: string[];
   cardProgress: Record<string, CardProgressState>;
   cardAttemptStreak: Record<string, number>;
+  // R-C (2026-05-23): count of confirmed R2 literal hits per card. Card stays in
+  // 'attempted' until count reaches 2, then 'cleared' (locked — further hits ignored).
+  cardCorrectCount: Record<string, number>;
   interestSignals: InterestSignal[];
   wordPerformance: Map<string, WordPerf>;
   silentTurns: number;

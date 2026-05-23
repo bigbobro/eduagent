@@ -229,6 +229,7 @@ export async function* streamUserInput(
   const beforePerformance = new Map(session.memory.wordPerformance);
   session.memory = commitAssistantStreamResult(
     session.memory,
+    session.course,
     result.speech,
     normalizedActions,
     result.state_update,

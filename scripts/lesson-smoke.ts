@@ -24,19 +24,20 @@ interface Step {
 }
 
 // 10 fixture inputs covering the ASR text shapes seen in 2026-05-23 real tests.
-// See docs/lesson-reports/2026-05-23-6c423b9e.md for the source patterns.
+// R-C (2-hit-clear, server-authoritative): each card needs 2 R2 literal hits to clear,
+// then server advances on the 2nd hit turn.
 const ANIMALS_SCRIPT: Step[] = [
   { kind: 'phase', to: 'interactive', note: 'enter interactive phase', expectShowCard: 'cat' },
-  { kind: 'message', text: '这是猫。', note: '#1 Chinese answer (no English target)', expectShowCard: 'cat' },
-  { kind: 'message', text: 'Cat.', note: '#2 first correct → R-A celebration stay', expectShowCard: 'cat' },
-  { kind: 'message', text: 'Cat.', note: '#3 second correct → LLM natural advance', expectShowCard: 'dog' },
-  { kind: 'message', text: '狗狗。', note: '#4 Chinese baby talk', expectShowCard: 'dog' },
-  { kind: 'message', text: 'Dog.', note: '#5 first correct → celebration stay', expectShowCard: 'dog' },
-  { kind: 'message', text: 'Dog.', note: '#6 second correct → advance', expectShowCard: 'bird' },
-  { kind: 'message', text: '他是 bird。', note: '#7 mixed CN-EN', expectShowCard: 'bird' },
-  { kind: 'message', text: 'Bird.', note: '#8 third-word celebration stay', expectShowCard: 'bird' },
-  { kind: 'message', text: 'Kite.', note: '#9 R2 mismatch — LLM may judge correct but ASR token absent → no advance', expectShowCard: null },
-  { kind: 'message', text: 'I see a fish.', note: '#10 sentence form + unlearned word', expectShowCard: null },
+  { kind: 'message', text: '这是猫。', note: '#1 CN-only — no R2 hit on cat, stay', expectShowCard: 'cat' },
+  { kind: 'message', text: 'Cat.', note: '#2 R2 hit 1 on cat — stay (count=1)', expectShowCard: 'cat' },
+  { kind: 'message', text: 'Cat.', note: '#3 R2 hit 2 — clear + advance to dog', expectShowCard: 'dog' },
+  { kind: 'message', text: '狗狗。', note: '#4 CN-only — no R2 hit on dog, stay', expectShowCard: 'dog' },
+  { kind: 'message', text: 'Dog.', note: '#5 R2 hit 1 on dog — stay', expectShowCard: 'dog' },
+  { kind: 'message', text: 'Dog.', note: '#6 R2 hit 2 — advance to bird', expectShowCard: 'bird' },
+  { kind: 'message', text: '他是 bird。', note: '#7 R2 hit 1 on bird (mixed CN-EN)', expectShowCard: 'bird' },
+  { kind: 'message', text: 'Bird.', note: '#8 R2 hit 2 — advance to fish', expectShowCard: 'fish' },
+  { kind: 'message', text: 'Kite.', note: '#9 no R2 hit on fish — stay', expectShowCard: 'fish' },
+  { kind: 'message', text: 'I see a fish.', note: '#10 R2 hit 1 on fish — stay (count=1)', expectShowCard: 'fish' },
 ];
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:3000';
