@@ -18,6 +18,35 @@ interface ProgressSnapshot {
   clearedCardIds: string[];
 }
 
+const DEV_PHASE_OPTIONS: PhaseName[] = ['intro', 'interactive', 'reinforcement', 'done'];
+
+function DevPhasePanel({
+  currentPhase,
+  onJump,
+}: {
+  currentPhase: PhaseName;
+  onJump: (to: PhaseName) => void;
+}) {
+  return (
+    <div className="fixed bottom-4 right-4 z-50 bg-black/80 text-white rounded-lg px-3 py-2 text-xs font-mono shadow-lg pointer-events-auto">
+      <div className="mb-1 opacity-70">dev · phase = {currentPhase}</div>
+      <div className="flex gap-1">
+        {DEV_PHASE_OPTIONS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onJump(p)}
+            disabled={p === currentPhase}
+            className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            {p}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const router = useRouter();
   const v2Ref = useRef<LessonController | null>(null);
@@ -90,6 +119,13 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         <h1 className="font-zh text-xl text-ink">{course.title}</h1>
         <div className="w-20" />
       </header>
+
+      {process.env.NODE_ENV === 'development' && started && (
+        <DevPhasePanel
+          currentPhase={phase}
+          onJump={(to) => phasedRef.current?.forceTransition(to)}
+        />
+      )}
 
       <div className="absolute inset-0 top-14">
         {!started && (
