@@ -39,7 +39,6 @@ export interface LessonMemory {
   cardCorrectCount: Record<string, number>;
   interestSignals: InterestSignal[];
   wordPerformance: Map<string, WordPerf>;
-  silentTurns: number;
   totalInteractions: number;
 }
 

@@ -3,7 +3,6 @@ import { foodCourse } from '@/data/courses/food';
 import {
   createMemory,
   getMessagesForLLM,
-  getNextWordCardId,
   initializeCardProgress,
   commitAssistantStreamResult,
   markWordCorrect,
@@ -45,7 +44,7 @@ describe('card progress updates', () => {
       foodCourse,
       'Look, apple!',
       [{ tool: 'show_card', params: { card_id: 'apple' } }],
-      { current_word: 'apple', phase: 'learning' }
+      { current_word: 'apple' }
     );
 
     expect(next.currentCardId).toBe('apple');
@@ -60,7 +59,6 @@ describe('card progress updates', () => {
 
     const next = commitAssistantStreamResult(memory, foodCourse, 'Great!', [], {
       current_word: 'apple',
-      phase: 'learning',
       attempt_assessment: {
         card_id: 'apple',
         result: 'correct',
@@ -81,7 +79,6 @@ describe('card progress updates', () => {
     };
     const assessment = (result: 'correct' | 'close' = 'correct') => ({
       current_word: 'apple',
-      phase: 'learning' as const,
       attempt_assessment: { card_id: 'apple', result, should_advance: true, evidence: 'heard apple' },
     });
 
@@ -118,7 +115,7 @@ describe('card progress updates', () => {
     const actions = normalizeAssistantActions(memory, foodCourse, {
       speech: 'Let us say egg again.',
       actions: [{ tool: 'show_card', params: { card_id: 'egg' } }],
-      state_update: { current_word: 'egg', phase: 'learning' },
+      state_update: { current_word: 'egg' },
     });
 
     expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'rice' } }]);
@@ -143,7 +140,6 @@ describe('card progress updates', () => {
       actions: [{ tool: 'show_card', params: { card_id: 'egg' } }],
       state_update: {
         current_word: 'egg',
-        phase: 'learning',
         attempt_assessment: { card_id: 'egg', result: 'correct', should_advance: true, evidence: 'said egg' },
       },
     }, 'Egg.');
@@ -167,17 +163,14 @@ describe('card progress updates', () => {
 
     memory = commitAssistantStreamResult(memory, foodCourse, 'Try slowly.', [], {
       current_word: 'apple',
-      phase: 'learning',
       attempt_assessment: assessment,
     });
     memory = commitAssistantStreamResult(memory, foodCourse, 'One more slow try.', [], {
       current_word: 'apple',
-      phase: 'learning',
       attempt_assessment: assessment,
     });
     memory = commitAssistantStreamResult(memory, foodCourse, 'We will come back later.', [], {
       current_word: 'apple',
-      phase: 'learning',
       attempt_assessment: assessment,
     });
 
@@ -193,7 +186,6 @@ describe('card progress updates', () => {
 
     const next = commitAssistantStreamResult(memory, foodCourse, 'Let us come back to apple.', [], {
       current_word: 'apple',
-      phase: 'learning',
       attempt_assessment: {
         card_id: 'apple',
         result: 'off_topic',
@@ -209,16 +201,14 @@ describe('card progress updates', () => {
   });
 
 
-  it('rejects premature closing while untouched cards remain', () => {
+  it('phase is not changed by state_update (phase controlled by session, not LLM)', () => {
     const memory = {
       ...initializeCardProgress(createMemory(), foodCourse),
       phase: 'learning' as const,
       currentCardId: 'apple',
     };
 
-    const next = commitAssistantStreamResult(memory, foodCourse, 'Today is done.', [], {
-      phase: 'closing',
-    });
+    const next = commitAssistantStreamResult(memory, foodCourse, 'Today is done.', [], {});
 
     expect(next.phase).toBe('learning');
   });
@@ -227,7 +217,6 @@ describe('card progress updates', () => {
 describe('R-C: server-authoritative R2 count + 2-hit clearance', () => {
   const mkAssessment = (result: 'correct' | 'close' | 'wrong' | 'off_topic', word = 'apple') => ({
     current_word: word,
-    phase: 'learning' as const,
     attempt_assessment: { card_id: word, result, should_advance: true, evidence: 'evidence' },
   });
 
@@ -273,7 +262,6 @@ describe('R-C: server-authoritative R2 count + 2-hit clearance', () => {
     // ASR='Cat.' — old bug would un-clear cat. R-C keeps cleared lock.
     memory = commitAssistantStreamResult(memory, foodCourse, 'c', [], {
       current_word: 'banana',
-      phase: 'learning' as const,
       attempt_assessment: { card_id: 'apple', result: 'correct', should_advance: true, evidence: '' },
     }, 'Banana.');  // ASR doesn't contain 'apple'
     expect(memory.cardProgress.apple).toBe('cleared');
@@ -318,7 +306,7 @@ describe('R5: canShowCard whitelist {currentCard, nextCard}', () => {
     const actions = normalizeAssistantActions(memory, animalsCourse, {
       speech: 'ok, frog time',
       actions: [{ tool: 'show_card', params: { card_id: 'frog' } }],
-      state_update: { current_word: 'cat', phase: 'learning' },
+      state_update: { current_word: 'cat' },
     });
 
     // frog is not current or next — rejected
@@ -339,7 +327,7 @@ describe('R5: canShowCard whitelist {currentCard, nextCard}', () => {
     const actions = normalizeAssistantActions(memory, foodCourse, {
       speech: 'Let us try milk again.',
       actions: [{ tool: 'show_card', params: { card_id: 'milk' } }],
-      state_update: { current_word: 'apple', phase: 'learning' },
+      state_update: { current_word: 'apple' },
     });
 
     expect(actions.every((a) => a.params.card_id !== 'milk')).toBe(true);
@@ -356,7 +344,7 @@ describe('R5: canShowCard whitelist {currentCard, nextCard}', () => {
     const actions = normalizeAssistantActions(memory, foodCourse, {
       speech: 'Now look at banana.',
       actions: [{ tool: 'show_card', params: { card_id: 'banana' } }],
-      state_update: { current_word: 'apple', phase: 'learning' },
+      state_update: { current_word: 'apple' },
     });
 
     // apple hasn't been hit twice — server forces stay on apple, banana is rejected.
@@ -378,7 +366,7 @@ describe('R5: canShowCard whitelist {currentCard, nextCard}', () => {
     const actions = normalizeAssistantActions(memory, foodCourse, {
       speech: 'Let us revisit banana.',
       actions: [{ tool: 'show_card', params: { card_id: 'banana' } }],
-      state_update: { current_word: 'apple', phase: 'learning' },
+      state_update: { current_word: 'apple' },
     });
 
     // banana is cleared — should be rejected, replaced by next active card
@@ -400,62 +388,12 @@ describe('R5: canShowCard whitelist {currentCard, nextCard}', () => {
     const actions = normalizeAssistantActions(memory, animalsCourse, {
       speech: 'Back to cat.',
       actions: [{ tool: 'show_card', params: { card_id: 'cat' } }],
-      state_update: { current_word: 'dog', phase: 'learning' },
+      state_update: { current_word: 'dog' },
     });
 
     expect(actions.every((a) => a.params.card_id !== 'cat')).toBe(true);
     // Fallback: should push activeWordCardId (dog) since cat was rejected
     expect(actions.some((a) => a.params.card_id === 'dog')).toBe(true);
-  });
-});
-
-describe('getNextWordCardId helper', () => {
-  it('returns first non-cleared word card after current in newCardIds order', () => {
-    const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
-    const memory = {
-      ...initializeCardProgress(createMemory(), animalsCourse),
-      currentCardId: 'cat',
-      cardProgress: {
-        ...initializeCardProgress(createMemory(), animalsCourse).cardProgress,
-        cat: 'cleared' as const,
-      },
-    };
-
-    // dynamic import to avoid extra top-level import edit
-    
-    expect(getNextWordCardId(memory, animalsCourse)).toBe('dog');
-  });
-
-  it('skips already cleared cards', () => {
-    const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
-    const memory = {
-      ...initializeCardProgress(createMemory(), animalsCourse),
-      currentCardId: 'cat',
-      cardProgress: {
-        ...initializeCardProgress(createMemory(), animalsCourse).cardProgress,
-        cat: 'cleared' as const,
-        dog: 'cleared' as const,
-      },
-    };
-
-    
-    expect(getNextWordCardId(memory, animalsCourse)).toBe('bird');
-  });
-
-  it('returns "" when all word cards are cleared', () => {
-    const animalsCourse = allCourses.find((c) => c.id === 'animals')!;
-    const allCleared: Record<string, 'cleared'> = {};
-    animalsCourse.cards
-      .filter((c) => c.kind === 'word')
-      .forEach((c) => { allCleared[c.id] = 'cleared'; });
-    const memory = {
-      ...initializeCardProgress(createMemory(), animalsCourse),
-      currentCardId: 'frog',
-      cardProgress: { ...initializeCardProgress(createMemory(), animalsCourse).cardProgress, ...allCleared },
-    };
-
-    
-    expect(getNextWordCardId(memory, animalsCourse)).toBe('');
   });
 });
 
@@ -472,7 +410,6 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
       actions: [],
       state_update: {
         current_word: 'cat',
-        phase: 'learning',
         attempt_assessment: {
           card_id: 'cat',
           result: 'correct',
@@ -500,7 +437,6 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
       actions: [{ tool: 'show_card', params: { card_id: 'dog' } }],
       state_update: {
         current_word: 'cat',
-        phase: 'learning',
         attempt_assessment: { card_id: 'cat', result: 'correct', should_advance: true, evidence: 'said cat' },
       },
     }, 'Cat.');
@@ -527,7 +463,6 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
       actions: [],
       state_update: {
         current_word: 'turtle',
-        phase: 'learning',
         attempt_assessment: {
           card_id: 'turtle',
           result: 'correct',
@@ -556,7 +491,7 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
     const actions = normalizeAssistantActions(memory, animalsCourse, {
       speech: 'Back to cat.',
       actions: [{ tool: 'show_card', params: { card_id: 'cat' } }],
-      state_update: { current_word: 'dog', phase: 'learning' },
+      state_update: { current_word: 'dog' },
     });
 
     expect(actions.every((a) => a.params.card_id !== 'cat')).toBe(true);
@@ -577,7 +512,6 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
       actions: [],
       state_update: {
         current_word: 'cat',
-        phase: 'learning',
         attempt_assessment: {
           card_id: 'cat',
           result: 'correct',
@@ -608,7 +542,6 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
       actions: [],
       state_update: {
         current_word: 'frog',
-        phase: 'learning',
         attempt_assessment: {
           card_id: 'frog',
           result: 'correct',
@@ -641,7 +574,7 @@ describe('R-A: celebration-turn card stay (replaces R7 auto-advance)', () => {
     const actions = normalizeAssistantActions(memory, animalsCourse, {
       speech: 'Cat again!',
       actions: [{ tool: 'show_card', params: { card_id: 'cat' } }],
-      state_update: { current_word: 'cat', phase: 'learning' },
+      state_update: { current_word: 'cat' },
     });
 
     expect(actions.every((a) => a.params.card_id !== 'cat')).toBe(true);

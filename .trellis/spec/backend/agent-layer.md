@@ -3,6 +3,23 @@
 Covers `src/lib/agent/{memory,session,prompt}.ts` and `src/lib/voice/lesson-controller.ts`.
 These are the modules that turn raw LLM output + ASR text into safe lesson state.
 
+> **Currency note (2026-05-24)** — The R5 / R7 / `getNextWordCardId` sections
+> below describe the **R7-era** implementation (pre-2026-05-23). They were
+> superseded by **R-C server-authoritative 2-hit clearance** (commits
+> `9bbcc77`, `4ad4708`). Read those sections as design rationale, not as the
+> current code. Current behavior lives in:
+> - `src/lib/agent/memory.ts` — search for `// R-C` comments
+> - `## state_update schema (R-C — server-authoritative)` section below
+> - `## Test fixtures & mocks` section below
+>
+> Key replacements:
+> - `getNextWordCardId` function → deleted; replaced by inline
+>   `findFirstUncleared(excludeId)` inside `normalizeAssistantActions`.
+> - R7 LLM-correct → server auto-advance → replaced by R-C 2-hit ASR literal
+>   counting (`cardCorrectCount[cardId] >= 2 → cleared`).
+> - R5 whitelist `{currentCard, nextCard}` → R-C `forceCardId` (stay on
+>   current until cleared, then auto-advance one card).
+
 ---
 
 ## actions / TTS Timing
@@ -279,6 +296,113 @@ same shape: always anchor to `assessedMemory`.
 
 ---
 
+## state_update schema (R-C — server-authoritative)
+
+> **Scope / Trigger**: changing the LLM JSON response schema, adding new
+> "state" fields, or wiring LLM-reported state into server logic.
+
+### Contract: LLM may only report 2 fields
+
+`AgentResponse.state_update` (see `src/types/tools.ts`) is **closed** to:
+
+| field | who reads it | why LLM still reports it |
+|---|---|---|
+| `current_word?: string` | `session.ts` closing guard (R6 exemption) | Identifies which word LLM thinks it's actively teaching, so R6 can whitelist legitimate mentions vs hallucinated unlearned-word enumeration |
+| `attempt_assessment?: { card_id, result, should_advance, evidence }` | `memory.ts` `applyAttemptAssessment` (R-C path B fallback, streak/needs_review only) | R-C uses ASR literal hits (path A) for `cleared`; LLM judgment is only used for non-hit streak tracking |
+
+**Forbidden — must NOT be added back to the schema**:
+
+| forbidden field | why | who owns it now |
+|---|---|---|
+| `phase` | Phase transitions are UX events (intro → interactive → reinforcement → done), not LLM decisions. LLM cannot observe `quiz-answer` events or `intro-busy` state | `PhasedLessonController` (browser) |
+| `words_learned` | LLM hallucinates "today we learned cat, dog, frog" even when only cat was actually said. R-C accumulates `wordsLearned` server-side from R2 hits | `applyAttemptAssessment` `mergeUnique(memory.wordsLearned, [targetCard.english])` on 2nd hit |
+| `current_card_id` | LLM repeatedly re-emits `show_card: cat` long after cat was cleared. Server `normalizeAssistantActions` computes `forceCardId` from `memory.currentCardId` + clearance state | `normalizeAssistantActions` `forceCardId` (R-C modes 1-4) |
+| `generated_content` | Never wired. Was a placeholder for "LLM generates a sentence/question" path that never got built | (dead — deleted 2026-05-24) |
+
+### Why this is server-authoritative
+
+LLM is a **reactive component**: given turn context + ASR, produce speech +
+optionally `show_card` + optionally an `attempt_assessment`. **Anything the
+server can derive itself, the server derives.** Phase comes from UI events.
+Words-learned comes from ASR counting. Current-card comes from memory +
+forceCardId. The LLM's job is teaching speech and on-the-fly assessment, not
+state authority.
+
+### Validation & Error Matrix
+
+| LLM output | server behavior |
+|---|---|
+| Reports only `current_word` + `attempt_assessment` (good) | Process normally |
+| Reports extra unknown fields (e.g. LLM hallucinates `phase: 'closing'`) | **Silently ignored** — `JSON.parse` + `result.state_update.X` returns undefined for absent fields; presence of extras does not throw. No zod validation needed |
+| Reports `current_word` only (missing `attempt_assessment`) | R-C path A (R2 hit) still works; path B (streak) is skipped — acceptable fallback |
+| Reports `attempt_assessment.card_id !== memory.currentCardId` | Ignored + `console.warn` — see "Memory: attempt assessment contracts" above |
+| Reports nothing (malformed / empty `state_update`) | `current_word` defaults to '', `attempt_assessment` undefined — R-C path B skipped, path A unaffected |
+
+### Wrong vs Correct
+
+#### Wrong — "future me wants LLM to report phase so we can save a round trip"
+
+```ts
+// In prompt.ts output schema:
+{
+  state_update: {
+    current_word: '...',
+    attempt_assessment: { ... },
+    phase: 'opening|review|learning|quiz|closing',  // ❌
+  }
+}
+// In session.ts:
+session.currentPhase = result.state_update.phase ?? session.currentPhase;  // ❌
+```
+
+**Why wrong**: LLM does not know about UI events. It cannot observe quiz
+answers, intro hotspot clicks, or dev-panel phase jumps. Trusting LLM phase
+desynchronizes server `currentPhase` from `PhasedLessonController.phase`,
+which the UI is actually rendering. The 2026-05-22 implementation had this
+bug — closing summaries fired in interactive phase because LLM jumped phase
+unilaterally.
+
+#### Correct — "LLM reports observation, server owns state"
+
+```ts
+// In prompt.ts:
+{
+  state_update: {
+    current_word: '...',  // what LLM thinks it's teaching now
+    attempt_assessment: { card_id, result, should_advance, evidence },
+  }
+}
+// In session.ts:
+// session.currentPhase only changes via /api/chat?action=phase-transition
+// (called by PhasedLessonController after intro/interactive/reinforcement signals)
+```
+
+### Tests Required
+
+- `src/lib/agent/memory.test.ts`: assert `commitAssistantStreamResult` does
+  not read `state_update.phase` / `state_update.words_learned` / `state_update.current_card_id`
+  (test must fail at compile time if these fields are re-added to `AgentResponse`)
+- `src/lib/agent/prompt.test.ts`: assert generated system prompt does not
+  contain the strings `current_card_id` / `words_learned` / `generated_content`
+  in the schema example
+- Smoke (`pnpm smoke:lesson`): same as before; behavior unchanged externally
+
+### Future extension protocol
+
+If a future feature needs LLM-reported state beyond `current_word` +
+`attempt_assessment`:
+
+1. **First** prove the server cannot derive it (e.g. "intent classification"
+   genuinely requires LLM reasoning, not derivable from ASR + memory).
+2. **Then** prove `PhasedLessonController` ownership doesn't fit (e.g. it's
+   not a UI lifecycle event).
+3. **Then** add the field to `AgentResponse.state_update` + this spec section
+   + a Validation matrix entry.
+
+Do not add new state fields opportunistically.
+
+---
+
 ## Prompt: closing guard (R4 + R6 — two-layer defense)
 
 ---
@@ -343,6 +467,116 @@ lesson-report and next-turn LLM history are clean.
 current word, LLM still hallucinates OTHER target words (e.g. lists "giraffe"
 in a closing when only "cat" and "dog" were covered). Prompt alone is
 insufficient.
+
+---
+
+## Test fixtures & mocks
+
+> **Scope / Trigger**: changing `src/types/tools.ts` (`ToolAction` shape),
+> `src/data/courses/*` structure, or `mockStreamLLM` in `src/lib/mimo/llm.ts`.
+> Triggered by `VOICE_MOCK=true` test runs and offline-dev usage.
+
+### Contract: mockStreamLLM output must satisfy live type contracts
+
+`mockStreamLLM` (in `src/lib/mimo/llm.ts`) emits a fixed JSON string that the
+real streaming pipeline then parses as `AgentResponse`. Two invariants:
+
+1. **Schema parity** — every field shape must match the current `AgentResponse`
+   and `ToolAction` types. Specifically:
+   - `actions[*]` must satisfy `ToolAction` (currently `{ tool: 'show_card', params: { card_id: string } }`)
+   - `state_update` must satisfy the closed schema in the section above (only
+     `current_word` + `attempt_assessment` allowed)
+2. **Data parity** — every referenced `card_id` must exist in a real course in
+   `src/data/courses/*`. The current mock uses `card_id: 'cat'` which is the
+   first word card of `animals` course (`src/data/courses/animals.ts`).
+
+### The 2026-05-24 incident (cautionary example)
+
+**Symptom**: `VOICE_MOCK=true` path was silently broken for months. Tests
+passed because they didn't exercise the post-normalize pipeline that
+type-checks `actions`.
+
+**Cause**: commit `130a71f` (2026-05-05) introduced the `show_card` protocol
+and changed `ToolAction` from `{ tool: 'show', params: { image_id } }` to
+`{ tool: 'show_card', params: { card_id } }`. The mock was not updated. It
+kept emitting the old shape:
+
+```ts
+// Pre-2026-05-24 mockStreamLLM (broken since 2026-05-05):
+actions: [{ tool: 'show', params: { image_id: 'boat' } }],  // ❌ violates ToolAction
+```
+
+This survived because:
+- `JSON.parse` doesn't validate against the TS type
+- Normalize's `for (const action of response.actions) { if (action.tool !== 'show_card') continue; }` silently dropped the bad action
+- No test asserted that `VOICE_MOCK=true` end-to-end produces a non-empty
+  normalized `actions` array
+
+### Convention: PR self-check when touching contract surfaces
+
+When a PR modifies any of:
+
+- `src/types/tools.ts` (`ToolAction`, `AgentResponse`, `state_update` shape)
+- `src/data/courses/*` (course IDs, card IDs, schema)
+- The output schema in `src/lib/agent/prompt.ts`
+
+**The PR self-check must include**:
+
+```bash
+# 1. Mock parity — open llm.ts, eyeball mockStreamLLM output:
+#    - actions[*] satisfies current ToolAction type?
+#    - state_update satisfies current schema?
+#    - all referenced card_id values exist in real courses?
+VOICE_MOCK=true pnpm test
+
+# 2. Smoke under mock:
+VOICE_MOCK=true pnpm dev > /tmp/dev.log 2>&1 &
+# manually launch animals lesson, confirm no [normalize] show_card rejected warnings
+```
+
+### Validation & Error Matrix
+
+| mock output condition | downstream behavior |
+|---|---|
+| `actions[*].tool` matches current `ToolAction` shape | Normalize passes through; `forceCardId` math applies normally |
+| `actions[*].tool` is stale (e.g. `'show'` instead of `'show_card'`) | Silently filtered out — `[normalize]` console log will be missing the `llmActions` entry |
+| `actions[*].params.card_id` references a non-existent card | `[normalize] show_card rejected by R-C` warning fires every turn — VISIBLE in dev console |
+| `state_update` includes forbidden fields (e.g. `phase`) | Silently ignored (per state_update schema section) — no error, but those fields do nothing |
+| `state_update.current_word` is missing | R6 falls back to `memory.currentWord` — works |
+
+### Wrong vs Correct
+
+#### Wrong — "I changed the protocol, mocks can wait"
+
+```ts
+// In src/types/tools.ts:
+export type ToolName = 'show_card' | 'play_audio';  // ✨ new tool added
+export interface PlayAudioParams { audio_id: string; }
+// ... but mockStreamLLM still only emits 'show_card'.
+```
+
+**Why wrong**: not by itself broken (the mock just doesn't exercise the new
+tool), but if a future contract change deprecates `show_card` and only
+`play_audio` remains, the mock breaks silently.
+
+#### Correct — "every contract change → mock review same PR"
+
+```ts
+// Same PR: update mockStreamLLM to emit a representative example of the new
+// tool, OR add a comment noting that mock is intentionally not updated and
+// why (e.g. "play_audio requires audio fixtures, mocked separately in
+// audio-fixture.ts").
+```
+
+### Tests Required
+
+- Unit: `VOICE_MOCK=true pnpm test` must pass (run as part of full `pnpm test`,
+  no separate command needed — `phase-transition.test.ts` / `quiz-answer.test.ts`
+  / `progress-snapshot.test.ts` already set `VOICE_MOCK=true`)
+- Integration: any new contract surface (tool / card schema) added to the
+  PR self-check list above
+- Regression: when `VOICE_MOCK=true pnpm dev` is started, no
+  `[normalize] show_card rejected` warning should fire in the first turn
 
 ---
 

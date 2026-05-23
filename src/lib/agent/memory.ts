@@ -18,7 +18,6 @@ export function createMemory(): LessonMemory {
     cardCorrectCount: {},
     interestSignals: [],
     wordPerformance: new Map(),
-    silentTurns: 0,
     totalInteractions: 0,
   };
 }
@@ -61,41 +60,10 @@ export function addUserMessage(memory: LessonMemory, content: string): LessonMem
     ...memory,
     messages,
     interestSignals: signals.slice(-10),
-    silentTurns: 0,
     totalInteractions: memory.totalInteractions + 1,
   };
 }
 
-export function addAssistantMessage(
-  memory: LessonMemory,
-  course: Course,
-  response: AgentResponse,
-  rawAsrText?: string
-): LessonMemory {
-  const message: Message = {
-    role: 'assistant',
-    content: response.speech,
-    timestamp: new Date(),
-    actions: response.actions,
-  };
-
-  const messages = [...memory.messages, message].slice(-MAX_HISTORY);
-
-  const update = response.state_update;
-  const assessedMemory = applyAttemptAssessment(memory, course, response, rawAsrText);
-  const nextCardId = getLastShowCardId(response.actions) || assessedMemory.currentCardId;
-  const actionProgress = applyShowCardProgress(assessedMemory.cardProgress, response.actions);
-
-  return {
-    ...assessedMemory,
-    messages,
-    cardProgress: actionProgress,
-    currentCardId: nextCardId,
-    currentWord: update.current_word || memory.currentWord,
-    phase: resolvePhase(assessedMemory, (update.phase as LessonPhase) || memory.phase),
-    wordsLearned: mergeUnique(assessedMemory.wordsLearned, update.words_learned || []),
-  };
-}
 
 export function markWordCorrect(memory: LessonMemory, word: string): LessonMemory {
   const wordPerf = new Map(memory.wordPerformance);
@@ -145,13 +113,6 @@ export function markWordIncorrect(memory: LessonMemory, word: string): LessonMem
   };
 }
 
-export function incrementSilentTurns(memory: LessonMemory): LessonMemory {
-  return {
-    ...memory,
-    silentTurns: memory.silentTurns + 1,
-  };
-}
-
 export function getMessagesForLLM(memory: LessonMemory): { role: string; content: string }[] {
   return memory.messages.slice(-MAX_HISTORY).map((m) => ({
     role: m.role,
@@ -168,19 +129,26 @@ export function commitAssistantStreamResult(
   stateUpdate: AgentResponse['state_update'],
   rawAsrText?: string
 ): LessonMemory {
-  return addAssistantMessage(memory, course, { speech, actions, state_update: stateUpdate }, rawAsrText);
-}
-
-export function getNextWordCardId(memory: LessonMemory, course: Course): string {
-  const wordCardIds = new Set(
-    course.cards.filter((c) => c.kind === 'word').map((c) => c.id)
-  );
-  const currentId = memory.currentCardId;
-  return course.teachingHints.newCardIds.find(
-    (id) => wordCardIds.has(id)
-      && id !== currentId
-      && memory.cardProgress[id] !== 'cleared'
-  ) || '';
+  const message: Message = {
+    role: 'assistant',
+    content: speech,
+    timestamp: new Date(),
+    actions,
+  };
+  const messages = [...memory.messages, message].slice(-MAX_HISTORY);
+  const response: AgentResponse = { speech, actions, state_update: stateUpdate };
+  const assessedMemory = applyAttemptAssessment(memory, course, response, rawAsrText);
+  const nextCardId = getLastShowCardId(actions) || assessedMemory.currentCardId;
+  const actionProgress = applyShowCardProgress(assessedMemory.cardProgress, actions);
+  return {
+    ...assessedMemory,
+    messages,
+    cardProgress: actionProgress,
+    currentCardId: nextCardId,
+    currentWord: stateUpdate.current_word || memory.currentWord,
+    phase: resolvePhase(assessedMemory, memory.phase),
+    wordsLearned: assessedMemory.wordsLearned,
+  };
 }
 
 // R-C (2026-05-23): server-authoritative card advance. Replaces R-A celebration-stay

@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -337,8 +337,10 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
 - 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
 - 2026-05-22 — **Teacher Agent UX P0 四项修复** — R1:actions/TTS 时序(pendingActions 缓冲);R2:ASR 字面 verify(LLM correct + raw ASR 双重确认才 cleared);R3:normalize 放宽(word card 接受任意 untouched/attempted);R4:closing guard 始终注入 + 服务端 speech 扫描替换。
-- 2026-05-22 — **Teacher Agent state sync 三项修复**(从 05-22 实测课报告) — R5:show_card 严格白名单 `{currentCard, nextCard}`(R3 收紧,防 LLM 回跳已通过卡);R6:closing guard 加 `currentWord` 白名单(防教学中误触发整句替换);R7:correct 后服务端自动 push `show_card: nextCard`(防 LLM 命中后不推进)。新增 `getNextWordCardId(memory, course)` helper;prompt 加 "show_card.card_id 必须 ∈ {current, next}" 硬约束。
+- 2026-05-22 — **Teacher Agent state sync 三项修复**(从 05-22 实测课报告) — R5:show_card 严格白名单 `{currentCard, nextCard}`(R3 收紧,防 LLM 回跳已通过卡);R6:closing guard 加 `currentWord` 白名单(防教学中误触发整句替换);R7:correct 后服务端自动 push `show_card: nextCard`(防 LLM 命中后不推进)。（旧 `getNextWordCardId` helper 已在 2026-05-24 清扫时删除,其功能被 R-C 的 `findFirstUncleared` 内联替代）
 - 2026-05-22 — **reinforcement quiz 静态 TTS 引导** — 新增 `LessonController.speakStatic` 与 `quiz-speaking` state;pick-word 播 prompt + correct English,repetition 播 targetText;播完前锁 UI,错答播 retry hint;reinforcement phase-change 等过渡 TTS 完成后再显示 quiz。
+
+- 2026-05-24 — **代码库清扫(A+B+C)** — 删 logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage(内联) / getNextWordCardId;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content),仅保留 current_word + attempt_assessment;mockStreamLLM 修正为合法 ToolAction。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 

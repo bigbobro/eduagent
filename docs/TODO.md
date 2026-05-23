@@ -25,7 +25,9 @@
 
 *2026-05-23 两份 animals 报告都触发 highAvgInput:约 2300-2774 input tokens / round。它不是当前 UI P0,但会持续影响成本与首包延迟。*
 
-优先动作:
+**2026-05-24 已完成**:state_update 删除 4 个废字段（current_card_id / phase / words_learned / generated_content），仅保留 current_word + attempt_assessment。LLM output token 成本下降，input token 不变。
+
+剩余优先动作:
 - 量化 `buildSystemPrompt` 裸 prompt、课程定义、history window 各自占比
 - 只传 currentCard / nextCard / clearedCardIds / 最近必要历史,把稳定规则尽量固化到服务端代码或短 system prompt
 - 目标先设为 avg input < 1500;是否继续压到 1000 以下看教学质量是否受损
@@ -85,3 +87,4 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 - 2026-05-21 — 课程 registry 扩到 10 门常规课程,合同收紧为 12 word + 4 sentence cards
 - 2026-05-22 — **Teacher Agent UX P0 四项修复(R1-R4)**:actions/TTS 时序、ASR 字面 verify、normalize 放宽(允许跳卡)、closing guard 始终注入 + 服务端 speech 扫描替换
 - 2026-05-23 — **Lesson voice regression stabilization + 轻量诊断闭环**:push-to-talk ASR 建连/关闭竞态、pointer/Space hold、speech/show_card 出口一致性、dev 强切 reinforcement 解锁、smoke UI 跟读与 speech/card 一致性断言;原"日志整理"长期项关闭
+- 2026-05-24 — **代码库清扫 A+B+C**:删 6 项死代码(logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage / getNextWordCardId);mockStreamLLM 修正为合法 show_card shape;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content)

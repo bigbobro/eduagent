@@ -9,26 +9,16 @@ export interface ToolAction {
   params: ShowCardParams;
 }
 
-export interface GenerateState {
-  type: 'sentence' | 'question' | 'comparison';
-  content: string;
-  topic: string;
-}
-
 export interface AgentResponse {
   speech: string;
   actions: ToolAction[];
   state_update: {
     current_word?: string;
-    current_card_id?: string;
-    phase?: 'opening' | 'review' | 'learning' | 'quiz' | 'closing';
-    words_learned?: string[];
     attempt_assessment?: {
       card_id: string;
       result: 'correct' | 'close' | 'wrong' | 'off_topic';
       should_advance: boolean;
       evidence: string;
     };
-    generated_content?: GenerateState;
   };
 }

@@ -1,0 +1,29 @@
+{
+  "id": "codebase-cleanup-and-refactor",
+  "name": "codebase-cleanup-and-refactor",
+  "title": "codebase-cleanup-and-refactor",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "bigbobro",
+  "assignee": "bigbobro",
+  "createdAt": "2026-05-24",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "05-24-cleanup-quick-wins",
+    "05-24-guard-pipeline-refactor"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

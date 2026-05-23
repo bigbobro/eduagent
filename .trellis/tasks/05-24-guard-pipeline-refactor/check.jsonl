@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "验收闸：pnpm test 全绿 + tsc 0 error + smoke:lesson 通过"}
+{"file": ".trellis/spec/backend/agent-layer.md", "reason": "校验：4 个 guard 行为对照 — R4/R6 closing override、R-B premature-closing override、R-C normalize forceCardId、speech-card-align 全部应与重构前一致"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "校验：[normalize] snapshot / [session] closing guard / [session] premature-closing 等 console 日志格式与字段顺序未变（lesson-report 依赖）"}
+{"file": "CLAUDE.md", "reason": "校验：架构文档 §[Agent Guard Pipeline] 已新增；smoke:lesson 真跑过；commit message 合规"}
+{"file": ".trellis/tasks/05-24-guard-pipeline-refactor/prd.md", "reason": "对照本任务 PRD 验收清单逐条勾选（含 streamUserInput < 80 行、guard 顺序注释、单测覆盖 5 项）"}
