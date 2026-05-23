@@ -444,6 +444,12 @@ export class LessonController {
       this.failStaticSpeech(new Error(err.message || 'TTS failed'));
       this.emit('error', err);
     });
+    this.tts.on('reconnecting', () => {
+      this.emit('subtitle', { text: '网络波动，正在重连…', source: 'ai' });
+    });
+    this.tts.on('reconnected', () => {
+      this.emit('subtitle-clear');
+    });
   }
 
   // ─── SSE 消费(speech-delta → TTS, actions → emit)────────────────
