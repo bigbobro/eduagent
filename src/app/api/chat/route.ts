@@ -10,10 +10,12 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
   ensureInitialized();
   const body = await req.json();
+  console.log('[chat]', 'action=' + body.action, 'courseId=' + (body.courseId ?? '-'), 'sessionId=' + (body.sessionId ?? '-'));
 
   if (body.action === 'start') {
     const course = getCourseById(body.courseId);
     if (!course) {
+      console.warn('[chat] 404 course not found:', body.courseId);
       return NextResponse.json({ error: 'Course not found' }, { status: 404 });
     }
     const session = createSession(course);
@@ -31,6 +33,7 @@ export async function POST(req: NextRequest) {
   if (body.action === 'message') {
     const session = getSession(body.sessionId);
     if (!session) {
+      console.warn('[chat] 404 session not found (message):', body.sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     const stream = streamUserInputToSSE(body.sessionId, body.text, body.asrResult);
@@ -46,6 +49,7 @@ export async function POST(req: NextRequest) {
   if (body.action === 'phase-transition') {
     const session = getSession(body.sessionId);
     if (!session) {
+      console.warn('[chat] 404 session not found (phase-transition):', body.sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     const valid: PhaseName[] = ['intro', 'interactive', 'reinforcement', 'done'];
@@ -66,6 +70,7 @@ export async function POST(req: NextRequest) {
   if (body.action === 'quiz-answer') {
     const ok = recordQuizAnswer(body.sessionId, body.quizId, body.answer, body.correct);
     if (!ok) {
+      console.warn('[chat] 404 session not found (quiz-answer):', body.sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     return NextResponse.json({ ok: true });

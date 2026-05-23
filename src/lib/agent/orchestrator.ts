@@ -12,10 +12,26 @@ export function streamUserInputToSSE(
   const encoder = new TextEncoder();
   const ac = new AbortController();
 
+  const sidTag = sessionId.slice(0, 8);
+  let speechBuf = '';
+
   return new ReadableStream({
     async start(controller) {
       try {
         for await (const ev of streamUserInput(sessionId, userText, asrResult, ac.signal)) {
+          if (ev.type === 'speech-delta') {
+            speechBuf += ev.text;
+          } else if (ev.type === 'speech-end') {
+            const s = speechBuf.replace(/\s+/g, ' ').trim();
+            console.log(`[agent ${sidTag}] speech="${s.slice(0, 120)}${s.length > 120 ? '…' : ''}"`);
+            speechBuf = '';
+          } else if (ev.type === 'actions') {
+            for (const a of ev.actions) {
+              if (a.tool === 'show_card') {
+                console.log(`[agent ${sidTag}] show_card → ${a.params.card_id}`);
+              }
+            }
+          }
           const frame = mapEventToSSE(ev);
           controller.enqueue(encoder.encode(frame));
         }
