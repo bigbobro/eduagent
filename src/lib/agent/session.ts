@@ -115,8 +115,6 @@ export async function* streamUserInput(
   let inputTokens = 0;
   let outputTokens = 0;
   let llmLatency = 0;
-  // 用于跨 chunk 拼回完整的字母数字下划线 token,避免 "sent" + "ence_cat" 这种切片漏过 sanitize。
-  let sanitizeCarry = '';
 
   try {
     for await (const ev of streamLLM(systemPrompt, messages, signal)) {
@@ -127,22 +125,8 @@ export async function* streamUserInput(
         break;
       }
       const out = extractor.feed(ev.delta);
-      if (out.speechDelta) {
-        const buf = sanitizeCarry + out.speechDelta;
-        const tailMatch = buf.match(/[A-Za-z0-9_]+$/);
-        const flushable = tailMatch ? buf.slice(0, buf.length - tailMatch[0].length) : buf;
-        sanitizeCarry = tailMatch ? tailMatch[0] : '';
-        if (flushable) {
-          yield { type: 'speech-delta', text: sanitizeSpeech(flushable) };
-        }
-      }
       if (out.complete && !speechClosed) {
-        if (sanitizeCarry) {
-          yield { type: 'speech-delta', text: sanitizeSpeech(sanitizeCarry) };
-          sanitizeCarry = '';
-        }
         speechClosed = true;
-        yield { type: 'speech-end' };
       }
     }
   } catch (err) {
@@ -152,11 +136,7 @@ export async function* streamUserInput(
 
   if (!speechClosed) {
     // 兜底:LLM 没正常关闭 speech 字段(畸形)
-    if (sanitizeCarry) {
-      yield { type: 'speech-delta', text: sanitizeSpeech(sanitizeCarry) };
-      sanitizeCarry = '';
-    }
-    yield { type: 'speech-end' };
+    speechClosed = true;
   }
 
   const result = extractor.finalize();
@@ -219,6 +199,11 @@ export async function* streamUserInput(
     actions: result.actions,
     state_update: result.state_update,
   }, userText);
+  result.speech = alignSpeechWithNormalizedCard(result.speech, normalizedActions, session);
+  if (result.speech) {
+    yield { type: 'speech-delta', text: result.speech };
+  }
+  yield { type: 'speech-end' };
   yield {
     type: 'actions',
     actions: normalizedActions,
@@ -276,4 +261,58 @@ export async function* streamUserInput(
   };
 
   yield { type: 'done' };
+}
+
+function alignSpeechWithNormalizedCard(
+  speech: string,
+  actions: ToolAction[],
+  session: Session,
+): string {
+  const primaryCardId = getLastWordShowCardId(actions, session.course);
+  if (!primaryCardId) return speech;
+  const primaryCard = session.course.cards.find((card) => card.id === primaryCardId && card.kind === 'word');
+  if (!primaryCard) return speech;
+
+  const mentionsPrimary = speechMentionsCard(speech, primaryCard);
+  const mentionedOtherWord = session.course.cards
+    .filter((card) => card.kind === 'word' && card.id !== primaryCardId)
+    .some((card) => speechMentionsCard(speech, card));
+  const movedToDifferentCard = Boolean(session.memory.currentCardId && session.memory.currentCardId !== primaryCardId);
+
+  if (!mentionsPrimary && (mentionedOtherWord || movedToDifferentCard)) {
+    console.warn('[session] speech/show_card mismatch — overriding speech', {
+      currentCardId: session.memory.currentCardId,
+      showCardId: primaryCardId,
+      speech: speech.slice(0, 120),
+    });
+    return buildCardPrompt(primaryCard);
+  }
+  return speech;
+}
+
+function getLastWordShowCardId(actions: ToolAction[], course: Course): string {
+  const wordCardIds = new Set(course.cards.filter((card) => card.kind === 'word').map((card) => card.id));
+  for (let i = actions.length - 1; i >= 0; i--) {
+    const action = actions[i];
+    const cardId = action.tool === 'show_card' ? action.params.card_id : '';
+    if (wordCardIds.has(cardId)) return cardId;
+  }
+  return '';
+}
+
+function speechMentionsCard(speech: string, card: Course['cards'][number]): boolean {
+  const english = card.english.trim();
+  const chinese = card.chinese.trim();
+  return Boolean(
+    (english && new RegExp(`\\b${escapeRegExp(english)}\\b`, 'i').test(speech))
+    || (chinese && speech.includes(chinese))
+  );
+}
+
+function buildCardPrompt(card: Course['cards'][number]): string {
+  return `做得好!我们看这张卡,这是 ${card.chinese} ${card.english}. 跟老师一起说:${card.english}!`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

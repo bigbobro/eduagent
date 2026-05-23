@@ -34,6 +34,27 @@ describe('ReinforceFrame', () => {
     expect(controller.startListening).toHaveBeenCalledWith({ routeToChat: false });
   });
 
+  it('keeps recording while a captured pointer leaves the button', async () => {
+    const controller = mockController('awaiting');
+    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '按住 Space' })).toHaveProperty('disabled', false));
+    const button = screen.getByRole('button', { name: '按住 Space' });
+    button.setPointerCapture = vi.fn();
+    button.hasPointerCapture = vi.fn(() => true);
+    button.releasePointerCapture = vi.fn();
+
+    fireEvent.pointerDown(button, { pointerId: 1 });
+    fireEvent.pointerLeave(button, { pointerId: 1 });
+
+    expect(controller.startListening).toHaveBeenCalledWith({ routeToChat: false });
+    expect(controller.stopListening).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(button, { pointerId: 1 });
+
+    expect(controller.stopListening).toHaveBeenCalledTimes(1);
+  });
+
   it('locks recording while the prompt is still playing', async () => {
     let resolvePrompt!: () => void;
     const controller = mockController('awaiting');

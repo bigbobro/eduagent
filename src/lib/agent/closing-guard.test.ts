@@ -6,6 +6,7 @@
  * the overridden safe speech.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { animalsCourse } from '@/data/courses/animals';
 import { foodCourse } from '@/data/courses/food';
 import { createSession, endSession, streamUserInput } from './session';
 import type { StreamEvent } from '@/lib/mimo/llm';
@@ -153,6 +154,56 @@ describe('R4: closing guard in streamUserInput', () => {
     expect(lastInteraction.content).toContain('下次再来玩吧');
     expect(lastInteraction.content).toContain('apple');   // learned word appears in template
     expect(lastInteraction.content).not.toContain('banana');
+    endSession(session.id);
+  });
+
+  it('does not stream the unsafe speech before server-side guards run', async () => {
+    const session = createSession(foodCourse);
+    session.memory.wordsLearned = [];
+    mockStreamLLM.mockReturnValue(asyncMakeStreamEvents(
+      '今天我们学了 apple 和 banana，下次再来玩吧！',
+      [],
+      { current_word: 'apple', phase: 'closing' }
+    ));
+
+    const speech = [];
+    for await (const ev of streamUserInput(session.id, '(结束)')) {
+      if (ev.type === 'speech-delta') speech.push(ev.text);
+    }
+
+    const spoken = speech.join('');
+    expect(spoken).toContain('下次再来玩吧');
+    expect(spoken).not.toContain('banana');
+    endSession(session.id);
+  });
+
+  it('overrides speech when normalized show_card advances to a different word card', async () => {
+    const session = createSession(animalsCourse);
+    session.currentPhase = 'interactive';
+    session.memory.currentCardId = 'dog';
+    session.memory.currentWord = 'dog';
+    session.memory.cardProgress.cat = 'cleared';
+    session.memory.cardProgress.dog = 'attempted';
+    session.memory.clearedCardIds = ['cat'];
+    session.memory.cardCorrectCount = { cat: 2, dog: 1 };
+    session.memory.wordsLearned = ['cat'];
+    mockStreamLLM.mockReturnValue(asyncMakeStreamEvents(
+      '做得好！Dog！你读得真好听！再跟老师说一次，dog！',
+      [],
+      { current_word: 'dog', phase: 'learning' }
+    ));
+
+    const events: any[] = [];
+    for await (const ev of streamUserInput(session.id, 'Dog.')) {
+      events.push(ev);
+    }
+
+    const spoken = events.filter((ev) => ev.type === 'speech-delta').map((ev) => ev.text).join('');
+    const actions = events.find((ev) => ev.type === 'actions')?.actions;
+    expect(actions).toContainEqual({ tool: 'show_card', params: { card_id: 'bird' } });
+    expect(spoken).toContain('bird');
+    expect(spoken).not.toContain('再跟老师说一次，dog');
+    expect(session.memory.currentCardId).toBe('bird');
     endSession(session.id);
   });
 });

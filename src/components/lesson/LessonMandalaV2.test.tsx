@@ -84,4 +84,24 @@ describe('LessonMandalaV2', () => {
       text: expect.stringContaining('当前卡片 apple'),
     }));
   });
+
+  it('keeps pointer recording active while the captured pointer leaves the button', () => {
+    const controller = mockController('awaiting');
+    render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
+
+    const button = screen.getByRole('button', { name: /按住 Space 跟我读/ });
+    button.setPointerCapture = vi.fn();
+    button.hasPointerCapture = vi.fn(() => true);
+    button.releasePointerCapture = vi.fn();
+
+    fireEvent.pointerDown(button, { pointerId: 1 });
+    fireEvent.pointerLeave(button, { pointerId: 1 });
+
+    expect(controller.startListening).toHaveBeenCalledTimes(1);
+    expect(controller.stopListening).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(button, { pointerId: 1 });
+
+    expect(controller.stopListening).toHaveBeenCalledTimes(1);
+  });
 });

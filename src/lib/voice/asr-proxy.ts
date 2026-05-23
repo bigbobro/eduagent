@@ -253,6 +253,7 @@ function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
   });
 
   upstream.on('error', (err) => {
+    if (closed) return;
     console.log(`${tag} upstream error:`, err.message);
     if (clientWs.readyState === clientWs.OPEN) {
       clientWs.send(JSON.stringify({ type: 'error', code: 'upstream', message: err.message }));
@@ -261,6 +262,7 @@ function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
   });
 
   upstream.on('close', () => {
+    if (closed) return;
     console.log(`${tag} upstream close`);
     closeAll();
   });

@@ -1,7 +1,9 @@
-// lesson-smoke.ts — drive a full animals lesson via /api/chat to validate the
-// teacher agent state machine (normalize, R-A celebration-stay, R5 whitelist,
-// R2 literal verify, closing guard). Bypasses ASR by posting text directly to
-// action=message; this trades ASR coverage for determinism and zero TTS calls.
+// lesson-smoke.ts — validate the lesson path in two layers:
+// 1) Open the real lesson page in Chrome and assert push-to-talk holds recording
+//    for both pointer and Space interactions. Browser audio/voice transports are
+//    mocked so this stays deterministic and does not need a real microphone.
+// 2) Drive a full animals lesson via /api/chat to validate the teacher agent
+//    state machine. This bypasses ASR by posting text directly to action=message.
 //
 // Usage: `pnpm smoke:lesson` (requires dev server already running on :3000)
 //        SMOKE_BASE=http://localhost:3001 pnpm smoke:lesson  (alt port)
@@ -9,7 +11,11 @@
 // Exit code 0 if all assertions pass, 1 on any failure or crash.
 
 import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { chromium, type Browser, type Page } from 'playwright-core';
+import { getCourseById } from '../src/data/courses';
+import type { WordCard } from '../src/types/course';
 
 type PhaseName = 'intro' | 'interactive' | 'reinforcement' | 'done';
 
@@ -42,9 +48,13 @@ const ANIMALS_SCRIPT: Step[] = [
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:3000';
 const COURSE_ID = process.env.SMOKE_COURSE || 'animals';
+const COURSE = getCourseById(COURSE_ID);
+const WORD_CARDS = (COURSE?.cards.filter((card) => card.kind === 'word') ?? []) as WordCard[];
 const REPORT_DIR = path.resolve('docs/lesson-reports');
+const CHROME_PATH = process.env.SMOKE_CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 interface SseEvent { event: string; data: any; }
+interface InteractionResult { name: string; pass: boolean; reason?: string; }
 
 async function* parseSse(res: Response): AsyncGenerator<SseEvent> {
   if (!res.body) return;
@@ -105,6 +115,187 @@ async function collectTurn(res: Response): Promise<TurnResult> {
   return { speech: speech.replace(/\s+/g, ' ').trim(), showCards, errors };
 }
 
+function smokeSse(actions: Array<{ tool: string; params: Record<string, string> }> = [{ tool: 'show_card', params: { card_id: 'cat' } }]): string {
+  return [
+    'event: speech-delta\ndata: {"text":"好，我们开始。"}\n\n',
+    `event: actions\ndata: ${JSON.stringify({ actions })}\n\n`,
+    'event: progress_snapshot\ndata: {"clearedCardIds":[],"totalAttempts":0,"currentPhase":"interactive"}\n\n',
+    'event: done\ndata: {}\n\n',
+  ].join('');
+}
+
+async function installBrowserMocks(page: Page): Promise<void> {
+  await page.route('**/api/chat', async (route) => {
+    const body = JSON.parse(route.request().postData() || '{}') as { action?: string };
+    await route.fulfill({
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'X-Session-Id': 'smoke-ui-session',
+      },
+      body: smokeSse(body.action === 'start' ? [{ tool: 'show_card', params: { card_id: 'cat' } }] : []),
+    });
+  });
+
+  await page.addInitScript(() => {
+    (window as any).__eduagentSmoke = { asrPcm: 0, asrControls: [] as string[] };
+
+    class SmokeWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 3;
+      CONNECTING = 0;
+      OPEN = 1;
+      CLOSED = 3;
+      readyState = 0;
+      binaryType = 'arraybuffer';
+      onopen: null | ((event: Event) => void) = null;
+      onmessage: null | ((event: MessageEvent) => void) = null;
+      onclose: null | ((event: Event) => void) = null;
+      onerror: null | ((event: Event) => void) = null;
+
+      constructor(private url: string) {
+        setTimeout(() => {
+          this.readyState = SmokeWebSocket.OPEN;
+          this.onopen?.(new Event('open'));
+        }, 0);
+      }
+
+      send(data: string | ArrayBuffer | Blob) {
+        if (this.url.includes('/api/voice/asr')) {
+          if (typeof data === 'string') {
+            (window as any).__eduagentSmoke.asrControls.push(data);
+          } else {
+            (window as any).__eduagentSmoke.asrPcm += 1;
+          }
+          return;
+        }
+
+        if (!this.url.includes('/api/voice/tts') || typeof data !== 'string') return;
+        let msg: any = {};
+        try { msg = JSON.parse(data); } catch {}
+        if (msg.type === 'session-start') this.emitJson({ type: 'session-started', sessionId: msg.sessionId });
+        if (msg.type === 'text-chunk') this.emitJson({ type: 'subtitle', text: msg.text || '' });
+        if (msg.type === 'session-finish') setTimeout(() => this.emitJson({ type: 'session-finished' }), 10);
+      }
+
+      close() {
+        this.readyState = SmokeWebSocket.CLOSED;
+        this.onclose?.(new Event('close'));
+      }
+
+      addEventListener(type: string, handler: EventListener) {
+        (this as any)[`on${type}`] = handler;
+      }
+
+      removeEventListener(type: string, handler: EventListener) {
+        if ((this as any)[`on${type}`] === handler) (this as any)[`on${type}`] = null;
+      }
+
+      private emitJson(payload: object) {
+        setTimeout(() => {
+          if (this.readyState !== SmokeWebSocket.OPEN) return;
+          this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent);
+        }, 0);
+      }
+    }
+
+    (window as any).WebSocket = SmokeWebSocket;
+  });
+}
+
+async function assertRecordingHeld(page: Page, name: string, start: () => Promise<void>, stop: () => Promise<void>): Promise<InteractionResult> {
+  try {
+    await page.evaluate(() => {
+      (window as any).__eduagentSmoke.asrPcm = 0;
+    });
+    await start();
+    await page.waitForSelector('[data-picture-card-size="hero"][data-picture-card-state="recording"]', { timeout: 3000 });
+    await page.waitForTimeout(450);
+    const stillRecording = await page.locator('[data-picture-card-size="hero"][data-picture-card-state="recording"]').count();
+    const debugState = await page.evaluate(() => {
+      const hero = document.querySelector('[data-picture-card-size="hero"]');
+      const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('按住 Space')) as HTMLButtonElement | undefined;
+      return {
+        heroState: hero?.getAttribute('data-picture-card-state') ?? '(none)',
+        buttonDisabled: Boolean(button?.disabled),
+        text: document.body.textContent?.replace(/\s+/g, ' ').slice(0, 180) ?? '',
+        asrPcm: (window as any).__eduagentSmoke.asrPcm,
+        asrControls: (window as any).__eduagentSmoke.asrControls,
+      };
+    });
+    await stop();
+    if (stillRecording < 1) return { name, pass: false, reason: `recording state did not stay active while held: ${JSON.stringify(debugState)}` };
+    return { name, pass: true };
+  } catch (error) {
+    try { await stop(); } catch {}
+    return { name, pass: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function runPushToTalkSmoke(): Promise<InteractionResult[]> {
+  if (!existsSync(CHROME_PATH)) {
+    return [{ name: 'browser setup', pass: false, reason: `Chrome executable not found: ${CHROME_PATH}` }];
+  }
+
+  let browser: Browser | null = null;
+  try {
+    browser = await chromium.launch({
+      executablePath: CHROME_PATH,
+      headless: true,
+      args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+    });
+    const context = await browser.newContext({ permissions: ['microphone'] });
+    const page = await context.newPage();
+    await installBrowserMocks(page);
+    await page.goto(`${BASE}/lesson/${COURSE_ID}`);
+    await page.getByRole('button', { name: /我们开始吧/ }).click();
+    const button = page.getByRole('button', { name: /按住 Space 跟我读/ });
+    await button.waitFor({ state: 'visible', timeout: 10000 });
+    await page.waitForFunction(() => {
+      const candidate = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('按住 Space'));
+      return Boolean(candidate && !(candidate as HTMLButtonElement).disabled);
+    }, undefined, { timeout: 10000 });
+
+    const box = await button.boundingBox();
+    if (!box) return [{ name: 'pointer hold', pass: false, reason: 'push-to-talk button has no bounding box' }];
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+
+    const pointer = await assertRecordingHeld(
+      page,
+      'pointer hold',
+      async () => {
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+      },
+      async () => {
+        await page.mouse.up();
+      },
+    );
+
+    await page.waitForFunction(() => !document.querySelector('[data-picture-card-size="hero"][data-picture-card-state="recording"]'), undefined, { timeout: 3000 });
+
+    const space = await assertRecordingHeld(
+      page,
+      'space hold',
+      async () => {
+        await page.keyboard.down('Space');
+      },
+      async () => {
+        await page.keyboard.up('Space');
+      },
+    );
+
+    return [pointer, space];
+  } catch (error) {
+    return [{ name: 'browser push-to-talk', pass: false, reason: error instanceof Error ? error.message : String(error) }];
+  } finally {
+    await browser?.close();
+  }
+}
+
 interface StepResult {
   step: Step;
   turn: TurnResult;
@@ -125,7 +316,33 @@ function validateStep(step: Step, turn: TurnResult): { pass: boolean; reasons: s
       reasons.push(`last show_card=${last}, expected ${step.expectShowCard}`);
     }
   }
+  const mismatch = validateSpeechMatchesShownCard(turn);
+  if (mismatch) reasons.push(mismatch);
   return { pass: reasons.length === 0, reasons };
+}
+
+function validateSpeechMatchesShownCard(turn: TurnResult): string | null {
+  const lastShowCard = turn.showCards[turn.showCards.length - 1];
+  if (!lastShowCard || !turn.speech) return null;
+  const shown = WORD_CARDS.find((card) => card.id === lastShowCard);
+  if (!shown) return null;
+  const mentionsShown = speechMentionsCard(turn.speech, shown);
+  const mentionedOther = WORD_CARDS.find((card) => card.id !== shown.id && speechMentionsCard(turn.speech, card));
+  if (mentionedOther && !mentionsShown) {
+    return `speech mentions ${mentionedOther.id} but last show_card=${shown.id}`;
+  }
+  return null;
+}
+
+function speechMentionsCard(speech: string, card: WordCard): boolean {
+  return Boolean(
+    (card.english && new RegExp(`\\b${escapeRegExp(card.english)}\\b`, 'i').test(speech))
+    || (card.chinese && speech.includes(card.chinese))
+  );
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function main(): Promise<number> {
@@ -137,6 +354,12 @@ async function main(): Promise<number> {
     return 1;
   }
   console.log('[smoke] server reachable');
+
+  const interactionResults = await runPushToTalkSmoke();
+  for (const result of interactionResults) {
+    const marker = result.pass ? '✓' : '✗';
+    console.log(`[smoke] ${marker} ui ${result.name}${result.reason ? ` — ${result.reason}` : ''}`);
+  }
 
   const t0 = Date.now();
   const start = await postChat({ action: 'start', courseId: COURSE_ID });
@@ -173,28 +396,39 @@ async function main(): Promise<number> {
   const totalMs = Date.now() - t0;
 
   const failed = results.filter((r) => !r.pass);
+  const failedInteractions = interactionResults.filter((r) => !r.pass);
   console.log('');
   console.log(`[smoke] === SUMMARY ===`);
   console.log(`[smoke] session: ${start.sessionId}`);
   console.log(`[smoke] steps:   ${results.length}  pass=${results.length - failed.length}  fail=${failed.length}`);
+  console.log(`[smoke] ui:      ${interactionResults.length}  pass=${interactionResults.length - failedInteractions.length}  fail=${failedInteractions.length}`);
   console.log(`[smoke] total:   ${totalMs}ms`);
 
   await fs.mkdir(REPORT_DIR, { recursive: true });
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const reportPath = path.join(REPORT_DIR, `smoke-${ts}.md`);
-  const md = renderReport(start.sessionId, totalMs, results);
+  const md = renderReport(start.sessionId, totalMs, results, interactionResults);
   await fs.writeFile(reportPath, md, 'utf-8');
   console.log(`[smoke] report: ${path.relative(process.cwd(), reportPath)}`);
 
-  return failed.length > 0 ? 1 : 0;
+  return failed.length > 0 || failedInteractions.length > 0 ? 1 : 0;
 }
 
-function renderReport(sessionId: string, totalMs: number, results: StepResult[]): string {
+function renderReport(sessionId: string, totalMs: number, results: StepResult[], interactionResults: InteractionResult[]): string {
   const failed = results.filter((r) => !r.pass);
+  const failedInteractions = interactionResults.filter((r) => !r.pass);
   const lines: string[] = [];
   lines.push(`# Smoke Report — ${COURSE_ID} (${new Date().toISOString().slice(0, 10)})`);
   lines.push('');
   lines.push(`session: ${sessionId.slice(0, 8)}... · ${totalMs}ms · ${results.length} steps · ${results.length - failed.length}/${results.length} pass`);
+  lines.push('');
+  lines.push('## UI Push-To-Talk');
+  lines.push('');
+  lines.push('| interaction | pass | reason |');
+  lines.push('|---|---|---|');
+  interactionResults.forEach((r) => {
+    lines.push(`| ${r.name} | ${r.pass ? '✓' : '✗'} | ${r.reason ?? ''} |`);
+  });
   lines.push('');
   lines.push('## Steps');
   lines.push('');
@@ -207,10 +441,15 @@ function renderReport(sessionId: string, totalMs: number, results: StepResult[])
     lines.push(`| ${i + 1} | ${tag} | ${cards} | ${exp} | ${r.pass ? '✓' : '✗'} | ${r.durationMs} |`);
   });
 
-  if (failed.length > 0) {
+  if (failed.length > 0 || failedInteractions.length > 0) {
     lines.push('');
     lines.push('## Failures');
     lines.push('');
+    failedInteractions.forEach((r, i) => {
+      lines.push(`### UI ${i + 1}. ${r.name}`);
+      lines.push(`- ${r.reason ?? 'unknown failure'}`);
+      lines.push('');
+    });
     failed.forEach((r, i) => {
       const tag = r.step.kind === 'message' ? `msg "${r.step.text}"` : `→ ${r.step.to}`;
       lines.push(`### ${i + 1}. ${tag} — ${r.step.note}`);

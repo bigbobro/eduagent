@@ -135,9 +135,10 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 1. 改前确认 dev server 在 :3000 跑(我自己后台起就行,`pnpm dev > /tmp/x.log 2>&1 &`)
 2. 改完跑 `pnpm smoke:lesson`,看 stdout 的 pass/fail 行
 3. 任一断言 fail 就回去改,不交付。报告写到 `docs/lesson-reports/smoke-<ISO>.md`
-4. smoke 跑通 ≠ 全部 OK,主观体感仍要真人验,但 server-side 协议层 / 状态机 / token 这些不该让用户跑
+4. `smoke:lesson` 先用 Chrome 跑 UI push-to-talk 交互(按钮持按 + Space 持按必须保持 `recording`),再跑 `/api/chat` 文本驱动状态机。文本段还必须检查 teacher speech 与最后的 `show_card` 不冲突,防止"画面切到 bird,老师还让读 dog"。两段任一失败都不能交付。
+5. smoke 跑通 ≠ 全部 OK,主观体感仍要真人验,但 server-side 协议层 / 状态机 / token 这些不该让用户跑
 
-**不能拿 smoke 替换的**:TTS 音感、麦克风物理输入、UI 动画顺滑、产品验收决策。这些继续走真人测。
+**不能拿 smoke 替换的**:TTS 音感、真实麦克风物理噪声 / ASR 识别质量、UI 动画顺滑、产品验收决策。这些继续走真人测。
 
 ### 反例(本项目曾经踩的)
 

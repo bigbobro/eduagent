@@ -43,6 +43,7 @@ export class LessonController {
   private speechStreamFinished = false;
   private routeCurrentAsrToChat = true;
   private pendingActions: ToolAction[] | null = null;
+  private listenStartup: { stopRequestedAt: number | null } | null = null;
   private courseId: string | null = null;
   private currentAsrCardId: string | null = null;
   private clearedCardIds: string[] = [];
@@ -134,7 +135,10 @@ export class LessonController {
     this.currentAsrCardId = null;
     this.clearedCardIds = [];
     setAsrSessionContext({});
+    this.listenStartup = null;
     await this.stopRecording();
+    try { this.asr?.close(); } catch {}
+    this.asr = null;
     this.player.stop();
     this.speechStreamFinished = false;
     this.routeCurrentAsrToChat = true;
@@ -216,14 +220,17 @@ export class LessonController {
     this.emit('subtitle-clear');
     this.listenStartedAt = performance.now();
 
-    this.asr = new AsrClient();
-    this.asr.on('partial', (text: string) => {
+    const asr = new AsrClient();
+    this.asr = asr;
+    const startup = { stopRequestedAt: null as number | null };
+    this.listenStartup = startup;
+    asr.on('partial', (text: string) => {
       this.emit('subtitle', { text, source: 'user' });
     });
-    this.asr.on('final', (text: string) => {
+    asr.on('final', (text: string) => {
       this.handleAsrFinal(text);
     });
-    this.asr.on('error', (err: { message: string }) => {
+    asr.on('error', (err: { message: string }) => {
       this.routeCurrentAsrToChat = true;
       this.emit('error', err);
       this.setState('awaiting');
@@ -234,17 +241,23 @@ export class LessonController {
     let recorderPromise: Promise<RecorderHandle>;
     try {
       recorderPromise = startRecorder({
-        onChunk: (pcm) => this.asr?.sendPcm(pcm),
+        onChunk: (pcm) => {
+          if (this.asr === asr) asr.sendPcm(pcm);
+        },
       });
     } catch (e) {
+      this.listenStartup = null;
+      if (this.asr === asr) this.asr = null;
       this.routeCurrentAsrToChat = true;
       this.emit('error', { message: '麦克风开不了哦,请允许权限' });
       this.setState('awaiting');
       return;
     }
     try {
-      await this.asr.open();
+      await asr.open();
     } catch {
+      if (this.listenStartup === startup) this.listenStartup = null;
+      if (this.asr === asr) this.asr = null;
       this.routeCurrentAsrToChat = true;
       this.emit('error', { message: 'ASR 连接失败,请重试' });
       // 录音也得清干净
@@ -253,19 +266,42 @@ export class LessonController {
       return;
     }
     try {
-      this.recorder = await recorderPromise;
+      const recorder = await recorderPromise;
+      if (this.asr !== asr || this.getState() !== 'listening') {
+        await recorder.stop();
+        if (this.listenStartup === startup) this.listenStartup = null;
+        return;
+      }
+      this.recorder = recorder;
+      if (this.listenStartup === startup) this.listenStartup = null;
+      if (startup.stopRequestedAt !== null) {
+        await this.finishListening(startup.stopRequestedAt);
+      }
     } catch (e) {
+      if (this.listenStartup === startup) this.listenStartup = null;
       this.routeCurrentAsrToChat = true;
       this.emit('error', { message: '麦克风开不了哦,请允许权限' });
-      this.asr?.close();
-      this.asr = null;
+      if (this.asr === asr) {
+        asr.close();
+        this.asr = null;
+      }
       this.setState('awaiting');
     }
   }
 
   async stopListening(): Promise<void> {
     if (this.state !== 'listening') return;
-    const recordedMs = performance.now() - (this.listenStartedAt || performance.now());
+    const stoppedAt = performance.now();
+    if (this.listenStartup) {
+      this.listenStartup.stopRequestedAt ??= stoppedAt;
+      return;
+    }
+    await this.finishListening(stoppedAt);
+  }
+
+  private async finishListening(stoppedAt: number): Promise<void> {
+    if (this.state !== 'listening') return;
+    const recordedMs = stoppedAt - (this.listenStartedAt || stoppedAt);
     // 录音 < 800ms — 豆包对超短音频识别置信度不够,几乎一定 timeout。直接前端拦截更友好。
     if (recordedMs < 800) {
       await this.stopRecording();

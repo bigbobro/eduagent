@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:**R-C 服务端 2-hit 切卡规则(2026-05-23,取代 R-A/R5/R7)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`,LLM 这一轮 speech 应包含"OK 你说对了 → 看下一个动物 → 这是什么?"。修复 2026-05-23 实测"乱序学习"(LLM 凭主观推卡导致 dog cleared 但 cat 没 cleared 的状态错乱)以及"过早结课"。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -111,6 +111,7 @@ PhasedLessonView mount → new LessonController → new PhasedLessonController
        │                      → onmessage('partial') → emit subtitle
 用户松开空格
   └─ controller.stopListening
+       ├─ 若 ASR/recorder startup 还在进行:先记录 stoppedAt,等 startup settle 后再清理
        ├─ recordedMs < 800ms? → emit error '太短啦~' + state→awaiting (return)
        ├─ recorder.stop():postMessage flush → worklet 吐残余 → onChunk → asr.sendPcm
        ├─ asr.finish() → JSON {type:'finish'} 给 proxy
@@ -126,10 +127,10 @@ ASR final 到达 client
        ├─ POST /api/chat { action:'message', sessionId, text, asrResult }
        │   server: add raw ASR user message
        │           → streamLLM (MiMo, prompt 含 currentCardId/cardProgress/drillParts)
-       │           → SpeechExtractor 状态机 → normalize show_card(过滤/替换已通过或非当前目标卡) → SSE
+       │           → SpeechExtractor 状态机 → server guards → normalize show_card(过滤/替换已通过或非当前目标卡) → speech/show_card 对齐 → SSE
        │           → commit attempt_assessment + 归一化后的 show_card 到 cardProgress/clearedCardIds
        │           → token_usage 记录 LLM + ASR + TTS 字符数
-       │            speech-delta × N + actions + done
+       │            speech-delta + actions + done
        └─ consumeSSE:
             speech-delta:
               第一个 → ensureTtsSession (event=100 StartSession)
@@ -275,7 +276,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | mic 在 startLesson prewarm | 用户按住瞬间能录 | 否则 getUserMedia + worklet 启动 ~300ms,前几个字丢 |
 | ASR proxy 握手期 PCM buffer | 不丢前 1-3 秒录音 | 详见踩坑 |
 | worklet flush 残余 | 不丢尾字 | 之前未满 200ms 的 buffer 在 disconnect 时被丢 |
-| 短按 < 800ms 前端拦截 | 不进 thinking 不空等 | 豆包对 < 1.5s 录音置信度不够,大概率 timeout |
+| 短按 < 800ms 前端拦截 | 不进 thinking 不空等;若 keyup 早于 ASR/recorder startup settle,先记录 stoppedAt,等 startup settle 后再 close,避免撕掉 connecting WS 产生假 upstream error | 豆包对 < 1.5s 录音置信度不够,大概率 timeout;真实短按是本地 UX 事件,不应被记录成 provider 故障 |
 | 5s 不 9s 的 ASR final 兜底 | 用户更快感知失败 | 9s 太长,影响"再说一次"的连续性 |
 | 不打断(speaking 时空格忽略) | 简化优先 | 实测打断后 inflight PCM 难完全清干净;后续再加 |
 | ~~字幕领先音频~~ → **R1 已修复** | actions(`show_card`)缓冲到 `tts.session-finished` 再 emit | 实测 bd78d967 报告确认 UX 杀手;`pendingActions` in `LessonController` 解决;TTS error 路径也释放 |
@@ -389,6 +390,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 | `src/lib/progress.ts` / `stats.ts` / `pin.ts` | 纯聚合 + 客户端 PIN |
 | `src/app/api/{progress,sessions,stats}/route.ts` | 三个只读聚合 API |
 | `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 5 页面 + 4 API |
+| `scripts/lesson-smoke.ts` | `pnpm smoke:lesson` 先用 Chrome 验证 push-to-talk 按钮 / Space 持按保持 recording,再用 `/api/chat` 文本脚本验证 teacher agent 状态机与 speech/show_card 一致性 |
 
 ### Design tokens
 

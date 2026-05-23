@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useSpacebar } from '@/hooks/useSpacebar';
 import type { Course } from '@/types/course';
 import type { ToolAction } from '@/types/tools';
@@ -161,14 +161,24 @@ function PushToTalkBar({
   onStart: () => void;
   onEnd: () => void;
 }) {
+  const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    onStart();
+  };
+  const onPointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    onEnd();
+  };
+
   return (
     <PaperButton
       color={active ? 'mint' : 'butter'}
       disabled={disabled}
-      onPointerDown={onStart}
-      onPointerUp={onEnd}
-      onPointerCancel={onEnd}
-      onPointerLeave={onEnd}
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
       className="w-full"
     >
       按住 Space 跟我读

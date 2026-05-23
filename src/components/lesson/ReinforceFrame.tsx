@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useSpacebar } from '@/hooks/useSpacebar';
 import type { Course, Quiz } from '@/types/course';
 import type { LessonController, LessonStateName } from '@/lib/voice/lesson-controller';
@@ -84,6 +84,17 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
     setListening(false);
     controller.stopListening();
   };
+  const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!canHold) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    start();
+  };
+  const onPointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    stop();
+  };
 
   useSpacebar({ enabled: canHold, onDown: start, onUp: stop });
 
@@ -119,10 +130,9 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
         <PaperButton
           color={listening ? 'mint' : 'butter'}
           disabled={!canHold}
-          onPointerDown={start}
-          onPointerUp={stop}
-          onPointerCancel={stop}
-          onPointerLeave={stop}
+          onPointerDown={onPointerDown}
+          onPointerUp={onPointerEnd}
+          onPointerCancel={onPointerEnd}
         >
           按住 Space
         </PaperButton>

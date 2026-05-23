@@ -20,6 +20,7 @@ export class PhasedLessonController {
   private currentPhase: PhaseName = 'intro';
   private lastSnapshot: ProgressSnapshot | null = null;
   private pendingTransition: PhaseName | null = null;
+  private transitionInFlight: Promise<void> | null = null;
   private introStartupUnlockTimer: ReturnType<typeof setTimeout> | null = null;
   private introBusy = false;
   private introActiveCardId: string | null = null;
@@ -205,6 +206,23 @@ export class PhasedLessonController {
   }
 
   private async performTransition(to: PhaseName): Promise<void> {
+    if (this.transitionInFlight) {
+      await this.transitionInFlight.catch(() => {});
+      if (to === this.currentPhase) return;
+    }
+
+    const run = this.performTransitionNow(to);
+    this.transitionInFlight = run;
+    try {
+      await run;
+    } finally {
+      if (this.transitionInFlight === run) {
+        this.transitionInFlight = null;
+      }
+    }
+  }
+
+  private async performTransitionNow(to: PhaseName): Promise<void> {
     this.currentPhase = to;
     this.setIntroBusy(false);
     this.setIntroActiveCardId(null);

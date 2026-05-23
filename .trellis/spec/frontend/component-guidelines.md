@@ -54,8 +54,11 @@ ASR/TTS details inside the controller.
   images need labels. `Cat` exposes `role="img"` and `aria-label="Mochi 麻吉"`.
 - Focus-visible ring classes are part of the UI contract. Tests check this for
   `PaperButton`.
-- Pointer controls should handle cancellation. Push-to-talk controls handle
-  `onPointerCancel` and `onPointerLeave`.
+- Pointer controls should handle cancellation. Push-to-talk controls should
+  call `setPointerCapture(pointerId)` on pointer down, stop on pointer up/cancel,
+  and ignore `pointerleave`. Do not wire
+  `onPointerLeave={stop}` directly, because the active button can repaint or
+  shift under the pointer and immediately end recording.
 
 ## Common Mistakes
 

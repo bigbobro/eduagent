@@ -24,7 +24,9 @@ ergonomics, accessibility labels, and the CC magic-academy visual system.
   `listening`. Speaking interruption is intentionally unsupported.
 - Do not call `AsrClient`, `TtsClient`, `PcmPlayer`, or recorder APIs directly
   from lesson components; go through `LessonController`.
-- Do not remove pointer-cancel/leave handling from press controls.
+- Do not remove pointer-cancel handling from press controls. For push-to-talk,
+  pointer leave must not stop an active captured press; use pointer capture and
+  ignore pointer leave entirely.
 - Do not add unlabelled icon-only buttons.
 - Do not introduce generic visual palettes that bypass the CC design tokens.
 
@@ -37,6 +39,14 @@ ergonomics, accessibility labels, and the CC magic-academy visual system.
 - Course UI/data changes: update course tests and run `pnpm test src/data/courses`.
 - Route/page changes: run `pnpm run smoke` when practical, because the app is
   full-screen and route regressions are easy to miss.
+- Lesson voice-flow changes: `pnpm smoke:lesson` must keep its browser
+  push-to-talk checks enabled. It should open the lesson page and assert both
+  the pointer button and Space key keep the hero card in `recording` state while
+  held before the text-driven agent-state-machine script runs.
+- Lesson agent smoke must also check speech/card consistency. If the last
+  `show_card` for a turn is `bird`, the teacher speech must not only talk about
+  `dog`; this catches server-side normalization drift that otherwise appears as
+  "the picture changed but the teacher asks for the old word."
 
 ## Review Checklist
 

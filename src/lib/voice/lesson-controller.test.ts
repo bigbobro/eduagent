@@ -9,11 +9,12 @@ const asrInstances = vi.hoisted(() => [] as Array<{
   sendPcm: ReturnType<typeof vi.fn>;
 }>);
 const setAsrSessionContextMock = vi.hoisted(() => vi.fn());
+const asrOpenQueue = vi.hoisted(() => [] as Array<() => Promise<void>>);
 
 vi.mock('./asr-client', () => {
   class AsrClient {
     handlers = new Map<string, (payload: any) => void>();
-    open = vi.fn(async () => {});
+    open = vi.fn(() => asrOpenQueue.shift()?.() ?? Promise.resolve());
     close = vi.fn();
     finish = vi.fn();
     sendPcm = vi.fn();
@@ -94,6 +95,7 @@ function sseResponse(): Response {
 describe('LessonController', () => {
   beforeEach(() => {
     asrInstances.length = 0;
+    asrOpenQueue.length = 0;
     ttsInstances.length = 0;
     setAsrSessionContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
@@ -134,6 +136,32 @@ describe('LessonController', () => {
         body: expect.stringContaining('"action":"message"'),
       }));
     });
+  });
+
+  it('does not close ASR while startup is still opening on immediate release', async () => {
+    let resolveOpen!: () => void;
+    asrOpenQueue.push(() => new Promise<void>((resolve) => {
+      resolveOpen = resolve;
+    }));
+    const controller = new LessonController();
+    const errors: string[] = [];
+    (controller as any).sessionId = 'session-1';
+    (controller as any).setState('awaiting');
+    controller.on('error', (err) => errors.push(err.message));
+
+    const started = controller.startListening();
+    await vi.waitFor(() => expect(asrInstances).toHaveLength(1));
+
+    await controller.stopListening();
+
+    expect(asrInstances[0].close).not.toHaveBeenCalled();
+
+    resolveOpen();
+    await started;
+
+    expect(asrInstances[0].close).toHaveBeenCalledOnce();
+    expect(errors).toContain('太短啦~按住多说一会儿');
+    expect(controller.getState()).toBe('awaiting');
   });
 
   it('speaks static quiz text through the existing TTS session path', async () => {
@@ -183,6 +211,7 @@ describe('LessonController', () => {
 describe('R1: actions buffered until TTS session-finished', () => {
   beforeEach(() => {
     asrInstances.length = 0;
+    asrOpenQueue.length = 0;
     ttsInstances.length = 0;
     setAsrSessionContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
