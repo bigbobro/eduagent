@@ -11,7 +11,8 @@
     "course:image-audit": "tsx scripts/prepare-course-image-jobs.ts --audit",
     "course:image-jobs": "tsx scripts/prepare-course-image-jobs.ts",
     "voice:asr-hotwords": "tsx scripts/asr-hotwords-regression.ts",
-    "smoke": "tsx scripts/smoke-pages.ts"
+    "smoke": "tsx scripts/smoke-pages.ts",
+    "smoke:lesson": "tsx scripts/lesson-smoke.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",

@@ -118,6 +118,27 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 
 **协议错、配置错、状态机错、时序错、并发错 — 都能自动复现 + 自动断言。**
 
+### C. lesson-smoke 强制规则(2026-05-23 起)
+
+**触发条件 = 大改边界**:动以下目录/文件的实质代码,**必须先跑 `pnpm smoke:lesson` 通过再交付**(不是 commit 之前才跑,是改完就跑):
+
+- `src/lib/agent/**`(normalize / memory / session / prompt / orchestrator / assessment)
+- `src/lib/voice/**`(lesson-controller / phased-lesson-controller / asr-proxy / tts-proxy / doubao-codec / speech-extractor)
+- `src/app/api/chat/route.ts`
+
+**例外**(小修不强制,可手动触发):
+- UI / 课程数据 / 文档 / dev panel / log 日志改动
+- `**/*.test.ts` 测试文件本身
+- 这些边界以外的改动
+
+**操作**:
+1. 改前确认 dev server 在 :3000 跑(我自己后台起就行,`pnpm dev > /tmp/x.log 2>&1 &`)
+2. 改完跑 `pnpm smoke:lesson`,看 stdout 的 pass/fail 行
+3. 任一断言 fail 就回去改,不交付。报告写到 `docs/lesson-reports/smoke-<ISO>.md`
+4. smoke 跑通 ≠ 全部 OK,主观体感仍要真人验,但 server-side 协议层 / 状态机 / token 这些不该让用户跑
+
+**不能拿 smoke 替换的**:TTS 音感、麦克风物理输入、UI 动画顺滑、产品验收决策。这些继续走真人测。
+
 ### 反例(本项目曾经踩的)
 
 - ❌ "按住空格说一句话,看 console 出几行 [bench]"重复 5 轮找"按下 3 秒才识别" — 应该是 TTS 生成 fixture audio + ASR 测试 1 分钟跑完
