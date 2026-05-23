@@ -186,6 +186,34 @@ export async function* streamUserInput(
     result.speech = `今天我们一起练了 ${learnedDisplay},你说得很努力！下次再来玩吧。`;
   }
 
+  // R-B (2026-05-23): premature-closing guard — when the LLM emits soft-closing phrases
+  // ("下次再来" / "今天到这里" / "改天" / "再见小朋友" 等) while word cards still have
+  // untouched ones, override with a continuation prompt. The R4/R6 unlearned-word guard
+  // only catches enumeration of unlearned words; this catches the "let's wrap up after
+  // 2 words" pattern observed in 2026-05-23 smoke step 7. Only fires in interactive phase
+  // — reinforcement/done are legitimate closing windows.
+  const interactivePhase = session.currentPhase === 'interactive';
+  const wordCardIds = session.course.cards.filter((c) => c.kind === 'word').map((c) => c.id);
+  const untouchedExists = wordCardIds.some((id) => session.memory.cardProgress[id] !== 'cleared');
+  const softClosingPatterns = [
+    /下次再来/, /下次再/, /下回见/, /下回再/, /再见小/, /再见小朋友/,
+    /今天就到这里/, /今天到这里/, /我们改天/, /改天再/, /明天再/,
+    /下次我们再(去)?认识/, /下次再认识/, /我们下次/,
+  ];
+  const matchedSoftClosing = softClosingPatterns.find((re) => re.test(result.speech));
+  if (interactivePhase && untouchedExists && matchedSoftClosing) {
+    const untouchedNext = wordCardIds.find((id) => session.memory.cardProgress[id] !== 'cleared') || '';
+    const nextCard = untouchedNext
+      ? session.course.cards.find((c) => c.id === untouchedNext)
+      : undefined;
+    console.warn('[session] premature-closing guard: matched', matchedSoftClosing.source, '— overriding; nextTarget=', untouchedNext);
+    const nextLabel = nextCard ? `${nextCard.chinese} ${nextCard.english}` : '下一个';
+    result.speech = `做得很棒!我们继续来学 ${nextLabel}!`;
+    // Drop any LLM actions and force-push the next untouched word card so normalize
+    // doesn't fall back to a stale/cleared card.
+    result.actions = untouchedNext ? [{ tool: 'show_card', params: { card_id: untouchedNext } }] : [];
+  }
+
   const normalizedActions = normalizeAssistantActions(session.memory, session.course, {
     speech: result.speech,
     actions: result.actions,

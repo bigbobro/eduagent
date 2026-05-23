@@ -191,6 +191,21 @@ export function normalizeAssistantActions(
   const nextCardId = getNextWordCardId(assessedMemory, course);
   const currentCardId = assessedMemory.currentCardId;
 
+  // diagnostic: per-turn snapshot of normalize inputs
+  const clearedList = Object.entries(assessedMemory.cardProgress)
+    .filter(([, v]) => v === 'cleared')
+    .map(([k]) => k);
+  console.log('[normalize] snapshot', JSON.stringify({
+    currentCardId,
+    activeWordCardId,
+    nextCardId,
+    cleared: clearedList,
+    llmActions: response.actions.map((a) => `${a.tool}:${a.params.card_id}`),
+    asrText: rawAsrText,
+    current_word: response.state_update.current_word,
+    assessment: response.state_update.attempt_assessment,
+  }));
+
   // R-A (2026-05-23): "celebration turn" — when the current card was just cleared this
   // very turn (LLM said correct AND R2 literal-verify accepted), the teacher speech for
   // THIS turn was generated around the cleared word ("great, cat! say cat again").
@@ -303,6 +318,14 @@ function applyAttemptAssessment(memory: LessonMemory, response: AgentResponse, r
         wordsLearned = mergeUnique(memory.wordsLearned, [response.state_update.current_word]);
       }
       memory = updateWordPerformance(memory, response.state_update.current_word, true);
+    } else if (memory.cardProgress[cardId] === 'cleared') {
+      // R2 mismatch on an ALREADY-cleared card. Common pattern: this turn the LLM is
+      // celebrating last turn's success while having advanced current_word to the next
+      // card (e.g. assessment.card_id='cat' result=correct but current_word='dog' and
+      // raw ASR='Cat.'). targetToken from current_word='dog' won't match ASR='cat', but
+      // that's a desync of current_word, not a real regression for cat. Leave the
+      // already-cleared card cleared.
+      console.warn('[memory] R2 mismatch but card already cleared, staying cleared. cardId=', cardId, 'asr=', rawAsrText, 'target=', targetToken);
     } else {
       // LLM judged correct but raw ASR doesn't contain the target word literal —
       // downgrade to attempted and keep the streak going.
