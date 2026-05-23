@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Course, PhaseName } from '@/types/course';
-import { LessonMemory, TokenUsage, InteractionLog } from '@/types/session';
+import { LessonMemory, TokenUsage } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
 import {
   createMemory,
@@ -8,12 +8,16 @@ import {
   getMessagesForLLM,
   commitAssistantStreamResult,
   initializeCardProgress,
-  normalizeAssistantActions,
 } from './memory';
 import { buildSystemPrompt } from './prompt';
 import { streamLLM } from '@/lib/mimo/llm';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 import { createLessonLog, finishLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
+import { GuardContext, runPipeline } from './guards/index';
+import { closingGuard } from './guards/closing-guard';
+import { prematureClosingGuard } from './guards/premature-closing-guard';
+import { normalizeActions } from './guards/normalize-actions';
+import { speechCardAlign } from './guards/speech-card-align';
 
 export interface Session {
   id: string;
@@ -99,220 +103,95 @@ export async function* streamUserInput(
   asrResult?: { latency: number; tokens: number },
   signal?: AbortSignal
 ): AsyncGenerator<StreamUserEvent> {
+  // 1. Session lookup + user message
   const session = sessions.get(sessionId);
   if (!session) {
     yield { type: 'error', message: `Session ${sessionId} not found` };
     return;
   }
-
   session.memory = addUserMessage(session.memory, userText);
 
-  const systemPrompt = buildSystemPrompt(session.course, session.memory, session.currentPhase);
-  const messages = getMessagesForLLM(session.memory);
-
+  // 2. LLM stream consumption
   const extractor = new StreamingSpeechExtractor();
-  let speechClosed = false;
   let inputTokens = 0;
   let outputTokens = 0;
   let llmLatency = 0;
-
   try {
-    for await (const ev of streamLLM(systemPrompt, messages, signal)) {
-      if (ev.done) {
-        inputTokens = ev.usage.inputTokens;
-        outputTokens = ev.usage.outputTokens;
-        llmLatency = ev.latency;
-        break;
-      }
-      const out = extractor.feed(ev.delta);
-      if (out.complete && !speechClosed) {
-        speechClosed = true;
-      }
+    const systemPrompt = buildSystemPrompt(session.course, session.memory, session.currentPhase);
+    for await (const ev of streamLLM(systemPrompt, getMessagesForLLM(session.memory), signal)) {
+      if (ev.done) { inputTokens = ev.usage.inputTokens; outputTokens = ev.usage.outputTokens; llmLatency = ev.latency; break; }
+      extractor.feed(ev.delta);
     }
   } catch (err) {
     yield { type: 'error', message: (err as Error).message };
     return;
   }
 
-  if (!speechClosed) {
-    // 兜底:LLM 没正常关闭 speech 字段(畸形)
-    speechClosed = true;
-  }
-
+  // 3. Finalize + sanitize
   const result = extractor.finalize();
   result.speech = sanitizeSpeech(result.speech);
 
-  // R4 + R6: closing guard — if LLM speech contains any course target word that has NOT
-  // been learned this session, replace the entire speech with a safe template.
-  // R6: but exclude `memory.currentWord` and LLM-reported `state_update.current_word`
-  // from the unlearned check, because mentioning the word being actively taught is
-  // legitimate; otherwise teaching "cat" would always trigger override.
-  const wordsLearned = session.memory.wordsLearned;
-  const targetWords = session.course.cards
-    .filter((c) => c.kind === 'word')
-    .map((c) => c.english);
-  const memoryCurrentWord = (session.memory.currentWord || '').toLowerCase();
-  const llmCurrentWord = (result.state_update.current_word || '').toLowerCase();
-  const unlearnedMentioned = targetWords.filter((w) => {
-    if (wordsLearned.includes(w)) return false;
-    const wLower = w.toLowerCase();
-    if (wLower === memoryCurrentWord || wLower === llmCurrentWord) return false;
-    const token = wLower.replace(/[.,!?;]/g, '');
-    return token.length > 0 && new RegExp(`\\b${token}\\b`, 'i').test(result.speech);
-  });
-  if (unlearnedMentioned.length > 0) {
-    console.warn('[session] closing guard: LLM mentioned unlearned words', unlearnedMentioned, '— overriding speech');
-    const learnedDisplay = wordsLearned.length > 0 ? wordsLearned.join('、') : '一些新词';
-    result.speech = `今天我们一起练了 ${learnedDisplay},你说得很努力！下次再来玩吧。`;
-  }
+  // 4. Run guard pipeline (ORDER SENSITIVE — see guards/index.ts)
+  const initialCtx: GuardContext = {
+    speech: result.speech, actions: result.actions, stateUpdate: result.state_update,
+    memory: session.memory, course: session.course, asrText: userText, currentPhase: session.currentPhase,
+  };
+  const finalCtx = runPipeline(initialCtx, [
+    closingGuard,           // R4/R6: unlearned-word closing override
+    prematureClosingGuard,  // R-B: soft-closing override when cards remain
+    normalizeActions,       // R-C: server-authoritative card selection
+    speechCardAlign,        // speech/show_card alignment
+  ]);
 
-  // R-B (2026-05-23): premature-closing guard — when the LLM emits soft-closing phrases
-  // ("下次再来" / "今天到这里" / "改天" / "再见小朋友" 等) while word cards still have
-  // untouched ones, override with a continuation prompt. The R4/R6 unlearned-word guard
-  // only catches enumeration of unlearned words; this catches the "let's wrap up after
-  // 2 words" pattern observed in 2026-05-23 smoke step 7. Only fires in interactive phase
-  // — reinforcement/done are legitimate closing windows.
-  const interactivePhase = session.currentPhase === 'interactive';
-  const wordCardIds = session.course.cards.filter((c) => c.kind === 'word').map((c) => c.id);
-  const untouchedExists = wordCardIds.some((id) => session.memory.cardProgress[id] !== 'cleared');
-  const softClosingPatterns = [
-    /下次再来/, /下次再/, /下回见/, /下回再/, /再见小/, /再见小朋友/,
-    /今天就到这里/, /今天到这里/, /我们改天/, /改天再/, /明天再/,
-    /下次我们再(去)?认识/, /下次再认识/, /我们下次/,
-  ];
-  const matchedSoftClosing = softClosingPatterns.find((re) => re.test(result.speech));
-  if (interactivePhase && untouchedExists && matchedSoftClosing) {
-    const untouchedNext = wordCardIds.find((id) => session.memory.cardProgress[id] !== 'cleared') || '';
-    const nextCard = untouchedNext
-      ? session.course.cards.find((c) => c.id === untouchedNext)
-      : undefined;
-    console.warn('[session] premature-closing guard: matched', matchedSoftClosing.source, '— overriding; nextTarget=', untouchedNext);
-    const nextLabel = nextCard ? `${nextCard.chinese} ${nextCard.english}` : '下一个';
-    result.speech = `做得很棒!我们继续来学 ${nextLabel}!`;
-    // Drop any LLM actions and force-push the next untouched word card so normalize
-    // doesn't fall back to a stale/cleared card.
-    result.actions = untouchedNext ? [{ tool: 'show_card', params: { card_id: untouchedNext } }] : [];
-  }
-
-  const normalizedActions = normalizeAssistantActions(session.memory, session.course, {
-    speech: result.speech,
-    actions: result.actions,
-    state_update: result.state_update,
-  }, userText);
-  result.speech = alignSpeechWithNormalizedCard(result.speech, normalizedActions, session);
-  if (result.speech) {
-    yield { type: 'speech-delta', text: result.speech };
-  }
+  // 5. Yield speech + actions
+  if (finalCtx.speech) yield { type: 'speech-delta', text: finalCtx.speech };
   yield { type: 'speech-end' };
-  yield {
-    type: 'actions',
-    actions: normalizedActions,
-    state_update: result.state_update,
-  };
+  yield { type: 'actions', actions: finalCtx.actions, state_update: finalCtx.stateUpdate };
 
-  // commit memory + token + interaction log
-  const beforePerformance = new Map(session.memory.wordPerformance);
-  session.memory = commitAssistantStreamResult(
-    session.memory,
-    session.course,
-    result.speech,
-    normalizedActions,
-    result.state_update,
-    userText
-  );
-  const assessment = result.state_update.attempt_assessment;
-  if (assessment && result.state_update.current_word) {
-    const before = beforePerformance.get(result.state_update.current_word);
-    const after = session.memory.wordPerformance.get(result.state_update.current_word);
-    if (after && (!before || after.attempts > before.attempts)) {
-      upsertWordPerformance(session.id, result.state_update.current_word, assessment.result === 'correct');
-    }
-  }
-  session.tokenUsage.llm.requests += 1;
-  session.tokenUsage.llm.inputTokens += inputTokens;
-  session.tokenUsage.llm.outputTokens += outputTokens;
-  if (asrResult) {
-    session.tokenUsage.asr.requests += 1;
-    session.tokenUsage.asr.tokens += asrResult.tokens;
-  }
-  session.tokenUsage.tts.requests += 1;
-  session.tokenUsage.tts.characters += result.speech.length;
+  // 6. Commit memory + accounting + log
+  commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency });
 
-  const interactionLog: InteractionLog = {
-    timestamp: new Date(),
-    userInput: userText,
-    aiResponse: result.speech,
-    actions: normalizedActions,
-    modelCalls: {
-      asr: asrResult,
-      llm: { latency: llmLatency, inputTokens, outputTokens },
-      tts: { latency: 0, characters: result.speech.length },
-    },
-  };
-  insertInteraction(session.id, interactionLog);
-
+  // 7. Yield progress snapshot + done
   let totalAttempts = 0;
   session.memory.wordPerformance.forEach((p) => { totalAttempts += p.attempts; });
-  yield {
-    type: 'progress_snapshot',
-    clearedCardIds: [...session.memory.clearedCardIds],
-    totalAttempts,
-    currentPhase: session.currentPhase,
-  };
-
+  yield { type: 'progress_snapshot', clearedCardIds: [...session.memory.clearedCardIds], totalAttempts, currentPhase: session.currentPhase };
   yield { type: 'done' };
 }
 
-function alignSpeechWithNormalizedCard(
-  speech: string,
-  actions: ToolAction[],
+function commitTurn(
   session: Session,
-): string {
-  const primaryCardId = getLastWordShowCardId(actions, session.course);
-  if (!primaryCardId) return speech;
-  const primaryCard = session.course.cards.find((card) => card.id === primaryCardId && card.kind === 'word');
-  if (!primaryCard) return speech;
-
-  const mentionsPrimary = speechMentionsCard(speech, primaryCard);
-  const mentionedOtherWord = session.course.cards
-    .filter((card) => card.kind === 'word' && card.id !== primaryCardId)
-    .some((card) => speechMentionsCard(speech, card));
-  const movedToDifferentCard = Boolean(session.memory.currentCardId && session.memory.currentCardId !== primaryCardId);
-
-  if (!mentionsPrimary && (mentionedOtherWord || movedToDifferentCard)) {
-    console.warn('[session] speech/show_card mismatch — overriding speech', {
-      currentCardId: session.memory.currentCardId,
-      showCardId: primaryCardId,
-      speech: speech.slice(0, 120),
-    });
-    return buildCardPrompt(primaryCard);
-  }
-  return speech;
-}
-
-function getLastWordShowCardId(actions: ToolAction[], course: Course): string {
-  const wordCardIds = new Set(course.cards.filter((card) => card.kind === 'word').map((card) => card.id));
-  for (let i = actions.length - 1; i >= 0; i--) {
-    const action = actions[i];
-    const cardId = action.tool === 'show_card' ? action.params.card_id : '';
-    if (wordCardIds.has(cardId)) return cardId;
-  }
-  return '';
-}
-
-function speechMentionsCard(speech: string, card: Course['cards'][number]): boolean {
-  const english = card.english.trim();
-  const chinese = card.chinese.trim();
-  return Boolean(
-    (english && new RegExp(`\\b${escapeRegExp(english)}\\b`, 'i').test(speech))
-    || (chinese && speech.includes(chinese))
+  ctx: GuardContext,
+  userText: string,
+  asrResult: { latency: number; tokens: number } | undefined,
+  llm: { inputTokens: number; outputTokens: number; llmLatency: number },
+): void {
+  const beforePerformance = new Map(session.memory.wordPerformance);
+  session.memory = commitAssistantStreamResult(
+    session.memory, session.course, ctx.speech, ctx.actions, ctx.stateUpdate, userText
   );
-}
-
-function buildCardPrompt(card: Course['cards'][number]): string {
-  return `做得好!我们看这张卡,这是 ${card.chinese} ${card.english}. 跟老师一起说:${card.english}!`;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const assessment = ctx.stateUpdate.attempt_assessment;
+  if (assessment && ctx.stateUpdate.current_word) {
+    const before = beforePerformance.get(ctx.stateUpdate.current_word);
+    const after = session.memory.wordPerformance.get(ctx.stateUpdate.current_word);
+    if (after && (!before || after.attempts > before.attempts)) {
+      upsertWordPerformance(session.id, ctx.stateUpdate.current_word, assessment.result === 'correct');
+    }
+  }
+  session.tokenUsage.llm.requests += 1;
+  session.tokenUsage.llm.inputTokens += llm.inputTokens;
+  session.tokenUsage.llm.outputTokens += llm.outputTokens;
+  if (asrResult) { session.tokenUsage.asr.requests += 1; session.tokenUsage.asr.tokens += asrResult.tokens; }
+  session.tokenUsage.tts.requests += 1;
+  session.tokenUsage.tts.characters += ctx.speech.length;
+  insertInteraction(session.id, {
+    timestamp: new Date(),
+    userInput: userText,
+    aiResponse: ctx.speech,
+    actions: ctx.actions,
+    modelCalls: {
+      asr: asrResult,
+      llm: { latency: llm.llmLatency, inputTokens: llm.inputTokens, outputTokens: llm.outputTokens },
+      tts: { latency: 0, characters: ctx.speech.length },
+    },
+  });
 }

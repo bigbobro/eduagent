@@ -9,7 +9,9 @@ These are the modules that turn raw LLM output + ASR text into safe lesson state
 > `9bbcc77`, `4ad4708`). Read those sections as design rationale, not as the
 > current code. Current behavior lives in:
 > - `src/lib/agent/memory.ts` — search for `// R-C` comments
+> - `src/lib/agent/guards/` — guard pipeline (R-D, 2026-05-24)
 > - `## state_update schema (R-C — server-authoritative)` section below
+> - `## Guard Pipeline (R-D — extract guards from streamUserInput)` section below
 > - `## Test fixtures & mocks` section below
 >
 > Key replacements:
@@ -19,6 +21,9 @@ These are the modules that turn raw LLM output + ASR text into safe lesson state
 >   counting (`cardCorrectCount[cardId] >= 2 → cleared`).
 > - R5 whitelist `{currentCard, nextCard}` → R-C `forceCardId` (stay on
 >   current until cleared, then auto-advance one card).
+> - R4/R6 closing guard + R-B premature-closing + normalize + speech-align
+>   inline in `streamUserInput` → extracted to `src/lib/agent/guards/` as
+>   composable `GuardFn[]` pipeline (R-D, 2026-05-24).
 
 ---
 
@@ -400,6 +405,284 @@ If a future feature needs LLM-reported state beyond `current_word` +
    + a Validation matrix entry.
 
 Do not add new state fields opportunistically.
+
+---
+
+## Guard Pipeline (R-D — extract guards from streamUserInput)
+
+> **Scope / Trigger**: adding a new closing/normalize/speech guard;
+> reordering existing guards; changing how `streamUserInput` consumes the LLM
+> response.
+>
+> **Code**: `src/lib/agent/guards/` (5 files) + `src/lib/agent/session.ts`
+> `streamUserInput` skeleton. Refactored 2026-05-24 from a 169-line inline
+> blob to a 60-line skeleton + 4-guard pipeline.
+
+### Why this exists
+
+Between 2026-05-22 and 2026-05-23, the guard set grew from R1–R4 → R5/R6/R7
+→ R-A → R-B → R-C (5 turns of inline edits to `streamUserInput`). Each new
+guard had to find a position in the existing 169-line function body and
+match the local variable names. The pipeline extraction makes adding a new
+guard a single push to a typed array.
+
+### Contract: `GuardFn` shape
+
+```ts
+// src/lib/agent/guards/index.ts
+export interface GuardContext {
+  speech: string;
+  actions: ToolAction[];
+  stateUpdate: AgentResponse['state_update'];
+  memory: LessonMemory;     // ← read-only view (see invariant below)
+  course: Course;
+  asrText?: string;
+  currentPhase: PhaseName;
+}
+
+export type GuardFn = (ctx: GuardContext) => GuardContext;
+```
+
+Input and output have **the same shape**. A guard that does nothing returns
+`ctx` unchanged. A guard that overrides speech returns
+`{ ...ctx, speech: '...' }`. No side-effects beyond `console.warn` /
+`console.error` for diagnostics.
+
+### Contract: `GuardContext.memory` is a read-only view
+
+Guards MUST NOT mutate `ctx.memory`. Memory updates happen **after** the
+pipeline runs, inside `commitTurn` (which calls
+`commitAssistantStreamResult`). If a guard mutates memory mid-pipeline:
+
+- Downstream guards may see partially-updated state and make wrong decisions
+- `commitTurn` re-derives state from `memory` + the post-pipeline
+  `{ speech, actions, stateUpdate }` — mutation would double-apply
+
+This invariant is enforced by convention only (TypeScript can't make a deep
+readonly view ergonomically). Reviewers must flag any guard that does
+`ctx.memory.X = Y` or `ctx.memory.X.push(...)`.
+
+### Contract: `runPipeline` fail-safe semantics
+
+```ts
+export function runPipeline(ctx: GuardContext, guards: GuardFn[]): GuardContext {
+  return guards.reduce((acc, guard) => {
+    try {
+      return guard(acc);
+    } catch (err) {
+      console.error('[guard]', guard.name, 'failed:', err);
+      return acc;  // ← skip this guard, pipeline continues with prior ctx
+    }
+  }, ctx);
+}
+```
+
+A guard throwing is **not fatal** — the next guard runs against the
+pre-throw ctx. Rationale: a broken guard in production should degrade
+gracefully (skip its effect, log the error) rather than blow up the whole
+turn and ship `[error]` to the child's audio.
+
+The try/catch is **per-guard, not pipeline-wide**. Normal `return` values
+are not error-wrapped — `reduce` propagates them naturally.
+
+### Contract: guards array order is sensitive — do NOT reshuffle
+
+Current order in `streamUserInput`:
+
+```ts
+runPipeline(ctx, [
+  closingGuard,            // R4/R6
+  prematureClosingGuard,   // R-B
+  normalizeActions,        // R-C wrapper
+  speechCardAlign,         // speech vs forceCardId
+]);
+```
+
+| guard | reads from prior ctx | writes |
+|---|---|---|
+| `closingGuard` | `speech`, `memory.wordsLearned`, `stateUpdate.current_word`, `course.cards` | `speech` (override) |
+| `prematureClosingGuard` | `speech`, `currentPhase`, `memory.cardProgress`, `course.cards` | `speech` (override), `actions` (force-push next untouched) |
+| `normalizeActions` | `actions`, `memory.currentCardId`, `memory.cardProgress`, `course.teachingHints`, `asrText`, `stateUpdate` | `actions` (R-C forceCardId) |
+| `speechCardAlign` | `actions` (post-normalize), `speech`, `memory.currentCardId`, `course.cards` | `speech` (override if mismatch) |
+
+**Why this order**:
+
+- `closingGuard` and `prematureClosingGuard` rewrite `speech` BEFORE
+  normalize. They can also push new `show_card` actions (premature-closing
+  does this). Normalize then reconciles those actions with R-C `forceCardId`.
+- `normalizeActions` is the source of truth for which card is visible this
+  turn (`forceCardId`). `speechCardAlign` MUST run AFTER normalize because
+  it compares `speech` against the **post-normalize** primary card to detect
+  speech/show_card mismatch.
+- Swapping `normalizeActions` ↔ `speechCardAlign` causes align to see the
+  pre-normalize (possibly LLM-hallucinated) card and either no-op when it
+  should fire, or fire on a card normalize is about to reject.
+
+### Design Decision: keep `normalizeAssistantActions` in `memory.ts`
+
+**Context**: When extracting guards, the natural temptation is to move every
+guard's logic into `guards/<name>.ts` for symmetry. `normalizeActions` is
+the largest guard (~70 lines) and the most "guard-shaped" — it reads ctx,
+returns a transformed `actions` array.
+
+**Options Considered**:
+
+1. Move `normalizeAssistantActions` (and its private helper
+   `applyAttemptAssessment`) into `guards/normalize-actions.ts`.
+2. Keep `normalizeAssistantActions` in `memory.ts`;
+   `guards/normalize-actions.ts` is a thin wrapper that calls it.
+
+**Decision**: Option 2 (wrapper). Reasons:
+
+- `applyAttemptAssessment` is tightly coupled to `LessonMemory` mutation
+  helpers (`markWordCorrect`, `markWordIncorrect`, `updateWordPerformance`,
+  `mergeUnique`). Moving it to `guards/` would require exporting those
+  helpers from `memory.ts`, widening the public API surface.
+- `memory.test.ts` has extensive coverage of `normalizeAssistantActions`
+  internals. Moving the function would force splitting/duplicating those
+  tests, with no behavior gain.
+- The wrapper costs ~10 LOC and zero indirection at runtime.
+
+**Wrapper shape** (`guards/normalize-actions.ts`):
+
+```ts
+import { normalizeAssistantActions } from '../memory';
+import type { GuardFn } from './index';
+
+export const normalizeActions: GuardFn = (ctx) => ({
+  ...ctx,
+  actions: normalizeAssistantActions(
+    ctx.memory,
+    ctx.course,
+    { speech: ctx.speech, actions: ctx.actions, state_update: ctx.stateUpdate },
+    ctx.asrText,
+  ),
+});
+```
+
+**Do not move `normalizeAssistantActions` into `guards/`** — even if a
+future PR "cleans up the boundary" with that justification. The boundary is
+intentional.
+
+### Don't: mutate `ctx.memory` inside a guard
+
+```ts
+// WRONG — guard mutates shared state
+export const myGuard: GuardFn = (ctx) => {
+  if (someCondition) {
+    ctx.memory.wordsLearned.push('hallucinated');  // ❌
+    ctx.memory.currentCardId = 'whatever';         // ❌
+  }
+  return ctx;
+};
+
+// CORRECT — guard only returns a new ctx; memory commits happen later
+export const myGuard: GuardFn = (ctx) => {
+  if (someCondition) {
+    // diagnose, override speech / actions / stateUpdate as needed.
+    return { ...ctx, speech: 'override' };
+  }
+  return ctx;
+};
+```
+
+`commitTurn` (in `session.ts`) is the **only** place that mutates session
+memory, and it does so from the post-pipeline ctx fields, not from memory
+itself.
+
+### Don't: swap `normalizeActions` ↔ `speechCardAlign` order
+
+```ts
+// WRONG — align runs before normalize, sees LLM's stale card
+runPipeline(ctx, [closingGuard, prematureClosingGuard, speechCardAlign, normalizeActions]);
+
+// CORRECT — normalize first, align observes the authoritative card
+runPipeline(ctx, [closingGuard, prematureClosingGuard, normalizeActions, speechCardAlign]);
+```
+
+If a future guard adds another speech rewrite that must happen
+post-normalize, put it after `speechCardAlign`. If it must happen
+pre-normalize, put it next to `prematureClosingGuard`. Document the choice
+in the guard file header.
+
+### Pattern: adding a new guard
+
+1. Create `src/lib/agent/guards/<name>.ts` exporting a `GuardFn`. Add a
+   header comment naming the rule (e.g. `// R-E: <one-line purpose>`).
+2. Create `src/lib/agent/guards/<name>.test.ts` with at least one positive
+   case (trigger fires, ctx changes) and one negative case (trigger doesn't
+   fire, ctx unchanged).
+3. Decide insert position by data dependency, not by intuition:
+   - Reads/writes `actions`? Probably near `normalizeActions`.
+   - Reads/writes `speech` only? Probably near `closingGuard` /
+     `speechCardAlign`.
+   - Reads `stateUpdate` only? Near the front.
+4. Push to the `guards` array in `streamUserInput` with a one-line comment
+   explaining the position choice.
+5. Run `pnpm test` + `pnpm exec tsc --noEmit` + `pnpm smoke:lesson`. Smoke
+   is **required** per `CLAUDE.md` for any `src/lib/agent/**` change.
+
+### Validation & Error Matrix
+
+| condition | runPipeline behavior |
+|---|---|
+| All guards return ctx normally | Pipeline returns the final ctx |
+| Guard throws | `console.error('[guard] <name> failed: <err>')`, pipeline continues with prior ctx |
+| Guard returns `undefined` / `null` | Pipeline continues with that value — downstream guards will likely crash on `ctx.X` access. **Not defended against**; treat as a bug in the guard, fix the guard |
+| Guard mutates `ctx.memory` | No runtime error; `commitTurn` will see inconsistent state. **Not defended against**; convention only |
+
+### Tests Required
+
+- `src/lib/agent/guards/run-pipeline.test.ts` — covers: normal sequence,
+  single guard throws (pipeline continues), all guards throw (pipeline
+  returns original ctx), empty guards array
+- Per-guard test files — at minimum, one positive + one negative case
+- `src/lib/agent/closing-guard.test.ts` (the **old** integration test in
+  the agent root, not the new unit test in `guards/`) is **kept on purpose**
+  — it tests the guard through `streamUserInput` end-to-end, providing an
+  E2E layer the new unit tests don't cover. Do not delete it.
+- Smoke (`pnpm smoke:lesson`) — verify `[normalize] snapshot` JSON output
+  is byte-identical to a baseline pre-refactor smoke output
+
+### Wrong vs Correct
+
+#### Wrong — "I'll add the new guard inline, it's faster"
+
+```ts
+// In streamUserInput, after extractor.finalize():
+const result = extractor.finalize();
+// ... R-E: new guard inline
+if (someEdgeCase) {
+  result.speech = 'override';
+  result.actions = [];
+}
+const ctx = { speech: result.speech, ... };
+runPipeline(ctx, [closingGuard, ...]);
+```
+
+**Why wrong**: the inline path bypasses the pipeline's fail-safe wrap; the
+new edge case is invisible to future readers looking at the guards array;
+the next guard added will have to choose between inline or pipeline,
+producing inconsistent style.
+
+#### Correct — push to the array
+
+```ts
+// src/lib/agent/guards/my-edge-case.ts
+export const myEdgeCaseGuard: GuardFn = (ctx) => {
+  if (!someEdgeCase(ctx)) return ctx;
+  return { ...ctx, speech: 'override', actions: [] };
+};
+
+// src/lib/agent/session.ts:
+runPipeline(ctx, [
+  closingGuard,
+  prematureClosingGuard,
+  myEdgeCaseGuard,      // ← inserted here because it overrides speech, runs after closing/premature
+  normalizeActions,
+  speechCardAlign,
+]);
+```
 
 ---
 

@@ -4,7 +4,7 @@
 > 历史迭代设计请看 `docs/superpowers/specs/*`,本文不复述当时的"打算怎么做",只描述"现在长什么样"。
 > 维护规则见 `/CLAUDE.md`。
 
-最近重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:**Guard pipeline 重构(2026-05-24)** — 把 `streamUserInput` 里的 4 段内联 guard 逻辑拆成 `src/lib/agent/guards/` 下的独立模块(GuardContext / GuardFn / runPipeline + closingGuard / prematureClosingGuard / normalizeActions / speechCardAlign);`streamUserInput` 从 169 行压缩到 60 行;每个 guard 有独立单测;行为不变。上次重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 ---
 
@@ -46,7 +46,8 @@
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
 | `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,8 状态机,统一编排 ASR + SSE + TTS + 静态 quiz TTS** |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
-| `src/lib/agent/session.ts` | LLM 一轮对话:词汇尝试判定 → 取 history → 调 streamLLM → 收 chunk → 记录 usage |
+| `src/lib/agent/session.ts` | LLM 一轮对话骨架:session 查找 + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn |
+| `src/lib/agent/guards/` | **Guard pipeline**(见下方 §Agent Guard Pipeline) |
 | `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta;导出 `sanitizeSpeech` 剥离 `xxx_yyy` 这种 card_id token,防止 TTS 把 `_` 读成"下划线 / underscore"** |
 | `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史、当前词精确尝试判定 |
 | `src/lib/agent/prompt.ts` | 课堂 system prompt 拼装,包含已学词总结与连续失败切策略约束 |
@@ -233,6 +234,47 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 
 ---
 
+## 4c. Agent Guard Pipeline
+
+Guard pipeline 在 `src/lib/agent/guards/` 下,由 `streamUserInput` 在 LLM 流式消费结束后、SSE yield 之前调用。
+
+### GuardContext(输入输出 shape)
+
+```ts
+interface GuardContext {
+  speech: string;          // 当前 AI 语音文本(各 guard 可替换)
+  actions: ToolAction[];   // 当前 show_card 动作列表(normalizeActions 后有效)
+  stateUpdate: AgentResponse['state_update'];
+  memory: LessonMemory;    // read-only 视图 — guard 不得修改 memory
+  course: Course;
+  asrText?: string;        // 原始 raw ASR 字符串
+  currentPhase: PhaseName;
+}
+```
+
+`GuardContext.memory` 是 **read-only 视图**。所有 memory 修改仍在 pipeline 之后的 `commitAssistantStreamResult` 里发生。
+
+### Guard 职责与顺序(顺序敏感)
+
+| 顺序 | Guard | 文件 | 职责 |
+|------|-------|------|------|
+| 1 | `closingGuard` | `closing-guard.ts` | R4/R6:speech 含未学词时替换安全模板;`memory.currentWord` 与 `state_update.current_word` 豁免 |
+| 2 | `prematureClosingGuard` | `premature-closing-guard.ts` | R-B:interactive 阶段说"下次再来"等软关闭词时覆盖 speech 并强推下一个 untouched 词卡 |
+| 3 | `normalizeActions` | `normalize-actions.ts` | R-C wrapper:调 `normalizeAssistantActions(memory.ts)`,服务端权威选牌 |
+| 4 | `speechCardAlign` | `speech-card-align.ts` | speech 提到的词卡与 normalizeActions 结果不一致时替换 speech |
+
+**为什么顺序敏感**:guard 4(`speechCardAlign`)读取 guard 3(`normalizeActions`)写入的 `ctx.actions` 来确定 forceCardId。如果顺序颠倒,speechCardAlign 会读到 normalize 前的 LLM 原始 actions,得出错误的对齐判断。
+
+### runPipeline 失败策略
+
+guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用抛出前的 ctx 继续走下一个 guard。这是 fail-safe 策略:单个 guard 的 bug 不会让整个课堂 SSE 冻住。
+
+### 与 memory.ts 的边界
+
+`normalizeAssistantActions` 保留在 `memory.ts`(与 `applyAttemptAssessment` 强耦合)。`guards/normalize-actions.ts` 是薄 wrapper,只把签名适配成 GuardFn。后续若解耦 memory 状态,可把 normalize 搬进 guards/;当前不动。
+
+---
+
 ## 5. 协议踩坑摘要(详情指向其它文档)
 
 完整原文:`docs/DOUBAO Protocol/{asr,tts}.md`。日常协作关键点:
@@ -341,6 +383,7 @@ idle ─startLesson─▶ intro ─[切1]─▶ interactive ─[切2]─▶ rein
 - 2026-05-22 — **reinforcement quiz 静态 TTS 引导** — 新增 `LessonController.speakStatic` 与 `quiz-speaking` state;pick-word 播 prompt + correct English,repetition 播 targetText;播完前锁 UI,错答播 retry hint;reinforcement phase-change 等过渡 TTS 完成后再显示 quiz。
 
 - 2026-05-24 — **代码库清扫(A+B+C)** — 删 logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage(内联) / getNextWordCardId;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content),仅保留 current_word + attempt_assessment;mockStreamLLM 修正为合法 ToolAction。
+- 2026-05-24 — **Guard pipeline 重构(D)** — 新增 `src/lib/agent/guards/`(index / closing-guard / premature-closing-guard / normalize-actions / speech-card-align + 各自 *.test.ts);`streamUserInput` 从 169 行压缩到 60 行;行为不变;每个 guard 有独立单测;`docs/architecture.md` 新增 §4c。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 

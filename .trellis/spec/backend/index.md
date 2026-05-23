@@ -27,7 +27,7 @@ lesson logs, MiMo LLM streaming, and Doubao ASR/TTS proxy modules.
 | [Error Handling](./error-handling.md) | API, SSE, WebSocket, provider, and client error patterns | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Required tests and review gates for backend changes | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Current console logging style and sensitive-data limits | Filled |
-| [Agent Layer](./agent-layer.md) | memory/session/prompt contracts: actions timing, ASR verify, R5/R7 (legacy, superseded by R-C 2026-05-23), R6 closing guard currentWord exempt, state_update schema (R-C server-authoritative), test fixtures & mocks | Filled |
+| [Agent Layer](./agent-layer.md) | memory/session/prompt contracts: actions timing, ASR verify, R5/R7 (legacy, superseded by R-C 2026-05-23), R6 closing guard currentWord exempt, state_update schema (R-C server-authoritative), Guard Pipeline (R-D 2026-05-24 — GuardFn[] in src/lib/agent/guards/), test fixtures & mocks | Filled |
 
 ## Quality Check
 
