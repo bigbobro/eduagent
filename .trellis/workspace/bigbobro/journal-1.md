@@ -484,3 +484,36 @@ Updated docs/TODO.md to reflect 2026-05-23 voice stabilization work, marked ligh
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: Codebase cleanup A+B+C: dead code, mock fix, state_update schema slim
+
+**Date**: 2026-05-24
+**Task**: Codebase cleanup A+B+C: dead code, mock fix, state_update schema slim
+**Branch**: `main`
+
+### Summary
+
+代码库 review 后 grill-me 拷打把 6 类优化压成 4 类（E PhasedController 收口砍掉、F 课程 factory park 到 TODO）。开父任务 codebase-cleanup-and-refactor + 2 子任务（cleanup-quick-wins / guard-pipeline-refactor）。本 session 完成子任务 1：A 删 6 项死代码（logger.ts 全文件 / callLLM / incrementSilentTurns + silentTurns / addAssistantMessage 内联 / getNextWordCardId / GenerateState）、B 修 mockStreamLLM 过期 ToolAction shape、C 删 state_update 4 个废字段（current_card_id / phase / words_learned / generated_content），LLM 只保留 current_word + attempt_assessment。沉淀 2 条契约到 .trellis/spec/backend/agent-layer.md（state_update server-authoritative + Test fixtures & mocks），含 2026-05-05 mock 失修教训。子任务 2（D session.ts 拆 guard pipeline）保持 planning 待派。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c366627` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

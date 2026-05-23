@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
-- **Last Active**: 2026-05-23
+- **Total Sessions**: 15
+- **Last Active**: 2026-05-24
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~486 | Active |
+| `journal-1.md` | ~519 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-05-24 | Codebase cleanup A+B+C: dead code, mock fix, state_update schema slim | `c366627` | `main` |
 | 14 | 2026-05-23 | 前端优化迭代：字体本地化、数据直传、代码清理、WS重连 | `eb4fd30`, `7dcd2e9`, `29d667d`, `2357f17`, `beccc85` | `main` |
 | 13 | 2026-05-23 | Update lesson TODO after voice stabilization | `3f91d18` | `main` |
 | 12 | 2026-05-23 | Fix lesson voice regressions | `8869b0f` | `main` |
