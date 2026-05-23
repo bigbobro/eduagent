@@ -381,3 +381,36 @@ Diagnosed and fixed 'card flipped but teacher voice lagging' from 2026-05-23 ani
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Fix lesson voice regressions
+
+**Date**: 2026-05-23
+**Task**: Fix lesson voice regressions
+**Branch**: `main`
+
+### Summary
+
+Fixed push-to-talk ASR startup and pointer capture regressions, serialized forced phase transitions, aligned teacher speech with normalized show_card before TTS, and extended lesson smoke coverage for UI hold plus speech/card consistency.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8869b0f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
