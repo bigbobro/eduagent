@@ -60,17 +60,25 @@ describe('design tokens', () => {
 
   it('defines global web fonts and CSS font variables', () => {
     const globals = readFileSync(join(process.cwd(), 'src/app/globals.css'), 'utf8');
-    expect(globals).toContain('fonts.googleapis.com/css2?family=ZCOOL+KuaiLe');
-    expect(globals).toContain('family=LXGW+WenKai+TC:wght@400;700');
-    expect(globals).toContain('family=Fredoka:wght@400;500;600;700');
-    expect(globals).toContain('family=Caveat:wght@500;600;700');
-    expect(globals).toContain('family=JetBrains+Mono:wght@400;500');
+    const layout = readFileSync(join(process.cwd(), 'src/app/layout.tsx'), 'utf8');
+    // 4 fonts loaded via next/font/google in layout.tsx (self-hosted at build time)
+    expect(layout).toContain("from 'next/font/google'");
+    expect(layout).toContain('ZCOOL_KuaiLe');
+    expect(layout).toContain('Fredoka');
+    expect(layout).toContain('Caveat');
+    expect(layout).toContain('JetBrains_Mono');
+    // LXGW WenKai TC loaded via non-blocking <link> in layout.tsx
+    expect(layout).toContain('LXGW+WenKai+TC');
+    // globals.css should NOT have the render-blocking @import
+    expect(globals).not.toContain('@import url(');
+    // CSS variables still declared in globals.css
     expect(globals).toContain('--font-zh:');
     expect(globals).toContain('--font-display:');
     expect(globals).toContain('--font-en:');
     expect(globals).toContain('--font-en-script:');
     expect(globals).toContain('--font-mono:');
   });
+
 
   it('disables sparkle motion for reduced-motion users', () => {
     const globals = readFileSync(join(process.cwd(), 'src/app/globals.css'), 'utf8');
