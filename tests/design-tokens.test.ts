@@ -61,14 +61,13 @@ describe('design tokens', () => {
   it('defines global web fonts and CSS font variables', () => {
     const globals = readFileSync(join(process.cwd(), 'src/app/globals.css'), 'utf8');
     const layout = readFileSync(join(process.cwd(), 'src/app/layout.tsx'), 'utf8');
-    // 4 fonts loaded via next/font/google in layout.tsx (self-hosted at build time)
-    expect(layout).toContain("from 'next/font/google'");
-    expect(layout).toContain('ZCOOL_KuaiLe');
+    // All 5 fonts loaded via next/font/local with self-hosted woff2 files
+    expect(layout).toContain("from 'next/font/local'");
+    expect(layout).toContain('ZCOOLKuaiLe');
     expect(layout).toContain('Fredoka');
     expect(layout).toContain('Caveat');
-    expect(layout).toContain('JetBrains_Mono');
-    // LXGW WenKai TC loaded via non-blocking <link> in layout.tsx
-    expect(layout).toContain('LXGW+WenKai+TC');
+    expect(layout).toContain('JetBrainsMono');
+    expect(layout).toContain('LXGWWenKaiTC');
     // globals.css should NOT have the render-blocking @import
     expect(globals).not.toContain('@import url(');
     // CSS variables still declared in globals.css

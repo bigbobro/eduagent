@@ -1,34 +1,43 @@
 import type { Metadata } from 'next';
-import { ZCOOL_KuaiLe, Fredoka, Caveat, JetBrains_Mono } from 'next/font/google';
+import localFont from 'next/font/local';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SVGDefs } from '@/components/ui/SVGDefs';
 import './globals.css';
 
-const zcoolKuaiLe = ZCOOL_KuaiLe({
+const zcoolKuaiLe = localFont({
+  src: './fonts/ZCOOLKuaiLe-Regular.woff2',
   weight: '400',
-  subsets: ['latin'],
   variable: '--font-display',
   display: 'swap',
 });
 
-const fredoka = Fredoka({
-  weight: ['400', '500', '600', '700'],
-  subsets: ['latin'],
+const fredoka = localFont({
+  src: './fonts/Fredoka-Variable.woff2',
+  weight: '400 700',
   variable: '--font-en',
   display: 'swap',
 });
 
-const caveat = Caveat({
-  weight: ['500', '600', '700'],
-  subsets: ['latin'],
+const caveat = localFont({
+  src: './fonts/Caveat-Variable.woff2',
+  weight: '500 700',
   variable: '--font-en-script',
   display: 'swap',
 });
 
-const jetbrainsMono = JetBrains_Mono({
-  weight: ['400', '500'],
-  subsets: ['latin'],
+const jetbrainsMono = localFont({
+  src: './fonts/JetBrainsMono-Variable.woff2',
+  weight: '400 500',
   variable: '--font-mono',
+  display: 'swap',
+});
+
+const lxgwWenKaiTC = localFont({
+  src: [
+    { path: './fonts/LXGWWenKaiTC-Regular.woff2', weight: '400', style: 'normal' },
+    { path: './fonts/LXGWWenKaiTC-Bold.woff2', weight: '700', style: 'normal' },
+  ],
+  variable: '--font-zh',
   display: 'swap',
 });
 
@@ -37,6 +46,7 @@ const fontVariableClasses = [
   fredoka.variable,
   caveat.variable,
   jetbrainsMono.variable,
+  lxgwWenKaiTC.variable,
 ].join(' ');
 
 export const metadata: Metadata = {
@@ -49,15 +59,6 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN" className={fontVariableClasses}>
-      <head>
-        {/* LXGW WenKai TC: not in next/font/google, load via CDN non-blocking */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&display=swap"
-        />
-      </head>
       <body className="font-zh antialiased bg-paper text-ink">
         <SVGDefs />
         <ErrorBoundary>{children}</ErrorBoundary>
