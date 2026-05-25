@@ -6,6 +6,10 @@ tokens, and controller-driven lesson views. The main lesson UI is driven by
 browser-side controller classes that emit state, subtitle, action, and progress
 events.
 
+Current product scope is local desktop-browser use only. Do not add iPadOS app,
+mobile web, or touch-device compatibility work unless that scope is explicitly
+changed; preserve desktop `localhost` lesson flow first.
+
 ## Pre-Development Checklist
 
 - Confirm whether the change touches the lesson flow, home/journal/parents
