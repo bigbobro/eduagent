@@ -35,6 +35,10 @@ Each regular 3-6 year old theme course must define:
 - `cards`: exactly 16 cards for a regular theme course: 12 concrete `word`
   cards plus 4 `sentence` practice cards.
 - `drillParts`: non-empty syllable or chunk list for every card.
+- `asrAliases`: optional explicit ASR hit aliases. Use only when a real ASR
+  transcript can reasonably represent the English target, for example
+  `pie` -> `派`. Do not populate it from every Chinese translation; saying
+  `蛋糕` should not automatically clear `cake`.
 - `objectives.sentences`: exactly 4 real child-sayable short sentences, not
   abstract templates. Each sentence must use one target word from the course's
   12 word cards.
@@ -100,6 +104,8 @@ Avoid: no English text, no Chinese text, no letters, no watermark, no realistic 
 | Generated source remains after project save | Delete the scratch source file |
 | Quiz references unknown card id | Fix data; do not hide with type assertions |
 | Home only shows a subset of courses | Update home UI/tests so registry courses are visible |
+| ASR often transcribes the English target as a homophone or transliteration | Add a narrow `asrAliases` entry and a regression test |
+| ASR alias is just the Chinese meaning | Do not add it unless it is also the expected ASR form for the English sound |
 
 ## Tests Required
 

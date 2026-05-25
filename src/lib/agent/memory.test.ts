@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
+import { treatsCourse } from '@/data/courses/treats';
 import {
   createMemory,
   getMessagesForLLM,
@@ -272,6 +273,107 @@ describe('R-C: server-authoritative R2 count + 2-hit clearance', () => {
     memory = commitAssistantStreamResult(memory, foodCourse, 'a', [], mkAssessment('correct', 'rice'), 'RICE!');
     memory = commitAssistantStreamResult(memory, foodCourse, 'b', [], mkAssessment('correct', 'rice'), 'rice.');
     expect(memory.cardProgress.rice).toBe('cleared');
+  });
+
+  it('ASR matching ignores separators for compound words such as ice cream', () => {
+    let memory: any = { ...initializeCardProgress(createMemory(), treatsCourse), currentCardId: 'icecream' };
+    const assessment = {
+      current_word: 'ice cream',
+      attempt_assessment: {
+        card_id: 'icecream',
+        result: 'correct' as const,
+        should_advance: true,
+        evidence: 'heard ice cream',
+      },
+    };
+
+    memory = commitAssistantStreamResult(memory, treatsCourse, 'a', [], assessment, 'Ice cream.');
+    expect(memory.cardCorrectCount.icecream).toBe(1);
+    expect(memory.cardProgress.icecream).toBe('attempted');
+
+    memory = commitAssistantStreamResult(memory, treatsCourse, 'b', [], assessment, 'ice-cream!');
+    expect(memory.cardCorrectCount.icecream).toBe(2);
+    expect(memory.cardProgress.icecream).toBe('cleared');
+    expect(memory.wordsLearned).toContain('ice cream');
+  });
+
+  it('ASR matching accepts explicit course aliases such as pie -> 派', () => {
+    let memory: any = { ...initializeCardProgress(createMemory(), treatsCourse), currentCardId: 'pie' };
+    const assessment = {
+      current_word: 'pie',
+      attempt_assessment: {
+        card_id: 'pie',
+        result: 'correct' as const,
+        should_advance: true,
+        evidence: 'heard pie',
+      },
+    };
+
+    memory = commitAssistantStreamResult(memory, treatsCourse, 'a', [], assessment, '派。');
+    memory = commitAssistantStreamResult(memory, treatsCourse, 'b', [], assessment, '派!');
+
+    expect(memory.cardCorrectCount.pie).toBe(2);
+    expect(memory.cardProgress.pie).toBe('cleared');
+    expect(memory.wordsLearned).toContain('pie');
+  });
+
+  it('ASR matching does not treat every Chinese translation as a hit by default', () => {
+    const memory = { ...initializeCardProgress(createMemory(), treatsCourse), currentCardId: 'cake' };
+
+    const next = commitAssistantStreamResult(memory, treatsCourse, 'a', [], {
+      current_word: 'cake',
+      attempt_assessment: {
+        card_id: 'cake',
+        result: 'correct',
+        should_advance: true,
+        evidence: 'LLM over-accepted Chinese translation',
+      },
+    }, '蛋糕。');
+
+    expect(next.cardProgress.cake).toBe('untouched');
+    expect(next.cardCorrectCount.cake || 0).toBe(0);
+  });
+
+  it('R-C advances from icecream to lollipop when the second hit is spoken as ice cream', () => {
+    const clearedBeforeIcecream = [
+      'cake',
+      'cookie',
+      'chocolate',
+      'honey',
+      'candy',
+      'pudding',
+      'pie',
+      'jelly',
+      'donut',
+      'muffin',
+    ];
+    const cardProgress = { ...initializeCardProgress(createMemory(), treatsCourse).cardProgress };
+    for (const id of clearedBeforeIcecream) {
+      cardProgress[id] = 'cleared';
+    }
+    const memory = {
+      ...initializeCardProgress(createMemory(), treatsCourse),
+      currentCardId: 'icecream',
+      cardProgress,
+      clearedCardIds: clearedBeforeIcecream,
+      cardCorrectCount: { icecream: 1 },
+    };
+
+    const actions = normalizeAssistantActions(memory, treatsCourse, {
+      speech: 'Great ice cream. Now lollipop.',
+      actions: [{ tool: 'show_card', params: { card_id: 'icecream' } }],
+      state_update: {
+        current_word: 'ice cream',
+        attempt_assessment: {
+          card_id: 'icecream',
+          result: 'correct',
+          should_advance: true,
+          evidence: 'heard ice cream',
+        },
+      },
+    }, 'Ice cream.');
+
+    expect(actions).toEqual([{ tool: 'show_card', params: { card_id: 'lollipop' } }]);
   });
 
   it('streak still marks needs_review on 3 close/wrong with no R2 hits', () => {

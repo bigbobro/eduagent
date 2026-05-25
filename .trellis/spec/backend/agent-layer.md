@@ -153,13 +153,35 @@ setAsrSessionContext({ courseId, cardId, clearedCardIds });
 
 `rawAsrText` is the verbatim ASR string from the user's microphone.
 
-**When `assessment.result === 'correct'`**:
+**R-C target matching**:
+
+- Lower-case target word and raw ASR.
+- Build target candidates from `WordCard.english` plus explicit
+  `WordCard.asrAliases`.
+- Keep ASCII letters/digits and CJK characters, deleting separators before
+  comparing. This makes `ice cream`, `ice-cream`, and `icecream` equivalent,
+  and allows a course to opt in aliases such as `pie` -> `派`.
+- Do not treat every `WordCard.chinese` value as a hit by default. Chinese
+  translations only count when the course explicitly lists them in
+  `asrAliases`.
+- Count hits against the current word card id, not against
+  `state_update.current_word`.
+
+**When a raw ASR target hit exists**:
 
 | condition | outcome |
 |-----------|---------|
-| `rawAsrText` contains the target word (case-insensitive, punctuation stripped) | → `cleared` (normal) |
-| `rawAsrText` present but does NOT contain target word | → `attempted` + `streak+1` + `console.warn` |
-| `rawAsrText` is `undefined` | → fallback: trust LLM (current behavior, no block) |
+| current card has < 1 prior hit | → `attempted`, `cardCorrectCount[cardId] = 1` |
+| current card reaches 2 hits | → `cleared`, append `clearedCardIds`, lock further counting |
+| current card is already `cleared` | → ignore further hits |
+
+**When no raw ASR target hit exists**:
+
+| condition | outcome |
+|-----------|---------|
+| `assessment.result === 'correct'` | → no progress credited + `console.warn` |
+| `assessment.result === 'close' || 'wrong'` | → increment streak; third miss marks `needs_review` |
+| `assessment.result === 'off_topic'` or missing assessment | → no progress change |
 
 **When `assessment.card_id !== memory.currentCardId`**: ignore silently + `console.warn`. Do not apply the assessment to a different card.
 

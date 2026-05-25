@@ -27,6 +27,9 @@ runtime schema library such as Zod.
 ## Required Course Data
 
 - Every `WordCard` requires `drillParts: string[]`.
+- `WordCard.asrAliases?: string[]` is optional and narrow. Use it only for
+  explicit ASR hit aliases that should count as the English target, such as
+  `pie` -> `派`. Do not mirror every Chinese translation into `asrAliases`.
 - Regular visible courses should include exactly 12 word cards, exactly 4
   sentence cards, exactly 4 child-sayable target sentences in
   `objectives.sentences`, `teachingHints`, and `phases`.

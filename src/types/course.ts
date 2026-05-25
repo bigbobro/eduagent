@@ -5,6 +5,7 @@ export interface WordCard {
   imageUrl: string;
   kind: 'word' | 'sentence';
   drillParts: string[];
+  asrAliases?: string[];
   difficulty?: number;
   tags?: string[];
 }

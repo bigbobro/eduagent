@@ -13,11 +13,11 @@ export const treatsCourse: Course = {
     { id: 'honey', english: 'honey', chinese: '蜂蜜', imageUrl: '/images/treats/honey.png', kind: 'word', drillParts: ["hon","ey"], difficulty: 1, tags: ['treats'] },
     { id: 'candy', english: 'candy', chinese: '糖果', imageUrl: '/images/treats/candy.png', kind: 'word', drillParts: ["can","dy"], difficulty: 1, tags: ['treats'] },
     { id: 'pudding', english: 'pudding', chinese: '布丁', imageUrl: '/images/treats/pudding.png', kind: 'word', drillParts: ["pud","ding"], difficulty: 1, tags: ['treats'] },
-    { id: 'pie', english: 'pie', chinese: '派', imageUrl: '/images/treats/pie.png', kind: 'word', drillParts: ["pie"], difficulty: 1, tags: ['treats'] },
+    { id: 'pie', english: 'pie', chinese: '派', imageUrl: '/images/treats/pie.png', kind: 'word', drillParts: ["pie"], asrAliases: ["派"], difficulty: 1, tags: ['treats'] },
     { id: 'jelly', english: 'jelly', chinese: '果冻', imageUrl: '/images/treats/jelly.png', kind: 'word', drillParts: ["jel","ly"], difficulty: 1, tags: ['treats'] },
     { id: 'donut', english: 'donut', chinese: '甜甜圈', imageUrl: '/images/treats/donut.png', kind: 'word', drillParts: ["do","nut"], difficulty: 1, tags: ['treats'] },
     { id: 'muffin', english: 'muffin', chinese: '麦芬', imageUrl: '/images/treats/muffin.png', kind: 'word', drillParts: ["muf","fin"], difficulty: 1, tags: ['treats'] },
-    { id: 'icecream', english: 'icecream', chinese: '冰淇淋', imageUrl: '/images/treats/icecream.png', kind: 'word', drillParts: ["ice","cream"], difficulty: 1, tags: ['treats'] },
+    { id: 'icecream', english: 'ice cream', chinese: '冰淇淋', imageUrl: '/images/treats/icecream.png', kind: 'word', drillParts: ["ice","cream"], difficulty: 1, tags: ['treats'] },
     { id: 'lollipop', english: 'lollipop', chinese: '棒棒糖', imageUrl: '/images/treats/lollipop.png', kind: 'word', drillParts: ["lol","li","pop"], difficulty: 2, tags: ['treats'] },
     { id: 'sentence_chocolate', english: 'I like chocolate.', chinese: '我喜欢巧克力。', imageUrl: '/images/treats/chocolate.png', kind: 'sentence', drillParts: ["I like","chocolate"], difficulty: 1, tags: ['treats', 'sentence'] },
     { id: 'sentence_cookie', english: 'I eat a cookie.', chinese: '我吃一块饼干。', imageUrl: '/images/treats/cookie.png', kind: 'sentence', drillParts: ["I eat","a cookie"], difficulty: 1, tags: ['treats', 'sentence'] },
@@ -32,7 +32,7 @@ export const treatsCourse: Course = {
     reviewCardIds: [],
     newCardIds: ["cake","cookie","chocolate","honey","candy","pudding","pie","jelly","donut","muffin","icecream","lollipop"],
     quizQuestions: ["Where is the chocolate?","Where is the cookie?","Where is the honey?","Where is the jelly?"],
-    closing: '今天我们认识了 cake, cookie, chocolate, honey, candy, pudding, pie, jelly, donut, muffin, icecream, lollipop!',
+    closing: '今天我们认识了 cake, cookie, chocolate, honey, candy, pudding, pie, jelly, donut, muffin, ice cream, lollipop!',
   },
   phases: {
     introduction: {

@@ -1,6 +1,6 @@
 import { LessonMemory, Message, InterestSignal, WordPerf, LessonPhase, CardProgressState } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
-import { Course } from '@/types/course';
+import { Course, WordCard } from '@/types/course';
 
 const MAX_HISTORY = 12;
 
@@ -259,8 +259,8 @@ function applyShowCardProgress(
 }
 
 // R-C (2026-05-23): server-authoritative clearance based on R2 literal ASR hits.
-// Rule (user-locked): a word card requires 2 R2 hits (raw ASR contains the card's
-// English token, lower-cased, punctuation stripped) to be 'cleared'. Hits do not need
+// Rule (user-locked): a word card requires 2 R2 hits (raw ASR contains one of
+// the card's canonical ASR targets) to be 'cleared'. Hits do not need
 // to be consecutive. Once 'cleared', the card is LOCKED — further hits are ignored.
 // LLM's assessment.result is used only for streak / hint signals on non-hit turns.
 function applyAttemptAssessment(
@@ -277,9 +277,9 @@ function applyAttemptAssessment(
     return memory;
   }
 
-  const targetToken = (targetCard.english || '').toLowerCase().replace(/[.,!?;]/g, '').trim();
-  const asrNormalized = (rawAsrText || '').toLowerCase().replace(/[.,!?;]/g, '');
-  const r2Hit = targetToken.length > 0 && asrNormalized.includes(targetToken);
+  const targetTokens = getR2MatchTargets(targetCard);
+  const asrNormalized = normalizeR2MatchText(rawAsrText || '');
+  const r2Hit = targetTokens.some((targetToken) => asrNormalized.includes(targetToken));
 
   // Path A: R2 hit — server credits the kid regardless of LLM result judgment.
   if (r2Hit) {
@@ -337,7 +337,7 @@ function applyAttemptAssessment(
   if (assessment.result === 'correct') {
     // LLM said correct but ASR did not contain the target token. Don't downgrade further
     // than current state; this is likely an LLM mis-judgment. Leave streak as-is.
-    console.warn('[memory] R-C: LLM correct but ASR lacks target — no progress credited. asr=', rawAsrText, 'target=', targetToken);
+    console.warn('[memory] R-C: LLM correct but ASR lacks target — no progress credited. asr=', rawAsrText, 'target=', targetTokens.join('|'));
     return memory;
   }
   if (assessment.result === 'close' || assessment.result === 'wrong') {
@@ -349,6 +349,17 @@ function applyAttemptAssessment(
   }
   // off_topic / unknown — no progress change.
   return memory;
+}
+
+function getR2MatchTargets(card: WordCard): string[] {
+  const candidates = [card.english, ...(card.asrAliases || [])];
+  return Array.from(new Set(candidates.map(normalizeR2MatchText).filter(Boolean)));
+}
+
+function normalizeR2MatchText(value: string): string {
+  return Array.from(value.toLowerCase())
+    .filter((char) => /[a-z0-9]/.test(char) || /[\u3400-\u9fff]/.test(char))
+    .join('');
 }
 
 function resolvePhase(memory: LessonMemory, requested: LessonPhase): LessonPhase {

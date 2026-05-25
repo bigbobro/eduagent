@@ -58,6 +58,7 @@ describe('course drill data', () => {
         expect(card.drillParts, `${course.id}/${card.id}`).toBeDefined();
         expect(card.drillParts.length, `${course.id}/${card.id}`).toBeGreaterThan(0);
         expect(card.drillParts.every((part) => part.trim().length > 0), `${course.id}/${card.id}`).toBe(true);
+        expect((card.asrAliases || []).every((alias) => alias.trim().length > 0), `${course.id}/${card.id} asrAliases`).toBe(true);
       }
     }
   });

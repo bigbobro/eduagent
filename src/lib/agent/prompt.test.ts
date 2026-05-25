@@ -110,6 +110,19 @@ describe('buildSystemPrompt v2 wordcard protocol', () => {
     expect(prompt).toContain('sentence_like_milk: I like milk. / 我喜欢牛奶。 (sentence); drillParts=I like | milk');
   });
 
+  it('lists explicit ASR aliases when a course card defines them', () => {
+    const course: Course = {
+      ...foodCourse,
+      cards: foodCourse.cards.map((card) => (
+        card.id === 'apple' ? { ...card, asrAliases: ['苹果音译'] } : card
+      )),
+    };
+
+    const prompt = buildSystemPrompt(course, createMemory());
+
+    expect(prompt).toContain('apple: apple / 苹果 (word); drillParts=app | le; asrAliases=苹果音译');
+  });
+
   it('exposes review/new card id lists', () => {
     const memory = createMemory();
     const prompt = buildSystemPrompt(foodCourse, memory);
@@ -148,6 +161,8 @@ describe('buildSystemPrompt v1.1 progress and drill contract', () => {
     expect(prompt).toContain('attempt_assessment');
     expect(prompt).toContain('raw ASR "Our." 对当前卡 hour 可以判 correct');
     expect(prompt).toContain('raw ASR "1000 is 10." 对 One thousand is ten hundreds. 判 close');
+    expect(prompt).toContain('目标英文 token 或课程明确列出的 asrAliases');
+    expect(prompt).toContain('大小写/标点/空格/连字符等分隔符忽略');
     expect(prompt).toContain('3 步慢读脚手架');
     expect(prompt).toContain('drillParts');
     expect(prompt).toContain('不得说"今天到这里/下课/结束"');
