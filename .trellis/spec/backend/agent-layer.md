@@ -972,6 +972,99 @@ The prompt sent to MiMo and the measured breakdown share one construction path.
 
 ---
 
+## Lesson report Eval v1 contract
+
+### 1. Scope / Trigger
+
+- Trigger: changing `scripts/lesson-report-data.ts`,
+  `interaction_logs.model_calls`, `word_performance`, or the lesson-report data
+  JSON shape.
+- Reason: Eval v1 is the deterministic scorecard used to decide the next Agent
+  iteration. It must stay reproducible from persisted session data and must not
+  rely on LLM-as-judge scoring.
+
+### 2. Signatures
+
+- `ReportData.eval.sessionHealth`: ended state, duration, interaction-count
+  consistency, provider usage tracking, token integrity, and LLM
+  requests-per-interaction.
+- `ReportData.eval.costContext`: LLM token totals/averages, high-input flag,
+  prompt breakdown tracked turns, coverage rate, and largest prompt bucket.
+- `ReportData.eval.teachingLoop`: target/attempted/cleared/needs-review word
+  counts, coverage/clear rates, attempts-per-cleared-word, per-word counters,
+  and stuck-card runs.
+- `ReportData.eval.agentBehavior`: residual speech/show_card mismatches,
+  premature closing phrases, empty assistant/action turns, and repeated-speech
+  runs.
+- `ReportData.eval.nextIterationSignals`: deterministic signal keys with
+  severity, reason, metric, and value.
+
+### 3. Contracts
+
+- Eval must be derived from `lesson_logs`, `interaction_logs`, course word-card
+  definitions, and `word_performance`.
+- Missing historical `word_performance` tables/rows or missing
+  `inputBreakdown` rows must not break report generation.
+- `correct >= 2` is the current report-side approximation for a word cleared in
+  the session; do not describe it as durable mastery.
+- Speech/show_card mismatch detection evaluates the final persisted speech and
+  normalized final `actions`, not raw model output.
+- Stuck-card detection is diagnostic only; it must not change lesson behavior.
+
+### 4. Validation & Error Matrix
+
+| condition | behavior |
+|---|---|
+| Session ended with matching interaction counts | `sessionHealth.status = "ok"` unless provider/token issues exist |
+| Session is open, interaction count drifts, or provider usage is untracked | `sessionHealth.status = "warn"` and `issues[]` names the condition |
+| `token_usage` is invalid JSON | `sessionHealth.status = "fail"` and `token_data_integrity` signal is emitted |
+| LLM request count is positive but no stored `inputBreakdown` exists | Keep token totals and emit `prompt_breakdown_missing` |
+| `word_performance` table or rows are missing | Keep report readable with zero teaching-loop progress |
+| Final speech mentions a different target word than the final word `show_card` | Emit `speech_card_alignment` with turn/card evidence |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a recent session has prompt breakdowns and `word_performance`; Eval
+  reports prompt coverage, target coverage, cleared words, stuck runs, behavior
+  risks, and next-iteration signals.
+- Base: an older session lacks prompt breakdowns or word performance; Eval still
+  emits the full shape with zero/empty metrics and compatibility signals.
+- Bad: a report script asks an LLM to infer scores from prose or current prompt
+  code instead of using persisted session rows; results are not repeatable.
+
+### 6. Tests Required
+
+- `scripts/lesson-report-data.test.ts` must cover healthy Eval aggregation,
+  historical missing-data compatibility, and signal-triggering behavior for
+  stuck loops, speech/card mismatch, repeated speech, provider tracking, and
+  prompt breakdown coverage.
+- Run `pnpm test scripts/lesson-report-data.test.ts`, `pnpm test`, and
+  `pnpm exec tsc --noEmit` after report-data contract changes.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const judgeSummary = await callLLM(interactions);
+report.eval = JSON.parse(judgeSummary);
+```
+
+This makes Eval non-deterministic and prevents before/after comparison across
+Agent iterations.
+
+#### Correct
+
+```ts
+const report = await buildReport(db, sessionId, courseLoader);
+const clearRate = report.eval.teachingLoop.clearRate;
+const signals = report.eval.nextIterationSignals;
+```
+
+The scorecard is calculated from persisted rows and stable course definitions.
+
+---
+
 ## Testing matrix
 
 | Fix | Test file | Key assertion |
