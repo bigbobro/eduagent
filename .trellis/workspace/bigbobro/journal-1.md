@@ -649,3 +649,36 @@ Fixed reinforcement static prompt gating so pick-word and repeat-after-me frames
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: Document Eval architecture design
+
+**Date**: 2026-05-27
+**Task**: Document Eval architecture design
+**Branch**: `main`
+
+### Summary
+
+Added a standalone Eval design chapter to docs/architecture.md covering why Eval exists, deterministic design principles, Eval v1 dimensions, sample admission, decision workflow, and v1 boundaries.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6709432` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
