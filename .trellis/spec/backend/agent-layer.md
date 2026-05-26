@@ -76,6 +76,14 @@ Contracts:
 - TTS error, timeout, or `endLesson` must reject the pending promise and clear
   the pending static-speech slot.
 - UI callers must treat `quiz-speaking` as locked input state.
+- UI callers must not treat the `awaiting -> quiz-speaking -> awaiting`
+  state changes from their own `speakStatic()` call as a prompt-cancellation
+  signal. Mark a reinforcement prompt as heard only after the returned promise
+  resolves.
+- If `speakStatic()` rejects because the controller is not `awaiting` yet or a
+  static TTS session is already in progress, keep learner input locked and retry
+  after the controller returns to `awaiting`; do not swallow the error and
+  unlock the quiz as if the prompt had played.
 
 Usage rules:
 - `QuizPickWordFrame` speaks `prompt + correct English word` before accepting
@@ -91,7 +99,9 @@ Usage rules:
 Tests required:
 - `lesson-controller` covers `speakStatic` happy path, TTS error rejection, and
   concurrent-call dedup.
-- Quiz frame tests cover static prompt construction and locked input.
+- Quiz frame tests cover static prompt construction, locked input, playback
+  state changes to `quiz-speaking`, and transient `speakStatic()` rejection
+  retry.
 
 ---
 

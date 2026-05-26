@@ -66,6 +66,7 @@
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
 | `src/components/lesson/IntroFrame.tsx` | 主题导入:麻吉 + 锁定 chip 网格,不再依赖 scene.svg |
 | `src/components/lesson/LessonMandalaV2.tsx` | 跟读练习法阵,保留 `LessonController` ASR/TTS 管线 |
+| `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS gate:等待 `awaiting`,调用 `speakStatic`,短暂失败重试,播完后解锁 UI |
 | `src/components/lesson/QuizPickWordFrame.tsx` | quiz:静态 TTS 播 prompt + 正确英文词,播完前锁 PictureCard 选择 |
 | `src/components/lesson/ReinforceFrame.tsx` | quiz:静态 TTS 播 targetText,播完前锁 repeat-after-me 录音 |
 | `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes,错答时播静态 retry hint |
@@ -161,8 +162,10 @@ ASR final 到达 client
 强化巩固的 quiz 引导不走 LLM。`QuizPickWordFrame` mount 后调用
 `LessonController.speakStatic(prompt + correctEnglish)`,`ReinforceFrame` mount 后
 调用 `speakStatic(targetText)`;两者都等 `state=awaiting` 才发起静态 TTS,播放中进入
-`quiz-speaking` 并锁住选择/录音。错答且仍可重试时,`ReinforcementFlow` 播
-`再听一次: ${prompt || targetText}` 后再允许下一次作答。
+`quiz-speaking` 并锁住选择/录音。`useStaticPromptSpeech` 只在 `speakStatic()`
+resolve 后标记 prompt 已听完;如果 controller 还没回到 `awaiting` 或静态 TTS 忙导致
+短暂 reject,继续锁住 UI 并在 `awaiting` 后重试。错答且仍可重试时,
+`ReinforcementFlow` 播 `再听一次: ${prompt || targetText}` 后再允许下一次作答。
 
 ### 3.3 结束课程
 
@@ -436,6 +439,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 | `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/HomeStudy.tsx` | 魔法书房首页,课程以书本卡呈现 |
 | `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | 课中六屏 view 层,保留控制器与 phase 状态机 |
+| `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
 | `src/components/journal/JournalPage.tsx` | 魔法书双页,按 progress 聚合展示词卡 |
 | `src/components/parents/{PINGateFrame,ParentsPage}.tsx` | 家长阁楼 PIN + dashboard |
 | `src/components/ui/{ErrorBoundary,SVGDefs}.tsx` | root 兜底与全局 SVG defs |

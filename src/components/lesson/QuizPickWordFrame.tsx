@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Course, Quiz, WordCard } from '@/types/course';
-import type { LessonController, LessonStateName } from '@/lib/voice/lesson-controller';
+import type { LessonController } from '@/lib/voice/lesson-controller';
 import { Cat, PictureCard } from '@/components/magic';
 import { toPictureCardData } from '@/components/magic/cardData';
+import { useStaticPromptSpeech } from './useStaticPromptSpeech';
 
 interface QuizPickWordFrameProps {
   quiz: Extract<Quiz, { type: 'pick-word' }>;
@@ -15,43 +16,15 @@ interface QuizPickWordFrameProps {
 
 export function QuizPickWordFrame({ quiz, course, controller, onAnswer }: QuizPickWordFrameProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [state, setState] = useState<LessonStateName>(controller.getState());
-  const [promptPlaying, setPromptPlaying] = useState(true);
-  const spokenPromptRef = useRef<string | null>(null);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const options = useMemo(() => buildOptions(wordCards, quiz), [wordCards, quiz]);
   const promptText = useMemo(() => buildPickWordPromptText(quiz, course), [course, quiz]);
+  const { state, promptPlaying } = useStaticPromptSpeech(controller, promptText, quiz.id);
   const locked = promptPlaying || state === 'quiz-speaking';
 
   useEffect(() => {
-    const onState = (next: LessonStateName) => setState(next);
-    controller.on('state', onState);
-    return () => controller.off('state', onState);
-  }, [controller]);
-
-  useEffect(() => {
-    spokenPromptRef.current = null;
     setSelectedId(null);
-    setPromptPlaying(true);
-  }, [promptText, quiz.id]);
-
-  useEffect(() => {
-    if (spokenPromptRef.current === promptText) return;
-    if (state !== 'awaiting') return;
-
-    let cancelled = false;
-    spokenPromptRef.current = promptText;
-    setPromptPlaying(true);
-    controller.speakStatic(promptText)
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setPromptPlaying(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [controller, promptText, state]);
+  }, [quiz.id]);
 
   return (
     <div className="grid h-full w-full grid-cols-[1fr_320px] gap-7 bg-paperDeep px-8 py-8 text-ink">

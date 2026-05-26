@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Entry point for lesson UI, controller subscriptions, and frontend quality expectations."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Component structure, controller boundary, PictureCard, and accessibility conventions."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Defines LessonController and PhasedLessonController state ownership for reinforcement flow."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Required RTL coverage for component behavior and lesson voice-flow checks."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Entry point for voice-controller and architecture documentation requirements."}
+{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Defines speakStatic reinforcement TTS contract and quiz-speaking lock behavior."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "State/timing boundary crosses controller events and React component interaction."}

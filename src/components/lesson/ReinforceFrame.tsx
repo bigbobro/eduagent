@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useSpacebar } from '@/hooks/useSpacebar';
 import type { Course, Quiz } from '@/types/course';
-import type { LessonController, LessonStateName } from '@/lib/voice/lesson-controller';
+import type { LessonController } from '@/lib/voice/lesson-controller';
 import { Cat, PaperButton, PictureCard } from '@/components/magic';
 import { toPictureCardData } from '@/components/magic/cardData';
+import { useStaticPromptSpeech } from './useStaticPromptSpeech';
 
 interface ReinforceFrameProps {
   quiz: Extract<Quiz, { type: 'repeat-after-me' }>;
@@ -15,12 +16,9 @@ interface ReinforceFrameProps {
 }
 
 export function ReinforceFrame({ quiz, course, controller, onAnswer }: ReinforceFrameProps) {
-  const [state, setState] = useState<LessonStateName>(controller.getState());
   const [listening, setListening] = useState(false);
   const [heardSentence, setHeardSentence] = useState(false);
-  const [hasHeardPrompt, setHasHeardPrompt] = useState(false);
-  const [promptPlaying, setPromptPlaying] = useState(true);
-  const spokenPromptRef = useRef<string | null>(null);
+  const { state, promptPlaying, hasHeardPrompt } = useStaticPromptSpeech(controller, quiz.targetText, quiz.id);
   const card = course.cards.find((item) => item.id === quiz.cardId);
   const targetWords = useMemo(
     () => quiz.targetText.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter((word) => word.length > 2),
@@ -30,7 +28,6 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
   const catMood = promptPlaying || state === 'quiz-speaking' ? 'speaking' : heardSentence ? 'cheer' : 'happy';
 
   useEffect(() => {
-    const onState = (next: LessonStateName) => setState(next);
     const onFinal = (event: { text: string }) => {
       const said = event.text.toLowerCase();
       const matchedCount = targetWords.filter((word) => said.includes(word)).length;
@@ -38,42 +35,16 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
       if (correct) setHeardSentence(true);
       onAnswer({ correct, said: event.text });
     };
-    controller.on('state', onState);
     controller.on('asr-final', onFinal);
     return () => {
-      controller.off('state', onState);
       controller.off('asr-final', onFinal);
     };
   }, [controller, onAnswer, targetWords]);
 
   useEffect(() => {
-    spokenPromptRef.current = null;
     setListening(false);
     setHeardSentence(false);
-    setHasHeardPrompt(false);
-    setPromptPlaying(true);
-  }, [quiz.id, quiz.targetText]);
-
-  useEffect(() => {
-    if (spokenPromptRef.current === quiz.targetText) return;
-    if (state !== 'awaiting') return;
-
-    let cancelled = false;
-    spokenPromptRef.current = quiz.targetText;
-    setPromptPlaying(true);
-    controller.speakStatic(quiz.targetText)
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) {
-          setHasHeardPrompt(true);
-          setPromptPlaying(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [controller, quiz.id, quiz.targetText, state]);
+  }, [quiz.id]);
 
   const start = () => {
     if (!canHold) return;

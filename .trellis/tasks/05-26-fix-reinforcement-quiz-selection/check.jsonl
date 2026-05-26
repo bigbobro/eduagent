@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify reinforcement component tests and lesson smoke expectations."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Review controller state subscriptions and locked-input transitions."}
+{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Review adherence to speakStatic and quiz-speaking contracts."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify typecheck and relevant controller tests."}
