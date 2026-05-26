@@ -372,7 +372,75 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 ---
 
-## 9. 文件演进历史(粗粒度)
+## 9. Eval 设计:让 Agent 可以被量化地演化
+
+EduAgent 不是一次性脚本,而是一个会持续迭代的课堂 Agent。只看单轮回复是否
+"像老师"不够,因为真实问题常发生在跨轮教学循环里:有没有推进目标词、有没有卡住、
+老师说的话和画面是否一致、一次课的上下文成本是否过高、修复后同类问题是否真的减少。
+Eval 的职责就是把这些课后人工判断沉淀成确定性、可比较、可回归的数据。
+
+### 为什么需要 Eval
+
+- **把体感变成决策依据**:真实试听能发现问题,但下一步改 prompt、改状态机、改课程数据还是
+  改 provider tracking,必须依赖同一套指标比较。
+- **防止只优化局部回复**:Agent 的质量不只是一句话,而是一节课能不能从 intro 推进到
+  interactive / reinforcement / done,并在目标词上形成有效循环。
+- **支撑长期演化**:每次修复或压缩 prompt 后,需要用相同口径比较前后 session,否则容易
+  只凭最新一节课的印象做决策。
+- **控制成本与质量的 tradeoff**:Prompt Slimming 这类优化必须同时看 token 成本、教学推进、
+  speech/show_card 对齐和提前收尾风险,不能只看输入 token 下降。
+
+### 设计原则
+
+1. **确定性优先**:Eval v1 不使用 LLM-as-judge。所有指标来自 SQLite 日志、课程定义、
+   `word_performance`、token usage 和 prompt input breakdown。
+2. **评估 session,不是评估孩子**:`cleared` 只表示本节课内达到两次 raw-ASR 命中后可以推进,
+   不代表长期掌握度;`needs_review` 也只是课堂内复习信号。
+3. **面向迭代决策**:Eval 输出不是为了给一节课打总分,而是指出下一步优先级,例如
+   `prompt_input_slimming`、`teaching_loop_stuck`、`speech_card_alignment` 或
+   `provider_tracking`。
+4. **跨版本可比较**:同一指标口径要能用于真实课、smoke 课和历史 session。老 session 缺
+   `inputBreakdown` 或 `word_performance` 时,报告应降级为空/零值,不能中断读取。
+5. **先覆盖工程可观测面**:v1 先量化运行健康、成本、教学推进和 Agent 行为风险;主观体验、
+   孩子兴趣、长期学习效果留给后续 Eval 版本或人工报告补充。
+
+### Eval v1 评估维度
+
+`scripts/lesson-report-data.ts` 在基础 session / tokens / interactions 之外输出
+`eval` 结构化评分卡:
+
+| 维度 | 评估什么 | 典型问题 |
+|------|----------|----------|
+| `sessionHealth` | 这节课日志是否完整、是否结束、交互数是否一致、provider usage 是否可观测 | session 中断、ASR/TTS usage 缺失、token 数据坏 |
+| `costContext` | LLM 输入/输出成本、平均每轮 input、最大 input、prompt breakdown 覆盖率和最大 bucket | 平均输入过高、最大成本来自 static rules 或 course definition |
+| `teachingLoop` | 目标词覆盖、attempted / cleared / needs_review、clear rate、连续卡同一张卡的 run | 目标词没覆盖、clear rate 低、某张卡卡住 3 轮以上 |
+| `agentBehavior` | speech/show_card 残余错位、提前收尾、空回复、空 action、重复话术 | 老师讲 dog 但画面是 bird、还没教完就总结、连续重复 |
+| `nextIterationSignals` | 把上述指标翻译成下一步工作信号 | 进入 Prompt Slimming、修教学循环、补 provider tracking |
+
+### 样本准入与使用方式
+
+用于产品/Agent 决策的真实课样本至少要满足:交互轮数足够(当前人工口径是 >15),
+不是已知 UI bug 造成的中断课,并且 session 数据能被 `lesson-report-data.ts` 读出。
+Smoke session 可以验证状态机和报告管线,但不能替代真实课样本。
+
+典型决策流程:
+
+1. 真实课结束后跑 `pnpm tsx scripts/lesson-report-data.ts <session-id>`。
+2. 先看 `sessionHealth`:如果数据不完整,优先修埋点或 session 记录。
+3. 再看 `agentBehavior`:如果有 speech/card 错位、提前收尾、空回复,优先修行为正确性。
+4. 行为基本健康后看 `teachingLoop`:判断 coverage / clear rate / stuck run 是否需要改教学循环。
+5. 最后结合 `costContext`:当教学行为健康但 input 仍过高,才进入 Prompt Slimming 这类成本优化。
+
+### v1 不评估什么
+
+- 不评估孩子的长期掌握度或真实英语能力。
+- 不评估主观体验、动画观感、老师音色是否更讨喜。
+- 不用 LLM 对课堂质量做开放式打分。
+- 不替代课后人工报告;它提供可回归指标,人工报告仍负责解释具体 ASR 误识、话术质量和产品判断。
+
+---
+
+## 10. 文件演进历史(粗粒度)
 
 - 2026-05-01 — 初版语音管线实施 + sync 文档(README/TODO/benchmarks)
 - 2026-05-01 — **E2E 验收期间多处集成 bug 修复**(架构定型的关键改动)
@@ -381,7 +449,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 - 2026-05-01 — git history redact secrets + CLAUDE.md 加凭据规则
 - 2026-05-05 — **画布 v2:WordCardCanvas 替换 ImageCanvas** — 协议从 show/focus/annotate 统一为 `show_card`;课程数据从 `images[]` 迁移到 `cards[]`(`kind: 'word'|'sentence'`);画布层从图叠层改为图+中英文独立 DOM;删除 ShowTool/FocusTool/AnnotateTool 组件
 - 2026-05-10 — **教学循环 v1.1:课堂内进度引擎 + drillParts** — 每张 card 必填 `drillParts`;服务端用 `show_card` 同步 currentCardId;LLM 输出 `attempt_assessment`;memory 维护 `cardProgress` / `clearedCardIds`;history 裁到最近 12 条
-- 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};客户端 PIN 门控;详见 §11
+- 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};客户端 PIN 门控;详见 §12
 - 2026-05-15 — **三阶段 lesson structure refactor** — 新增 food 三阶段课程、ImageGen PNG 单卡资产 + 结构化 `scene.svg`;新增 phase-aware prompt / SSE progress_snapshot / `phase-transition` / `quiz-answer`;新增 `PhasedLessonController` + Intro / Interactive / Reinforce / Quiz 组件;删除旧课程数据与旧 `LessonView` fallback;`Course.phases` 收紧为必填
 - 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
 - 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
@@ -399,7 +467,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 ---
 
-## 10. 开发工具链 — 课后报告生成器
+## 11. 开发工具链 — 课后报告生成器
 
 实测课后用 `/lesson-report` slash command 生成内部诊断报告,驱动迭代决策。
 
@@ -420,7 +488,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 ---
 
-## 11. 前端架构(麻吉魔法学院,2026-05 CC 重构)
+## 12. 前端架构(麻吉魔法学院,2026-05 CC 重构)
 
 5 个空间 / 5 个页面 / 1 个麻吉小猫组件:
 
