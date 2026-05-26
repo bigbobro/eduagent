@@ -64,6 +64,41 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 
 ---
 
+## 战略方向待决:Agentness vs Content 平衡 *(2026-05-25 讨论登记)*
+
+> 触发:课程已扩到 ~30 门常规课,小朋友进入每日上课实测阶段。需要用真实使用反馈决定下一阶段重心是**继续加课**还是**补 agentness 缺口**。本节不直接转 task,作为后续 backlog 排序的判据。
+
+### 项目在 agent 思想上的现状对照
+
+**强对齐(已经在按 agent 范式做)**:
+- 完整 perceive-think-act 闭环:ASR → MiMo LLM 决策 → TTS + `show_card` 改画面(action 影响 environment,而非只回字)
+- 多模态 grounding:画面是推理的一部分而非渲染产物,老师话术与 `show_card` 出口一致性已是硬约束
+- `src/lib/agent/` 分层(normalize / memory / session / prompt / orchestrator / assessment)是按 agent 拆的,不是套壳
+- LessonController 三阶段状态机 = 显式 high-level plan skeleton + LLM 局部决策的 hybrid 范式
+
+**弱项(挂着 agent 但实际偏 scripted multimodal app)**:
+1. **Autonomy 弱** — 每轮都靠 push-to-talk 触发,孩子静默时 agent 不会主动推进;无 idle / proactive policy
+2. **Planning 浅** — 课程内容是预制 `Course` 对象,不是 agent 根据学生水平动态生成的教学路径
+3. **跨 session 长记忆未闭环** — memory 模块存在,但孩子的学习轨迹(反复错的词 / 已掌握的词)是否真影响下一节课的选课与重点,目前未证实
+4. **Self-correction 局限于局部** — micro 级(ASR / LLM 输出格式)有降级,macro 级("整节课节奏不对要重设计")没有
+
+### 实测决策路径(用每日真实上课信号反推方向)
+
+接下来每日上课的观察重点(分别对应不同迭代方向):
+
+- 如果**主要痛点是内容枯燥 / 词汇不足 / 重复感** → 继续加课、加多样性(content-driven)
+- 如果**主要痛点是孩子静默后冷场、不会自己进下一步** → 补 autonomy(idle policy / proactive prompt),autonomy 项升 backlog
+- 如果**主要痛点是同一难度反复教 / 不会自动跳过已掌握 / 不会重点回访薄弱点** → 补长期记忆 + 动态选课,把"兴趣 / 困惑记忆"和 session persistence 升 backlog
+- 如果**主要痛点是 LLM 话术质量 / 成本 / 延迟** → 启动 Hybrid 预渲染(已 park 项),agentness 反而退一步换稳定性
+- 如果**没有强痛点,只是内容深度不够** → 继续 content-driven,本节不动
+
+### 自我提醒
+
+- "单用户阶段优先内容驱动"的 feedback 仍生效(见 user memory `feedback_content_over_architecture_at_single_user.md`)。本节不是要立刻补 agentness,而是**让真实反馈来决定**,避免凭直觉重构。
+- 任何"补 agentness"的迭代,启动前必须能指出"哪条实测信号触发了它",不接受纯架构动机。
+
+---
+
 ## 远期 backlog
 
 1. **Session persistence / resume** — `sessions` 是 in-memory Map,server 重启 / 刷新会让客户端 sessionId 失效。9 分钟一节课中断概率低,真被坑了再升回当前 backlog。

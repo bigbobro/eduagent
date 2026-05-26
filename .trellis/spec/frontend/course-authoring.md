@@ -79,6 +79,29 @@ Pillow/canvas/SVG placeholder drawing when producing real course resources.
   missing, tiny, oversized, over-dimensioned, invalid, or unreferenced course
   PNGs.
 
+### Batch ImageGen Workflow
+
+Large course-image jobs must be planned as a filesystem workflow, not as one
+long Codex chat that continuously carries generated image results.
+
+- Before generating more than 30 images, create or inspect the
+  `pnpm course:image-jobs` JSONL manifest and confirm the exact target paths.
+- Work in batches of 10-20 word-card images. Save each accepted image directly
+  to `public/images/<courseId>/<wordCardId>.png`, then run the closest
+  `pnpm course:image-audit -- --course <courseId>` check before continuing.
+- In chat updates, report only course ids, counts, target paths, and audit
+  results. Do not paste base64, binary payloads, bulk image data, or large
+  previews into the conversation.
+- Do not keep one Codex thread as the primary execution surface for 100+ image
+  jobs. Finish a course or small batch, checkpoint the filesystem state, and
+  resume later from `git status`, the manifest, and audit results in a fresh
+  session if the conversation becomes large.
+- Do not regenerate assets that already pass audit unless the user explicitly
+  asks for a visual replacement.
+- After each batch is saved and audited, delete only the matching scratch files
+  under `.codex/generated_images/...`; never delete project assets from
+  `public/images/...` as part of cache cleanup.
+
 Prompt baseline:
 
 ```text
