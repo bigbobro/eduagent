@@ -550,3 +550,36 @@ Updated docs/TODO.md to reflect 2026-05-23 voice stabilization work, marked ligh
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: Prompt input quantification MVP
+
+**Date**: 2026-05-26
+**Task**: Prompt input quantification MVP
+**Branch**: `main`
+
+### Summary
+
+Implemented durable per-turn LLM input breakdown for prompt quantification. buildPromptInput now measures static rules, phase rules, course definition, lesson state, summary constraints, history, and separators; streamUserInput persists the breakdown into model_calls.llm; lesson-report-data aggregates tracked turns, largest bucket, and estimated token share. Added prompt/session/report tests, updated architecture and backend agent-layer spec, and verified with full tests, typecheck, diff check, and lesson smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4201e48` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
