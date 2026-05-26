@@ -616,3 +616,36 @@ Implemented deterministic Eval v1 scorecard in lesson-report data: session healt
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: Fix reinforcement quiz selection blocking
+
+**Date**: 2026-05-26
+**Task**: Fix reinforcement quiz selection blocking
+**Branch**: `main`
+
+### Summary
+
+Fixed reinforcement static prompt gating so pick-word and repeat-after-me frames wait for awaiting state, survive quiz-speaking transitions, retry transient speakStatic failures, and unlock only after prompt playback resolves. Added regression coverage and synced architecture/spec docs.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7206c11` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
