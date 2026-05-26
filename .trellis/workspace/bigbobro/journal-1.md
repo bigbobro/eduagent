@@ -583,3 +583,36 @@ Implemented durable per-turn LLM input breakdown for prompt quantification. buil
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Eval v1 lesson quality scorecard
+
+**Date**: 2026-05-26
+**Task**: Eval v1 lesson quality scorecard
+**Branch**: `main`
+
+### Summary
+
+Implemented deterministic Eval v1 scorecard in lesson-report data: session health, cost/context, teaching-loop outcomes, agent behavior risks, and next-iteration signals. Verified with targeted report-data tests, full test suite, typecheck, diff check, fresh lesson smoke, and report-data JSON inspection for the smoke session.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e942252` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

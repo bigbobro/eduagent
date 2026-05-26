@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-05-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~585 | Active |
+| `journal-1.md` | ~618 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-05-26 | Eval v1 lesson quality scorecard | `e942252` | `main` |
 | 17 | 2026-05-26 | Prompt input quantification MVP | `4201e48` | `main` |
 | 16 | 2026-05-24 | Codebase cleanup D: extract guard pipeline from streamUserInput | `0f0278e` | `main` |
 | 15 | 2026-05-24 | Codebase cleanup A+B+C: dead code, mock fix, state_update schema slim | `c366627` | `main` |
