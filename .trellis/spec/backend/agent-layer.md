@@ -885,6 +885,93 @@ tool), but if a future contract change deprecates `show_card` and only
 
 ---
 
+## Prompt input quantification contract
+
+### 1. Scope / Trigger
+
+- Trigger: changing `src/lib/agent/prompt.ts`, `getMessagesForLLM`, or the
+  `streamLLM(systemPrompt, messages)` call shape in `src/lib/agent/session.ts`.
+- Reason: lesson reports use `model_calls.llm.inputBreakdown` to decide where
+  prompt slimming should happen. The breakdown must describe the same prompt
+  and messages actually sent to MiMo, not a separately reconstructed prompt.
+
+### 2. Signatures
+
+- `buildPromptInput(course, memory, phase, messages, inputTokens?)`
+  returns `{ systemPrompt, breakdown }`.
+- `InteractionLog.modelCalls.llm.inputBreakdown?: PromptInputBreakdown`.
+- `scripts/lesson-report-data.ts` reads
+  `interaction_logs.model_calls.llm.inputBreakdown` and aggregates it under
+  `tokens.llm.promptInputBreakdown`.
+
+### 3. Contracts
+
+- `buildPromptInput().systemPrompt` must be byte-for-byte equal to
+  `buildSystemPrompt(course, memory, phase)`.
+- `breakdown.systemChars` must equal `systemPrompt.length`.
+- `breakdown.messageChars` must equal the sum of the exact `messages[].content`
+  strings passed to `streamLLM`.
+- Buckets must include:
+  `static_rules`, `phase_rules`, `course_definition`, `lesson_state`,
+  `summary_constraints`, `history`, and `prompt_separators`.
+- `estimatedTokens` is a proportional estimate based on MiMo `prompt_tokens`;
+  it is not a tokenizer-accurate bucket count. The exact provider value remains
+  `llm.inputTokens`.
+
+### 4. Validation & Error Matrix
+
+| condition | behavior |
+|---|---|
+| New interaction has `inputBreakdown` | Report aggregates tracked turn, average chars, largest bucket, and estimated token share |
+| Old interaction lacks `inputBreakdown` | Report remains backward compatible with `trackedTurns: 0` |
+| Bucket is missing or malformed in one stored row | Report skips malformed bucket fields and continues aggregating valid rows |
+| MiMo reports `inputTokens = 0` | Bucket `estimatedTokens` may be absent; char counts still provide a baseline |
+
+### 5. Good/Base/Bad Cases
+
+- Good: `streamUserInput` builds `messages` once, calls `buildPromptInput`, sends
+  `promptInput.systemPrompt` and the same `messages` to `streamLLM`, then stores
+  `promptInput.breakdown` with provider token estimates after `done`.
+- Base: existing historical report rows have only `llm.inputTokens`; report
+  shows token totals and an empty prompt-input breakdown.
+- Bad: report script re-runs `buildSystemPrompt` against current code for an old
+  session. That would measure today's prompt, not the prompt actually sent.
+
+### 6. Tests Required
+
+- `src/lib/agent/prompt.test.ts`: assert `buildPromptInput().systemPrompt`
+  equals `buildSystemPrompt()` and bucket chars sum to `totalChars`.
+- `src/lib/agent/session-prompt-input.test.ts`: assert `streamUserInput`
+  persists an `inputBreakdown` aligned with the actual `streamLLM` arguments.
+- `scripts/lesson-report-data.test.ts`: assert report aggregation identifies
+  the largest bucket and remains compatible with rows that lack breakdown data.
+- Smoke: `pnpm smoke:lesson` after agent changes, because this touches the
+  `/api/chat` LLM request path.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const systemPrompt = buildSystemPrompt(course, memory, phase);
+await streamLLM(systemPrompt, getMessagesForLLM(memory));
+const breakdown = buildPromptInput(course, memory, phase, getMessagesForLLM(memory)).breakdown;
+```
+
+This calls `getMessagesForLLM` twice and can drift if message selection changes.
+
+#### Correct
+
+```ts
+const messages = getMessagesForLLM(memory);
+const promptInput = buildPromptInput(course, memory, phase, messages);
+await streamLLM(promptInput.systemPrompt, messages);
+```
+
+The prompt sent to MiMo and the measured breakdown share one construction path.
+
+---
+
 ## Testing matrix
 
 | Fix | Test file | Key assertion |

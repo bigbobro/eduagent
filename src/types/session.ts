@@ -49,9 +49,34 @@ export interface InteractionLog {
   actions: ToolAction[];
   modelCalls: {
     asr?: { latency: number; tokens: number };
-    llm: { latency: number; inputTokens: number; outputTokens: number };
+    llm: { latency: number; inputTokens: number; outputTokens: number; inputBreakdown?: PromptInputBreakdown };
     tts?: { latency: number; characters: number };
   };
+}
+
+export type PromptInputBucketKey =
+  | 'static_rules'
+  | 'phase_rules'
+  | 'course_definition'
+  | 'lesson_state'
+  | 'summary_constraints'
+  | 'history'
+  | 'prompt_separators';
+
+export interface PromptInputBucket {
+  key: PromptInputBucketKey;
+  label: string;
+  chars: number;
+  estimatedTokens?: number;
+}
+
+export interface PromptInputBreakdown {
+  totalChars: number;
+  systemChars: number;
+  messageChars: number;
+  messageCount: number;
+  inputTokens?: number;
+  buckets: PromptInputBucket[];
 }
 
 export interface TokenUsage {

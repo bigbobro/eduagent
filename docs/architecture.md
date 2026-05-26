@@ -130,10 +130,11 @@ ASR final 到达 client
        ├─ clearTimeout(asrFinalTimer), asr.close, asr=null
        ├─ POST /api/chat { action:'message', sessionId, text, asrResult }
        │   server: add raw ASR user message
+       │           → buildPromptInput 生成 MiMo system prompt + inputBreakdown(静态规则 / phase / 课程定义 / 状态 / history)
        │           → streamLLM (MiMo, prompt 含 currentCardId/cardProgress/drillParts)
        │           → SpeechExtractor 状态机 → server guards → normalize show_card(过滤/替换已通过或非当前目标卡) → speech/show_card 对齐 → SSE
        │           → commit attempt_assessment + 归一化后的 show_card 到 cardProgress/clearedCardIds
-       │           → token_usage 记录 LLM + ASR + TTS 字符数
+       │           → token_usage 记录 LLM + ASR + TTS 字符数;interaction_logs.model_calls.llm 记录 inputBreakdown 供课后报告量化
        │            speech-delta + actions + done
        └─ consumeSSE:
             speech-delta:
@@ -388,6 +389,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 - 2026-05-24 — **代码库清扫(A+B+C)** — 删 logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage(内联) / getNextWordCardId;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content),仅保留 current_word + attempt_assessment;mockStreamLLM 修正为合法 ToolAction。
 - 2026-05-24 — **Guard pipeline 重构(D)** — 新增 `src/lib/agent/guards/`(index / closing-guard / premature-closing-guard / normalize-actions / speech-card-align + 各自 *.test.ts);`streamUserInput` 从 169 行压缩到 60 行;行为不变;每个 guard 有独立单测;`docs/architecture.md` 新增 §4c。
 - 2026-05-25 — **R-C canonical matching + explicit ASR aliases** — R-C 计数前对 target 与 raw ASR lower-case,保留 ASCII 字母/数字和 CJK 字符并删除分隔符,修复 treats 课程 `ice cream` ASR 输出无法命中 `icecream` 卡片 id、导致无法推进到 `lollipop` 的问题;新增 `WordCard.asrAliases` 支持课程显式声明 `pie` 可由 ASR 输出 `派` 命中,但不默认把所有中文释义算作英文通过。
+- 2026-05-26 — **Prompt input quantification** — `/api/chat` 每轮 LLM 调用前通过 `buildPromptInput()` 生成同一份 system prompt 与 inputBreakdown,按 static rules / phase rules / course definition / lesson state / summary constraints / history / separators 记录字符数,并在拿到 MiMo `prompt_tokens` 后按字符占比估算各 bucket token;`interaction_logs.model_calls.llm.inputBreakdown` 持久化该诊断,`lesson-report-data.ts` 聚合 trackedTurns、平均字符、最大 bucket 和估算 token share,用于决定下一轮 prompt slimming 先压哪里。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 
@@ -402,12 +404,12 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
     /lesson-report [session-id?]
       ↓ Claude 读 .claude/commands/lesson-report.md
       ↓ 跑 pnpm tsx scripts/lesson-report-data.ts [session-id?]
-      ↓ 拿 JSON(基础聚合 + anomaly flags + 全部 interactions)
+      ↓ 拿 JSON(基础聚合 + anomaly flags + prompt input breakdown + 全部 interactions)
       ↓ Claude 按 prompt 模板生成 markdown
       ↓ Write 到 docs/lesson-reports/YYYY-MM-DD-<sid8>.md(已 gitignore)
 
 **职责切分**:
-- **`scripts/lesson-report-data.ts`**(数据层,有单测):基础聚合 + 课程目标词 + anomaly flags(`highAvgInput` / `asrUsageNotTracked` / `ttsUsageNotTracked` / `tokensCorrupted`)。pure 函数 `buildReport(db, sessionId, courseLoader)`,接受依赖注入。
+- **`scripts/lesson-report-data.ts`**(数据层,有单测):基础聚合 + 课程目标词 + anomaly flags(`highAvgInput` / `asrUsageNotTracked` / `ttsUsageNotTracked` / `tokensCorrupted`) + prompt input breakdown 聚合(`trackedTurns`、平均字符、最大 bucket、估算 token share)。pure 函数 `buildReport(db, sessionId, courseLoader)`,接受依赖注入。
 - **`.claude/commands/lesson-report.md`**(LLM 层):报告模板 + 写作要求,LLM 看 raw `interactions` 判 ASR 误识 / 话术循环卡死。
 
 **报告范围**:只产出**工程信号**(ASR 误识 / 话术循环 / token / 埋点),教学策略类观察只列不评判。spec 见 `docs/superpowers/specs/2026-05-02-lesson-report-generator-design.md`。

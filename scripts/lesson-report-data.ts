@@ -18,7 +18,14 @@ export interface ReportData {
     ended: boolean;
   };
   tokens: {
-    llm: { requests: number; input: number; output: number; avgInputPerRound: number; maxInput: number };
+    llm: {
+      requests: number;
+      input: number;
+      output: number;
+      avgInputPerRound: number;
+      maxInput: number;
+      promptInputBreakdown: PromptInputBreakdownSummary;
+    };
     asr: { requests: number; tracked: boolean };
     tts: { requests: number; tracked: boolean };
   };
@@ -38,6 +45,29 @@ export interface ReportData {
 }
 
 export type CourseLoader = (courseId: string) => Promise<{ title: string; words: string[] } | null>;
+
+interface PromptInputBreakdownSummary {
+  trackedTurns: number;
+  avgTotalChars: number;
+  avgSystemChars: number;
+  avgMessageChars: number;
+  avgMessageCount: number;
+  largestBucket: null | {
+    key: string;
+    label: string;
+    by: 'estimatedTokens' | 'chars';
+    value: number;
+  };
+  buckets: Array<{
+    key: string;
+    label: string;
+    totalChars: number;
+    avgChars: number;
+    totalEstimatedTokens: number;
+    avgEstimatedTokens: number;
+    shareOfEstimatedTokens: number;
+  }>;
+}
 
 interface LessonRow {
   id: string;
@@ -86,13 +116,14 @@ export async function buildReport(
   }));
 
   const usage = parseTokenUsage(lesson.token_usage);
-  const inputs = rows.map((r) => {
-    const mc = safeJsonParse(r.model_calls, {}) as { llm?: { inputTokens?: number } };
+  const modelCalls = rows.map((r) => safeJsonParse(r.model_calls, {}) as ModelCallsRow);
+  const inputs = modelCalls.map((mc) => {
     return mc.llm?.inputTokens ?? 0;
   });
   const sumInput = inputs.reduce((a, b) => a + b, 0);
   const avgInputPerRound = inputs.length > 0 ? Math.round(sumInput / inputs.length) : 0;
   const maxInput = inputs.length > 0 ? Math.max(...inputs) : 0;
+  const promptInputBreakdown = summarizePromptInputBreakdown(modelCalls);
 
   const startMs = Date.parse(lesson.start_time);
   const endMs = lesson.end_time ? Date.parse(lesson.end_time) : null;
@@ -117,6 +148,7 @@ export async function buildReport(
         output: usage.llm.outputTokens,
         avgInputPerRound,
         maxInput,
+        promptInputBreakdown,
       },
       asr: { requests: usage.asr.requests, tracked: usage.asr.requests > 0 },
       tts: { requests: usage.tts.requests, tracked: usage.tts.requests > 0 },
@@ -133,6 +165,112 @@ export async function buildReport(
 
 function safeJsonParse(s: string, fallback: unknown): unknown {
   try { return JSON.parse(s); } catch { return fallback; }
+}
+
+interface ModelCallsRow {
+  llm?: {
+    inputTokens?: number;
+    inputBreakdown?: {
+      totalChars?: number;
+      systemChars?: number;
+      messageChars?: number;
+      messageCount?: number;
+      buckets?: Array<{
+        key?: string;
+        label?: string;
+        chars?: number;
+        estimatedTokens?: number;
+      }>;
+    };
+  };
+}
+
+type PromptInputBreakdownRow = NonNullable<NonNullable<ModelCallsRow['llm']>['inputBreakdown']>;
+
+function isPromptInputBreakdownRow(value: unknown): value is PromptInputBreakdownRow {
+  return !!value && typeof value === 'object' && Array.isArray((value as PromptInputBreakdownRow).buckets);
+}
+
+function summarizePromptInputBreakdown(modelCalls: ModelCallsRow[]): PromptInputBreakdownSummary {
+  const breakdowns = modelCalls
+    .map((mc) => mc.llm?.inputBreakdown)
+    .filter(isPromptInputBreakdownRow);
+
+  if (breakdowns.length === 0) {
+    return {
+      trackedTurns: 0,
+      avgTotalChars: 0,
+      avgSystemChars: 0,
+      avgMessageChars: 0,
+      avgMessageCount: 0,
+      largestBucket: null,
+      buckets: [],
+    };
+  }
+
+  const bucketMap = new Map<string, {
+    key: string;
+    label: string;
+    totalChars: number;
+    totalEstimatedTokens: number;
+  }>();
+  let totalChars = 0;
+  let systemChars = 0;
+  let messageChars = 0;
+  let messageCount = 0;
+
+  for (const breakdown of breakdowns) {
+    totalChars += Number(breakdown.totalChars ?? 0);
+    systemChars += Number(breakdown.systemChars ?? 0);
+    messageChars += Number(breakdown.messageChars ?? 0);
+    messageCount += Number(breakdown.messageCount ?? 0);
+
+    for (const bucket of breakdown.buckets || []) {
+      if (!bucket.key) continue;
+      const existing = bucketMap.get(bucket.key) || {
+        key: bucket.key,
+        label: bucket.label || bucket.key,
+        totalChars: 0,
+        totalEstimatedTokens: 0,
+      };
+      existing.totalChars += Number(bucket.chars ?? 0);
+      existing.totalEstimatedTokens += Number(bucket.estimatedTokens ?? 0);
+      bucketMap.set(bucket.key, existing);
+    }
+  }
+
+  const totalEstimatedTokens = Array.from(bucketMap.values())
+    .reduce((sum, bucket) => sum + bucket.totalEstimatedTokens, 0);
+  const buckets = Array.from(bucketMap.values())
+    .map((bucket) => ({
+      ...bucket,
+      avgChars: Math.round(bucket.totalChars / breakdowns.length),
+      avgEstimatedTokens: Math.round(bucket.totalEstimatedTokens / breakdowns.length),
+      shareOfEstimatedTokens: totalEstimatedTokens > 0
+        ? Number((bucket.totalEstimatedTokens / totalEstimatedTokens).toFixed(4))
+        : 0,
+    }))
+    .sort((a, b) => (
+      totalEstimatedTokens > 0
+        ? b.totalEstimatedTokens - a.totalEstimatedTokens
+        : b.totalChars - a.totalChars
+    ));
+
+  const top = buckets[0];
+  return {
+    trackedTurns: breakdowns.length,
+    avgTotalChars: Math.round(totalChars / breakdowns.length),
+    avgSystemChars: Math.round(systemChars / breakdowns.length),
+    avgMessageChars: Math.round(messageChars / breakdowns.length),
+    avgMessageCount: Math.round(messageCount / breakdowns.length),
+    largestBucket: top ? {
+      key: top.key,
+      label: top.label,
+      by: totalEstimatedTokens > 0 ? 'estimatedTokens' : 'chars',
+      value: totalEstimatedTokens > 0 ? top.totalEstimatedTokens : top.totalChars,
+    } : null,
+    buckets,
+  };
 }
 
 interface ParsedUsage {

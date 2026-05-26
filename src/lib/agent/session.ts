@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Course, PhaseName } from '@/types/course';
-import { LessonMemory, TokenUsage } from '@/types/session';
+import { LessonMemory, PromptInputBreakdown, TokenUsage } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
 import {
   createMemory,
@@ -9,7 +9,7 @@ import {
   commitAssistantStreamResult,
   initializeCardProgress,
 } from './memory';
-import { buildSystemPrompt } from './prompt';
+import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/mimo/llm';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 import { createLessonLog, finishLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
@@ -116,10 +116,25 @@ export async function* streamUserInput(
   let inputTokens = 0;
   let outputTokens = 0;
   let llmLatency = 0;
+  let inputBreakdown: PromptInputBreakdown | undefined;
   try {
-    const systemPrompt = buildSystemPrompt(session.course, session.memory, session.currentPhase);
-    for await (const ev of streamLLM(systemPrompt, getMessagesForLLM(session.memory), signal)) {
-      if (ev.done) { inputTokens = ev.usage.inputTokens; outputTokens = ev.usage.outputTokens; llmLatency = ev.latency; break; }
+    const messages = getMessagesForLLM(session.memory);
+    const promptInput = buildPromptInput(session.course, session.memory, session.currentPhase, messages);
+    inputBreakdown = promptInput.breakdown;
+    for await (const ev of streamLLM(promptInput.systemPrompt, messages, signal)) {
+      if (ev.done) {
+        inputTokens = ev.usage.inputTokens;
+        outputTokens = ev.usage.outputTokens;
+        llmLatency = ev.latency;
+        inputBreakdown = buildPromptInput(
+          session.course,
+          session.memory,
+          session.currentPhase,
+          messages,
+          inputTokens,
+        ).breakdown;
+        break;
+      }
       extractor.feed(ev.delta);
     }
   } catch (err) {
@@ -149,7 +164,7 @@ export async function* streamUserInput(
   yield { type: 'actions', actions: finalCtx.actions, state_update: finalCtx.stateUpdate };
 
   // 6. Commit memory + accounting + log
-  commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency });
+  commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency, inputBreakdown });
 
   // 7. Yield progress snapshot + done
   let totalAttempts = 0;
@@ -163,7 +178,7 @@ function commitTurn(
   ctx: GuardContext,
   userText: string,
   asrResult: { latency: number; tokens: number } | undefined,
-  llm: { inputTokens: number; outputTokens: number; llmLatency: number },
+  llm: { inputTokens: number; outputTokens: number; llmLatency: number; inputBreakdown?: PromptInputBreakdown },
 ): void {
   const beforePerformance = new Map(session.memory.wordPerformance);
   session.memory = commitAssistantStreamResult(
@@ -190,7 +205,12 @@ function commitTurn(
     actions: ctx.actions,
     modelCalls: {
       asr: asrResult,
-      llm: { latency: llm.llmLatency, inputTokens: llm.inputTokens, outputTokens: llm.outputTokens },
+      llm: {
+        latency: llm.llmLatency,
+        inputTokens: llm.inputTokens,
+        outputTokens: llm.outputTokens,
+        ...(llm.inputBreakdown ? { inputBreakdown: llm.inputBreakdown } : {}),
+      },
       tts: { latency: 0, characters: ctx.speech.length },
     },
   });

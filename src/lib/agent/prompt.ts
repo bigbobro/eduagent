@@ -1,5 +1,28 @@
 import { Course, PhaseName, WordCard } from '@/types/course';
-import { LessonMemory } from '@/types/session';
+import { LessonMemory, PromptInputBreakdown, PromptInputBucket, PromptInputBucketKey } from '@/types/session';
+
+const PROMPT_SECTION_SEPARATOR = '\n\n---\n\n';
+
+interface PromptSection {
+  key: PromptInputBucketKey;
+  label: string;
+  content: string;
+}
+
+interface BuiltPrompt {
+  systemPrompt: string;
+  buckets: PromptInputBucket[];
+}
+
+const BUCKET_LABELS: Record<PromptInputBucketKey, string> = {
+  static_rules: 'Role and static rules',
+  phase_rules: 'Phase rules',
+  course_definition: 'Course definition',
+  lesson_state: 'Lesson state and target control',
+  summary_constraints: 'Summary and closing constraints',
+  history: 'LLM message history',
+  prompt_separators: 'Prompt separators',
+};
 
 const ROLE_PROMPT = `你是一个儿童英语教学助手。你的任务是围绕课程目标，主动带着小朋友完成一节课。
 
@@ -148,7 +171,7 @@ ${sentenceList}
   }`;
 }
 
-function buildMemoryContext(memory: LessonMemory, course: Course): string {
+function buildMemoryContextParts(memory: LessonMemory, course: Course): PromptSection[] {
   const progressEntries = Object.entries(memory.cardProgress);
   const cardsByState = (state: string) =>
     progressEntries.filter(([, value]) => value === state).map(([id]) => id).join(', ') || '(无)';
@@ -168,7 +191,7 @@ function buildMemoryContext(memory: LessonMemory, course: Course): string {
   const activeSentenceCard = activeWordCard
     ? sentenceCards.find((card) => card.id === `sentence_${activeWordCardId}` || card.imageUrl === activeWordCard.imageUrl)
     : undefined;
-  let context = `## 当前课堂状态
+  let lessonState = `## 当前课堂状态
 - 当前正在教: ${memory.currentWord || '(未开始)'}
 - 当前卡片: ${memory.currentCardId || '(未建立)'}
 - 当前环节: ${memory.phase}
@@ -181,7 +204,7 @@ function buildMemoryContext(memory: LessonMemory, course: Course): string {
 - 总交互次数: ${memory.totalInteractions}`;
 
   const currentCardR2Count = currentWordCardId ? (memory.cardCorrectCount[currentWordCardId] || 0) : 0;
-  context += `\n\n## 当前目标控制
+  lessonState += `\n\n## 当前目标控制
 - word card 学习顺序: ${wordOrder.join(', ')}
 - 当前应练习的 word card: ${activeWordCardId || '(全部完成)'}
 - **当前卡字面通过次数**: ${currentCardR2Count} / 2 ${currentCardR2Count >= 2 ? '(已达成,服务端会自动推进)' : currentCardR2Count === 1 ? '(再 1 次字面通过即推进)' : '(还没通过,正常教学)'}
@@ -192,20 +215,20 @@ function buildMemoryContext(memory: LessonMemory, course: Course): string {
 - 如果要说目标短句,必须 show_card 对应短句图卡: ${course.objectives.sentences.map((sentence) => `${sentence} => ${sentenceCardByText.get(sentence) || '(无对应卡)'}`).join(' | ')}`;
 
   if (memory.interestSignals.length > 0) {
-    context += `\n\n## 学生兴趣信号`;
+    lessonState += `\n\n## 学生兴趣信号`;
     for (const signal of memory.interestSignals.slice(-5)) {
-      context += `\n- ${signal.description}`;
+      lessonState += `\n- ${signal.description}`;
     }
-    context += `\n建议：如果学生对某个话题感兴趣，可以适当拓展，但要拉回教学主线。`;
+    lessonState += `\n建议：如果学生对某个话题感兴趣，可以适当拓展，但要拉回教学主线。`;
   }
 
   if (memory.wordPerformance.size > 0) {
-    context += `\n\n## 词汇表现`;
+    lessonState += `\n\n## 词汇表现`;
     memory.wordPerformance.forEach((perf, word) => {
       const rate = perf.attempts > 0 ? Math.round((perf.correct / perf.attempts) * 100) : 0;
-      context += `\n- ${word}: ${perf.correct}/${perf.attempts} (${rate}%)`;
+      lessonState += `\n- ${word}: ${perf.correct}/${perf.attempts} (${rate}%)`;
       if (perf.attempts >= 3 && perf.correct === 0) {
-        context += ` — 连续 3 次错误，必须切换策略`;
+        lessonState += ` — 连续 3 次错误，必须切换策略`;
       }
     });
   }
@@ -214,13 +237,81 @@ function buildMemoryContext(memory: LessonMemory, course: Course): string {
   // LLM sometimes generates a closing summary that lists all course words, not just
   // the words actually practiced this session. This hard-constraint is injected every
   // turn so the LLM always knows it must not enumerate unlearned words.
-  context += `\n\n## 总结约束（任何阶段均有效）
+  const summaryConstraints = `## 总结约束（任何阶段均有效）
 - 只能总结本节已通过词汇: ${memory.wordsLearned.join(', ') || '(无)'}
 - 只能说"练过/通过/还要继续练",不要说"学会/掌握"。
 - 如果 untouched cards 不是(无),不得结课。
 - 在任何一句话里,绝对不能说出未通过且不是当前正在教的目标词(上面"(无)"意味着本节没有已通过词汇)。`;
 
-  return context;
+  return [
+    toPromptSection('lesson_state', lessonState),
+    toPromptSection('summary_constraints', summaryConstraints),
+  ];
+}
+
+function buildMemoryContext(memory: LessonMemory, course: Course): string {
+  return buildMemoryContextParts(memory, course).map((part) => part.content).join('\n\n');
+}
+
+function toPromptSection(key: PromptInputBucketKey, content: string): PromptSection {
+  return { key, label: BUCKET_LABELS[key], content };
+}
+
+function buildPhasePromptSection(course: Course, currentPhase: PhaseName): PromptSection | null {
+  if (currentPhase === 'intro') {
+    const hint = course.phases.introduction.narrationHint || '';
+    return toPromptSection('phase_rules', PHASE_INTRO_PROMPT + (hint ? `\n- 旁白指南: ${hint}` : ''));
+  }
+  if (currentPhase === 'interactive') {
+    return toPromptSection('phase_rules', PHASE_INTERACTIVE_PROMPT);
+  }
+  if (currentPhase === 'reinforcement') {
+    return toPromptSection('phase_rules', PHASE_REINFORCEMENT_PROMPT);
+  }
+  return null;
+}
+
+function buildSystemPromptWithBuckets(
+  course: Course,
+  memory: LessonMemory,
+  currentPhase: PhaseName,
+): BuiltPrompt {
+  const promptSections = [
+    toPromptSection('static_rules', ROLE_PROMPT),
+    toPromptSection('course_definition', buildCourseInfo(course, currentPhase)),
+  ];
+  const phaseSection = buildPhasePromptSection(course, currentPhase);
+  if (phaseSection) promptSections.push(phaseSection);
+  promptSections.push(toPromptSection('lesson_state', buildMemoryContext(memory, course)));
+
+  const systemPrompt = promptSections.map((section) => section.content).join(PROMPT_SECTION_SEPARATOR);
+  const memoryBuckets = buildMemoryContextParts(memory, course).map((section) => ({
+    key: section.key,
+    label: section.label,
+    chars: section.content.length,
+  }));
+  const buckets: PromptInputBucket[] = [
+    ...promptSections
+      .filter((section) => section.key !== 'lesson_state')
+      .map((section) => ({ key: section.key, label: section.label, chars: section.content.length })),
+    ...memoryBuckets,
+  ];
+  const measuredChars = buckets.reduce((sum, bucket) => sum + bucket.chars, 0);
+  const separatorChars = systemPrompt.length - measuredChars;
+  if (separatorChars > 0) {
+    buckets.push({
+      key: 'prompt_separators',
+      label: BUCKET_LABELS.prompt_separators,
+      chars: separatorChars,
+    });
+  }
+
+  return { systemPrompt, buckets };
+}
+
+function estimateBucketTokens(bucketChars: number, totalChars: number, inputTokens?: number): number | undefined {
+  if (!inputTokens || totalChars <= 0 || bucketChars <= 0) return undefined;
+  return Math.round((bucketChars / totalChars) * inputTokens);
 }
 
 export function buildSystemPrompt(
@@ -228,17 +319,41 @@ export function buildSystemPrompt(
   memory: LessonMemory,
   currentPhase: PhaseName = 'interactive',
 ): string {
-  const sections = [ROLE_PROMPT, buildCourseInfo(course, currentPhase)];
+  return buildSystemPromptWithBuckets(course, memory, currentPhase).systemPrompt;
+}
 
-  if (currentPhase === 'intro') {
-    const hint = course.phases.introduction.narrationHint || '';
-    sections.push(PHASE_INTRO_PROMPT + (hint ? `\n- 旁白指南: ${hint}` : ''));
-  } else if (currentPhase === 'interactive') {
-    sections.push(PHASE_INTERACTIVE_PROMPT);
-  } else if (currentPhase === 'reinforcement') {
-    sections.push(PHASE_REINFORCEMENT_PROMPT);
-  }
+export function buildPromptInput(
+  course: Course,
+  memory: LessonMemory,
+  currentPhase: PhaseName = 'interactive',
+  messages: { role: string; content: string }[] = [],
+  inputTokens?: number,
+): { systemPrompt: string; breakdown: PromptInputBreakdown } {
+  const { systemPrompt, buckets: systemBuckets } = buildSystemPromptWithBuckets(course, memory, currentPhase);
+  const messageChars = messages.reduce((sum, message) => sum + message.content.length, 0);
+  const systemChars = systemPrompt.length;
+  const totalChars = systemChars + messageChars;
+  const buckets = [
+    ...systemBuckets,
+    {
+      key: 'history' as const,
+      label: BUCKET_LABELS.history,
+      chars: messageChars,
+    },
+  ].map((bucket) => ({
+    ...bucket,
+    estimatedTokens: estimateBucketTokens(bucket.chars, totalChars, inputTokens),
+  }));
 
-  sections.push(buildMemoryContext(memory, course));
-  return sections.join('\n\n---\n\n');
+  return {
+    systemPrompt,
+    breakdown: {
+      totalChars,
+      systemChars,
+      messageChars,
+      messageCount: messages.length,
+      ...(inputTokens ? { inputTokens } : {}),
+      buckets,
+    },
+  };
 }

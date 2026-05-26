@@ -3,7 +3,7 @@ import { foodCourse } from '@/data/courses/food';
 import { Course } from '@/types/course';
 import { LessonMemory } from '@/types/session';
 import { createMemory, markWordIncorrect } from './memory';
-import { buildSystemPrompt } from './prompt';
+import { buildPromptInput, buildSystemPrompt } from './prompt';
 
 const sentenceFixtureCourse: Course = {
   ...foodCourse,
@@ -166,5 +166,45 @@ describe('buildSystemPrompt v1.1 progress and drill contract', () => {
     expect(prompt).toContain('3 步慢读脚手架');
     expect(prompt).toContain('drillParts');
     expect(prompt).toContain('不得说"今天到这里/下课/结束"');
+  });
+});
+
+describe('buildPromptInput measurement', () => {
+  it('breaks down the exact system prompt plus message history', () => {
+    const memory = {
+      ...createMemory(),
+      currentCardId: 'apple',
+      cardProgress: {
+        apple: 'attempted' as const,
+        banana: 'untouched' as const,
+      },
+      wordsLearned: ['apple'],
+    };
+    const messages = [
+      { role: 'user', content: 'Apple.' },
+      { role: 'assistant', content: 'Good. Say apple again.' },
+    ];
+
+    const input = buildPromptInput(foodCourse, memory, 'interactive', messages, 1000);
+    const bucketChars = input.breakdown.buckets.reduce((sum, bucket) => sum + bucket.chars, 0);
+
+    expect(input.systemPrompt).toBe(buildSystemPrompt(foodCourse, memory, 'interactive'));
+    expect(input.breakdown.systemChars).toBe(input.systemPrompt.length);
+    expect(input.breakdown.messageChars).toBe('Apple.'.length + 'Good. Say apple again.'.length);
+    expect(input.breakdown.messageCount).toBe(2);
+    expect(input.breakdown.totalChars).toBe(input.breakdown.systemChars + input.breakdown.messageChars);
+    expect(bucketChars).toBe(input.breakdown.totalChars);
+    expect(input.breakdown.inputTokens).toBe(1000);
+    expect(input.breakdown.buckets.map((bucket) => bucket.key)).toEqual(expect.arrayContaining([
+      'static_rules',
+      'phase_rules',
+      'course_definition',
+      'lesson_state',
+      'summary_constraints',
+      'history',
+      'prompt_separators',
+    ]));
+    expect(input.breakdown.buckets.find((bucket) => bucket.key === 'course_definition')?.chars).toBeGreaterThan(0);
+    expect(input.breakdown.buckets.find((bucket) => bucket.key === 'history')?.estimatedTokens).toBeDefined();
   });
 });

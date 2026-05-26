@@ -102,6 +102,7 @@ describe('buildReport — basic aggregation', () => {
     expect(r.tokens.llm.output).toBe(200);
     expect(r.tokens.llm.avgInputPerRound).toBe(1200);
     expect(r.tokens.llm.maxInput).toBe(1200);
+    expect(r.tokens.llm.promptInputBreakdown.trackedTurns).toBe(0);
     expect(r.interactions).toHaveLength(2);
     expect(r.interactions[0].n).toBe(1);
     expect(r.interactions[0].user).toBe('(开始)');
@@ -115,6 +116,84 @@ describe('buildReport — basic aggregation', () => {
 
     const r = await buildReport(db, null, noopCourseLoader);
     expect(r.session.id).toBe('new');
+  });
+});
+
+describe('buildReport — prompt input breakdown', () => {
+  it('aggregates per-turn LLM input composition from model calls', async () => {
+    const db = createMemDb();
+    seedSession(db, {
+      id: 's',
+      courseId: 'food',
+      startTime: '2026-01-01T00:00:00.000Z',
+      interactions: [
+        {
+          user: 'a',
+          ai: 'a',
+          modelCalls: {
+            llm: {
+              inputTokens: 1000,
+              inputBreakdown: {
+                totalChars: 1000,
+                systemChars: 800,
+                messageChars: 200,
+                messageCount: 2,
+                buckets: [
+                  { key: 'static_rules', label: 'Role and static rules', chars: 400, estimatedTokens: 400 },
+                  { key: 'course_definition', label: 'Course definition', chars: 300, estimatedTokens: 300 },
+                  { key: 'history', label: 'LLM message history', chars: 200, estimatedTokens: 200 },
+                  { key: 'prompt_separators', label: 'Prompt separators', chars: 100, estimatedTokens: 100 },
+                ],
+              },
+            },
+          },
+        },
+        {
+          user: 'b',
+          ai: 'b',
+          modelCalls: {
+            llm: {
+              inputTokens: 2000,
+              inputBreakdown: {
+                totalChars: 2000,
+                systemChars: 1600,
+                messageChars: 400,
+                messageCount: 4,
+                buckets: [
+                  { key: 'static_rules', label: 'Role and static rules', chars: 800, estimatedTokens: 800 },
+                  { key: 'course_definition', label: 'Course definition', chars: 700, estimatedTokens: 700 },
+                  { key: 'history', label: 'LLM message history', chars: 400, estimatedTokens: 400 },
+                  { key: 'prompt_separators', label: 'Prompt separators', chars: 100, estimatedTokens: 100 },
+                ],
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const r = await buildReport(db, 's', noopCourseLoader);
+    const breakdown = r.tokens.llm.promptInputBreakdown;
+
+    expect(breakdown.trackedTurns).toBe(2);
+    expect(breakdown.avgTotalChars).toBe(1500);
+    expect(breakdown.avgSystemChars).toBe(1200);
+    expect(breakdown.avgMessageChars).toBe(300);
+    expect(breakdown.avgMessageCount).toBe(3);
+    expect(breakdown.largestBucket).toEqual({
+      key: 'static_rules',
+      label: 'Role and static rules',
+      by: 'estimatedTokens',
+      value: 1200,
+    });
+    expect(breakdown.buckets[0]).toMatchObject({
+      key: 'static_rules',
+      totalChars: 1200,
+      avgChars: 600,
+      totalEstimatedTokens: 1200,
+      avgEstimatedTokens: 600,
+      shareOfEstimatedTokens: 0.4,
+    });
   });
 });
 
