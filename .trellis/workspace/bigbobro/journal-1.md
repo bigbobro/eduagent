@@ -715,3 +715,36 @@ Compressed agent static prompt rules and a small course prompt format slice, add
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: Configure ESLint Gate
+
+**Date**: 2026-05-28
+**Task**: Configure ESLint Gate
+**Branch**: `main`
+
+### Summary
+
+Cleared stale Trellis runtime session fallback and configured the Next.js ESLint gate so pnpm lint runs non-interactively and passes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `843e1b3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
