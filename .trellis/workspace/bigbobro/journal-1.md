@@ -682,3 +682,36 @@ Added a standalone Eval design chapter to docs/architecture.md covering why Eval
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: Prompt Slimming v1
+
+**Date**: 2026-05-28
+**Task**: Prompt Slimming v1
+**Branch**: `main`
+
+### Summary
+
+Compressed agent static prompt rules and a small course prompt format slice, added bucket threshold coverage, captured measurement evidence, and verified prompt/Eval smoke gates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `046c22d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

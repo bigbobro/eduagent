@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
-- **Last Active**: 2026-05-27
+- **Total Sessions**: 21
+- **Last Active**: 2026-05-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~684 | Active |
+| `journal-1.md` | ~717 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-05-28 | Prompt Slimming v1 | `046c22d` | `main` |
 | 20 | 2026-05-27 | Document Eval architecture design | `6709432` | `main` |
 | 19 | 2026-05-26 | Fix reinforcement quiz selection blocking | `7206c11` | `main` |
 | 18 | 2026-05-26 | Eval v1 lesson quality scorecard | `e942252` | `main` |
