@@ -100,14 +100,14 @@ describe('buildSystemPrompt v2 wordcard protocol', () => {
     expect(prompt).not.toContain('总览图');
   });
 
-  it('lists word cards and sentence cards with id / english / chinese / kind', () => {
+  it('lists word cards and sentence cards with id / english / chinese / drill parts', () => {
     const memory = createMemory();
     const prompt = buildSystemPrompt(sentenceFixtureCourse, memory);
 
     expect(prompt).toContain('## 目标词卡');
     expect(prompt).toContain('## 短句图卡');
-    expect(prompt).toContain('apple: apple / 苹果 (word); drillParts=app | le');
-    expect(prompt).toContain('sentence_like_milk: I like milk. / 我喜欢牛奶。 (sentence); drillParts=I like | milk');
+    expect(prompt).toContain('apple: apple/苹果; drillParts=app|le');
+    expect(prompt).toContain('sentence_like_milk: I like milk./我喜欢牛奶。; drillParts=I like|milk');
   });
 
   it('lists explicit ASR aliases when a course card defines them', () => {
@@ -120,7 +120,7 @@ describe('buildSystemPrompt v2 wordcard protocol', () => {
 
     const prompt = buildSystemPrompt(course, createMemory());
 
-    expect(prompt).toContain('apple: apple / 苹果 (word); drillParts=app | le; asrAliases=苹果音译');
+    expect(prompt).toContain('apple: apple/苹果; drillParts=app|le; asrAliases=苹果音译');
   });
 
   it('exposes review/new card id lists', () => {
@@ -170,6 +170,20 @@ describe('buildSystemPrompt v1.1 progress and drill contract', () => {
 });
 
 describe('buildPromptInput measurement', () => {
+  it('keeps v1 prompt buckets below the measured pre-slimming baseline', () => {
+    const input = buildPromptInput(
+      foodCourse,
+      createMemory(),
+      'interactive',
+      [{ role: 'user', content: 'Apple.' }],
+    );
+    const bucket = (key: string) => input.breakdown.buckets.find((item) => item.key === key)?.chars || 0;
+
+    expect(input.breakdown.totalChars).toBeLessThanOrEqual(3545);
+    expect(bucket('static_rules')).toBeLessThanOrEqual(1300);
+    expect(bucket('course_definition')).toBeLessThanOrEqual(1050);
+  });
+
   it('breaks down the exact system prompt plus message history', () => {
     const memory = {
       ...createMemory(),

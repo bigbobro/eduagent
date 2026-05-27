@@ -951,6 +951,11 @@ tool), but if a future contract change deprecates `show_card` and only
 
 - `src/lib/agent/prompt.test.ts`: assert `buildPromptInput().systemPrompt`
   equals `buildSystemPrompt()` and bucket chars sum to `totalChars`.
+- When intentionally slimming prompt text, update `src/lib/agent/prompt.test.ts`
+  with a representative fixture that caps `totalChars` and the edited bucket
+  sizes, while still asserting behavior-critical prompt contracts such as
+  R-C ASR matching, current-card control, summary/closing safety, `show_card`,
+  `drillParts`, and `state_update`.
 - `src/lib/agent/session-prompt-input.test.ts`: assert `streamUserInput`
   persists an `inputBreakdown` aligned with the actual `streamLLM` arguments.
 - `scripts/lesson-report-data.test.ts`: assert report aggregation identifies
