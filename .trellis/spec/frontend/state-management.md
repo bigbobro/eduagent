@@ -46,6 +46,9 @@ aggregates.
   cards unless the learner explicitly asks to review.
 - `PhasedLessonView` stores controller instances in refs and mirrors emitted
   phase/busy/active-card state into React.
+- `PhasedLessonView` treats `PhasedLessonController.startLesson() === false` as
+  a failed startup and returns to the not-started intro screen so the start
+  button remains retryable.
 - `LessonMandalaV2` mirrors lesson state, subtitle, and current card from
   controller events. It should not duplicate ASR/TTS state-machine logic.
 - Reinforcement `repeat-after-me` quizzes reuse `LessonController` recording,
@@ -118,6 +121,68 @@ Let every LLM `show_card` directly update `currentCardId` and the hero card.
 
 Normalize `show_card` against session progress before SSE/commit, then keep a
 small UI guard using the latest progress snapshot.
+
+## Scenario: Lesson Start Failure Recovery
+
+### 1. Scope / Trigger
+
+- Trigger: changes to `LessonController.startLesson()`,
+  `PhasedLessonController.startLesson()`, or `PhasedLessonView` start handling.
+- Reason: initial `/api/chat?action=start` can fail before a server session
+  exists; the learner must be able to retry without refreshing the page.
+
+### 2. Signatures
+
+- `LessonController.startLesson(courseId): Promise<boolean>`
+- `PhasedLessonController.startLesson(): Promise<boolean>`
+- `PhasedLessonView.handleStart()` sets `started=true` optimistically, then
+  rolls back when the phased controller returns `false`.
+
+### 3. Contracts
+
+- Startup success -> `true`; normal intro-to-interactive flow continues.
+- Startup failure -> `false`; controller state returns to `idle`, intro busy is
+  cleared, and `started` is reset to `false`.
+- TTS open and mic prewarm failures remain recoverable warnings; they do not by
+  themselves make `startLesson()` return `false`.
+
+### 4. Validation & Error Matrix
+
+- `/api/chat?action=start` 500/404/no body -> emit an error, state `idle`,
+  return `false`.
+- `LessonController.startLesson()` throws unexpectedly -> phased controller
+  clears busy and returns `false`.
+- Successful SSE start -> return `true`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: failed start shows the original start button again.
+- Base: successful start reaches interactive after the opening TTS finishes.
+- Bad: failed start leaves `started=true` with intro locked and no retry path.
+
+### 6. Tests Required
+
+- `LessonController` test for failed start returning `false` and state `idle`.
+- `PhasedLessonController` test for clearing intro busy on false start.
+- `PhasedLessonView` test for returning to the start screen.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```tsx
+setStarted(true);
+await phased.startLesson();
+```
+
+#### Correct
+
+```tsx
+setStarted(true);
+if ((await phased.startLesson()) === false) {
+  setStarted(false);
+}
+```
 
 ## Server And Durable State Boundaries
 

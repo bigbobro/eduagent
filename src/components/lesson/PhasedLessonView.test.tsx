@@ -6,6 +6,7 @@ import { PhasedLessonView } from './PhasedLessonView';
 const routerPush = vi.hoisted(() => vi.fn());
 const lessonInstances = vi.hoisted(() => [] as any[]);
 const phasedInstances = vi.hoisted(() => [] as any[]);
+const phasedStartQueue = vi.hoisted(() => [] as Array<() => Promise<boolean | void>>);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: routerPush }),
@@ -84,8 +85,11 @@ vi.mock('@/lib/voice/phased-lesson-controller', () => {
     }
 
     async startLesson() {
+      const queued = phasedStartQueue.shift();
+      if (queued) return queued();
       await this.v2.startLesson();
       this.emit('phase-change', 'interactive');
+      return true;
     }
 
     async endLesson() {}
@@ -107,6 +111,7 @@ describe('PhasedLessonView', () => {
   beforeEach(() => {
     lessonInstances.length = 0;
     phasedInstances.length = 0;
+    phasedStartQueue.length = 0;
     routerPush.mockClear();
   });
 
@@ -124,6 +129,18 @@ describe('PhasedLessonView', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /按住 Space 跟我读/ })).toBeTruthy();
     });
+  });
+
+  it('returns to the start screen when lesson startup fails', async () => {
+    phasedStartQueue.push(async () => false);
+    render(<PhasedLessonView course={foodCourse} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /我们开始吧/ })).toBeTruthy();
+    });
+    expect(screen.queryByRole('button', { name: /按住 Space 跟我读/ })).toBeNull();
   });
 
   it('restarts the current course from the in-lesson done frame', async () => {

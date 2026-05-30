@@ -138,6 +138,22 @@ describe('LessonController', () => {
     });
   });
 
+  it('returns false and resets to idle when lesson start fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
+    const controller = new LessonController();
+    const errors: string[] = [];
+    const states: string[] = [];
+    controller.on('error', (err) => errors.push(err.message));
+    controller.on('state', (state) => states.push(state));
+
+    await expect(controller.startLesson('food')).resolves.toBe(false);
+
+    expect(errors).toContain('Failed to start lesson');
+    expect(states).toContain('greeting');
+    expect(states).toContain('idle');
+    expect(controller.getState()).toBe('idle');
+  });
+
   it('does not close ASR while startup is still opening on immediate release', async () => {
     let resolveOpen!: () => void;
     asrOpenQueue.push(() => new Promise<void>((resolve) => {

@@ -61,13 +61,21 @@ export class PhasedLessonController {
     return this.introActiveCardId;
   }
 
-  async startLesson(): Promise<void> {
+  async startLesson(): Promise<boolean> {
     this.setIntroBusy(true);
     this.armIntroStartupUnlockTimer();
     try {
-      await this.v2.startLesson(this.course.id);
+      const started = await this.v2.startLesson(this.course.id);
+      if (started === false) {
+        this.clearIntroStartupUnlockTimer();
+        if (this.currentPhase === 'intro') this.setIntroBusy(false);
+        return false;
+      }
+      return true;
     } catch {
+      this.clearIntroStartupUnlockTimer();
       if (this.currentPhase === 'intro') this.setIntroBusy(false);
+      return false;
     }
   }
 

@@ -17,7 +17,7 @@ function mockV2() {
       if (event === 'state') state = data;
       listeners.get(event)?.forEach((fn) => fn(data));
     },
-    startLesson: vi.fn(async () => {}),
+    startLesson: vi.fn(async (): Promise<boolean | void> => {}),
     endLesson: vi.fn(async () => {}),
     startListening: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
@@ -38,6 +38,18 @@ describe('PhasedLessonController phase transitions', () => {
 
   it('starts at phase=intro', async () => {
     await ctrl.startLesson();
+    expect(ctrl.getCurrentPhase()).toBe('intro');
+  });
+
+  it('clears intro busy and returns false when the underlying lesson fails to start', async () => {
+    v2.startLesson.mockResolvedValueOnce(false);
+    const busyChanges: boolean[] = [];
+    ctrl.on('intro-busy-change', (busy: boolean) => busyChanges.push(busy));
+
+    await expect(ctrl.startLesson()).resolves.toBe(false);
+
+    expect(ctrl.isIntroBusy()).toBe(false);
+    expect(busyChanges).toEqual([true, false]);
     expect(ctrl.getCurrentPhase()).toBe('intro');
   });
 

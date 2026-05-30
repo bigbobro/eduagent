@@ -82,7 +82,7 @@ export class LessonController {
 
   // ─── 课堂生命周期 ─────────────────────────────────────────────────
 
-  async startLesson(courseId: string): Promise<void> {
+  async startLesson(courseId: string): Promise<boolean> {
     this.courseId = courseId;
     this.currentAsrCardId = null;
     this.clearedCardIds = [];
@@ -110,13 +110,14 @@ export class LessonController {
     if (!res.ok || !res.body) {
       this.emit('error', { message: 'Failed to start lesson' });
       this.setState('idle');
-      return;
+      return false;
     }
     this.sessionId = res.headers.get('X-Session-Id');
 
     await this.consumeSSE(res.body, /* afterDone= */ () => {
       // greeting 不立刻切到 awaiting,等 TTS session-finished 来了再切
     });
+    return true;
   }
 
   async endLesson(): Promise<void> {

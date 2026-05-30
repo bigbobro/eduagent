@@ -11,8 +11,74 @@ separate migration framework.
 - Initialize tables through `ensureInitialized()` in `src/lib/init.ts`, which
   calls `initDatabase()` once after env validation. The `/api/chat` route does
   this because lesson sessions create and finish logs.
-- Read-only aggregate API routes currently call `getDb()` directly; see
-  `/api/progress`, `/api/stats`, and `/api/sessions`.
+- Read-only aggregate API routes call `ensureDatabaseInitialized()` from
+  `src/lib/init.ts` before reading. They must not require voice/provider env
+  credentials just to render journal or parent dashboards.
+
+## Scenario: Fresh DB Aggregate Routes
+
+### 1. Scope / Trigger
+
+- Trigger: changes to `/api/progress`, `/api/stats`, `/api/sessions`,
+  `src/lib/init.ts`, or aggregate helpers that affect first-run DB access.
+- Reason: fresh local checkouts and temp smoke databases may hit dashboard APIs
+  before any lesson has called `/api/chat`.
+
+### 2. Signatures
+
+- `ensureDatabaseInitialized(): void` -> creates SQLite tables only.
+- `ensureInitialized(): void` -> validates provider env, then calls
+  `ensureDatabaseInitialized()`.
+- `GET /api/progress`, `GET /api/stats`, `GET /api/sessions` -> call
+  `ensureDatabaseInitialized()` before `getDb()`.
+
+### 3. Contracts
+
+- Aggregate routes must create the schema if `DATABASE_PATH` points to a new
+  file.
+- Aggregate routes must not validate `DOUBAO_*` or `MIMO_*` env variables.
+- `/api/chat` continues to use `ensureInitialized()` because it needs provider
+  readiness and writes lesson logs.
+
+### 4. Validation & Error Matrix
+
+- Fresh DB + aggregate route first -> 200 with empty snapshots/lists.
+- Missing provider env + aggregate route -> still 200 if DB can be opened.
+- Missing provider env + `/api/chat` -> env error from `ensureInitialized()`.
+
+### 5. Good/Base/Bad Cases
+
+- Good: temp `DATABASE_PATH` then `/api/progress` returns all course words with
+  zero attempts.
+- Base: existing DB returns normal aggregate data.
+- Bad: `/api/progress` throws `no such table: word_performance` until a lesson
+  is started.
+
+### 6. Tests Required
+
+- Route-level test with a temp `DATABASE_PATH` and no `/api/chat` call first.
+- Existing in-memory API tests should still cover empty and non-empty aggregate
+  shapes.
+- `pnpm run smoke` should pass with a temp DB and mock voice env.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+export async function GET() {
+  return NextResponse.json(buildProgressSnapshot(getDb(), allCourses));
+}
+```
+
+#### Correct
+
+```ts
+export async function GET() {
+  ensureDatabaseInitialized();
+  return NextResponse.json(buildProgressSnapshot(getDb(), allCourses));
+}
+```
 
 ## Schema Conventions
 

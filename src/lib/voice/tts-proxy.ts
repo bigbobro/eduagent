@@ -25,7 +25,11 @@ interface PendingSession {
   sessionId: string;
 }
 
-function bridge(clientWs: WsClient): void {
+interface TtsBridgeOptions {
+  createUpstream?: (url: string, options: { headers: Record<string, string> }) => WsClient;
+}
+
+export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void {
   const connectId = randomUUID();
   const headers: Record<string, string> = {
     'X-Api-App-Id': process.env.DOUBAO_APP_ID || '',
@@ -34,16 +38,32 @@ function bridge(clientWs: WsClient): void {
     'X-Api-Connect-Id': connectId,
   };
 
-  const upstream = new WsClient(DOUBAO_TTS_URL, { headers });
+  const upstream = options.createUpstream?.(DOUBAO_TTS_URL, { headers }) ?? new WsClient(DOUBAO_TTS_URL, { headers });
   let connectionReady = false;
   let currentSession: PendingSession | null = null;
   let closed = false;
+  const pendingControlFrames: Array<() => void> = [];
 
   const closeAll = (code: number = 1000) => {
     if (closed) return;
     closed = true;
     try { clientWs.close(code); } catch {}
     try { upstream.close(); } catch {}
+  };
+
+  const sendWhenReady = (sendFrame: () => void) => {
+    if (connectionReady && upstream.readyState === upstream.OPEN) {
+      sendFrame();
+      return;
+    }
+    pendingControlFrames.push(sendFrame);
+  };
+
+  const flushPendingControlFrames = () => {
+    while (connectionReady && upstream.readyState === upstream.OPEN && pendingControlFrames.length > 0) {
+      const sendFrame = pendingControlFrames.shift()!;
+      sendFrame();
+    }
   };
 
   upstream.on('open', () => {
@@ -63,6 +83,7 @@ function bridge(clientWs: WsClient): void {
       case 50: // ConnectionStarted
         connectionReady = true;
         clientWs.send(JSON.stringify({ type: 'connection-started' }));
+        flushPendingControlFrames();
         break;
       case 150: // SessionStarted
         clientWs.send(JSON.stringify({ type: 'session-started', sessionId: frame.sessionId }));
@@ -107,7 +128,6 @@ function bridge(clientWs: WsClient): void {
 
   clientWs.on('message', (data, isBinary) => {
     if (isBinary) return; // 前端到代理只接受 JSON 控制帧
-    void connectionReady; // 引用变量,等连接 ready 再处理但不阻塞 — 实际发出会失败,记录但不致命
     const text = data.toString();
     const msg = safeParse(text);
     if (!msg) return;
@@ -137,28 +157,32 @@ function bridge(clientWs: WsClient): void {
           namespace: 'BidirectionalTTS',
           req_params: reqParams,
         });
-        upstream.send(encodeTtsEvent({ event: 100, sessionId, payload: Buffer.from(payload, 'utf8') }));
+        sendWhenReady(() => upstream.send(encodeTtsEvent({ event: 100, sessionId, payload: Buffer.from(payload, 'utf8') })));
         break;
       }
       case 'text-chunk': {
         if (!currentSession) return;
+        const sessionId = currentSession.sessionId;
+        const chunkText = String(msg.text ?? '');
         // 豆包文档:TaskRequest 的 text 在 req_params.text 里,不是顶层
         const payload = JSON.stringify({
           event: 200,
           namespace: 'BidirectionalTTS',
-          req_params: { text: msg.text },
+          req_params: { text: chunkText },
         });
-        upstream.send(encodeTtsEvent({ event: 200, sessionId: currentSession.sessionId, payload: Buffer.from(payload, 'utf8') }));
+        sendWhenReady(() => upstream.send(encodeTtsEvent({ event: 200, sessionId, payload: Buffer.from(payload, 'utf8') })));
         break;
       }
       case 'session-finish': {
         if (!currentSession) return;
-        upstream.send(encodeTtsEvent({ event: 102, sessionId: currentSession.sessionId, payload: Buffer.from('{}', 'utf8') }));
+        const sessionId = currentSession.sessionId;
+        sendWhenReady(() => upstream.send(encodeTtsEvent({ event: 102, sessionId, payload: Buffer.from('{}', 'utf8') })));
         break;
       }
       case 'session-cancel': {
         if (!currentSession) return;
-        upstream.send(encodeTtsEvent({ event: 101, sessionId: currentSession.sessionId, payload: Buffer.from('{}', 'utf8') }));
+        const sessionId = currentSession.sessionId;
+        sendWhenReady(() => upstream.send(encodeTtsEvent({ event: 101, sessionId, payload: Buffer.from('{}', 'utf8') })));
         currentSession = null;
         break;
       }

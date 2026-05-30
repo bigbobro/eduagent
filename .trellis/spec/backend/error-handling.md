@@ -95,6 +95,10 @@ normalization, then emit the approved speech followed by normalized actions.
   `{ type: 'error', code, message }`.
 - Protocol decode errors use `code: 'decode'`; upstream/provider failures use
   `code: 'upstream'`.
+- TTS control frames from the browser may arrive before the upstream provider
+  sends `ConnectionStarted`. Queue `session-start`, `text-chunk`,
+  `session-finish`, and `session-cancel` in arrival order and flush only after
+  upstream readiness.
 - ASR must not close the upstream connection immediately on user stop. The
   browser sends a `{ type: 'finish' }` control frame, the proxy sends the Doubao
   negative-sequence final packet, and the client closes only after final text.
@@ -108,6 +112,70 @@ normalization, then emit the approved speech followed by normalized actions.
   the connection closed, ignore later upstream `error` / `close` events caused
   by that local teardown. Those events are not provider failures and should not
   emit learner-visible errors or noisy `[asr ...] upstream error` logs.
+
+## Scenario: TTS Upstream Readiness Buffer
+
+### 1. Scope / Trigger
+
+- Trigger: changes to `src/lib/voice/tts-proxy.ts`,
+  `src/lib/voice/tts-client.ts`, or TTS session lifecycle.
+- Reason: browser -> local proxy WebSocket open is faster than proxy -> Doubao
+  StartConnection; sending session controls too early can drop the opening
+  speech or throw on a non-ready upstream socket.
+
+### 2. Signatures
+
+- Browser controls: `{ type: 'session-start', sessionId }`,
+  `{ type: 'text-chunk', text }`, `{ type: 'session-finish' }`,
+  `{ type: 'session-cancel' }`.
+- Provider readiness signal: TTS server event `50` (`ConnectionStarted`).
+- Proxy helper: queue `() => upstream.send(encodeTtsEvent(...))` callbacks until
+  `connectionReady && upstream.readyState === upstream.OPEN`.
+
+### 3. Contracts
+
+- Control frames preserve browser arrival order.
+- `session-start` sets `currentSession` immediately so following `text-chunk`
+  and `session-finish` are retained while queued.
+- `session-cancel` may clear `currentSession` immediately, but its already
+  captured provider cancel frame must still flush after readiness.
+
+### 4. Validation & Error Matrix
+
+- Controls before `ConnectionStarted` -> queued, then flushed after event `50`.
+- Controls after `ConnectionStarted` -> sent immediately.
+- Upstream error/close before readiness -> send browser error/close through
+  existing proxy error path; do not flush queued frames into a closed upstream.
+
+### 5. Good/Base/Bad Cases
+
+- Good: local client sends start/text/finish immediately; upstream receives
+  events `100 -> 200 -> 102` after connection event `50`.
+- Base: upstream is already ready; controls pass through without delay.
+- Bad: proxy calls `upstream.send(event=100)` before StartConnection finishes.
+
+### 6. Tests Required
+
+- Unit test delayed upstream readiness with queued start/text/finish.
+- Unit test queued cancel order.
+- `pnpm smoke:lesson` should keep passing because opening TTS and quiz static
+  TTS both use this path.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+upstream.send(encodeTtsEvent({ event: 100, sessionId, payload }));
+```
+
+#### Correct
+
+```ts
+sendWhenReady(() => {
+  upstream.send(encodeTtsEvent({ event: 100, sessionId, payload }));
+});
+```
 
 ## Provider And Environment Errors
 
@@ -123,6 +191,9 @@ normalization, then emit the approved speech followed by normalized actions.
 - If `/api/chat` returns 404 during a lesson message, the current behavior is to
   tell the learner the course expired and return to `awaiting`. This handles dev
   server restarts clearing the in-memory session map.
+- If initial lesson start fails, `LessonController.startLesson()` returns
+  `false`, resets state to `idle`, and the phased/view layer must return to a
+  retryable start screen instead of leaving intro busy.
 - Very short recordings are intercepted client-side at `< 800ms` and do not hit
   chat. When the recording ends before ASR startup is armed, use the original
   keyup timestamp for the short-recording decision after startup settles.

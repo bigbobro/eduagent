@@ -86,7 +86,13 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
 
   const handleStart = async () => {
     setStarted(true);
-    await phasedRef.current?.startLesson();
+    const startedOk = await phasedRef.current?.startLesson();
+    if (startedOk === false) {
+      setStarted(false);
+      setPhase('intro');
+      setIntroBusy(false);
+      setIntroActiveCardId(null);
+    }
   };
 
   const handleHotspotClick = (cardId: string) => {
