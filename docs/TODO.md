@@ -1,36 +1,41 @@
 # EduAgent TODO
 
-> 2026-05-23 更新版。05-22 P0 修复已落地;05-23 继续补上 push-to-talk ASR 建连竞态、pointer/Space hold、teacher speech 与 `show_card` 出口一致性、dev panel 强切 reinforcement 解锁,并把这些交互写进 smoke。
+> 2026-05-30 更新版。05-26 已补 Prompt input quantification 和 Eval v1;05-27/28 已完成 Prompt Slimming v1;05-28 已把 `pnpm lint` 配成非交互式质量门。下一步不再凭感觉排工程项,先跑真实课 + Eval,再决定继续压 prompt/延迟、上 Hybrid、还是补 session/autonomy。
 > 历史完成项参考 `docs/architecture.md` §9「文件演进历史」,本文件不复述。
 
-## 下一步:05-23 修复后回归实测
+## 下一步:真实课 + Eval 决策
 
-最新代码已通过自动 smoke,但还需要再跑 1 节真实 animals 课确认人工路径:
-- 按住 Space 或按钮时录音态持续到松手,不会瞬间关闭;服务端不再刷 `WebSocket was closed before the connection was established`
-- 切卡时画面、老师话术、TTS 听感指向同一个词
-- 问答阶段老师问完题后图片可点击,不会因为 dev panel / phase transition 留在 disabled 状态
-- TTS 有声;如再次无声,优先看 provider quota / env diagnostic,不要先怀疑 UI 按钮
-- `/lesson-report` 对新课不再报 speech/show_card mismatch;同时继续记录 avg input token
+最新代码已通过自动 smoke / prompt slimming / Eval 数据门,但还需要再跑 1 节真实课确认人工路径:
+- 课后跑 `pnpm tsx scripts/lesson-report-data.ts <session-id>`,先看 `eval.sessionHealth` 和 `eval.agentBehavior`,再看 `eval.teachingLoop` / `eval.costContext`
+- 继续确认 Space / 按钮 push-to-talk、切卡 speech/show_card、reinforcement 点击解锁、TTS 有声这些 05-23 交互没有回归
+- 重点观察真实体验:老师话术是否自然、首音频延迟是否仍明显、孩子静默时是否冷场、内容是否开始重复
+- 记录 avg input / largest prompt bucket,验证 Prompt Slimming v1 在真实课里是否足够
 
 结果决定:
-- 如果只剩 token / 延迟偏高 → 启动 Prompt / token budget slimming
+- 如果 Eval 先报 session/agent 行为风险 → 先修行为正确性,不要先优化成本
+- 如果只剩 token / 延迟偏高 → 启动 Prompt Slimming v2 或模型/首句延迟优化
 - 如果老师话术质量仍是主要瓶颈 → 进入 Hybrid 预渲染重构
 - 如果 session resume / 进度选择是主要痛点 → 启动 SQLite session persistence
+- 如果孩子静默冷场是主要痛点 → 启动 idle / proactive policy
 
 ---
 
 ## 当前 backlog
 
-### 1. Prompt / token budget slimming — 降低每轮 LLM input *(等回归稳定后启动)*
+### 1. Prompt / latency optimization v2 — 真实 Eval 继续指向成本/延迟时再启动
 
-*2026-05-23 两份 animals 报告都触发 highAvgInput:约 2300-2774 input tokens / round。它不是当前 UI P0,但会持续影响成本与首包延迟。*
+*2026-05-23/25 真实报告曾触发 highAvgInput:约 2300-2935 input tokens / round。05-26 已做 input breakdown,05-27/28 已完成 Prompt Slimming v1。现在不要再凭旧 TODO 直接继续压 prompt,先等下一节真实课 Eval 证明它仍是主瓶颈。*
 
 **2026-05-24 已完成**:state_update 删除 4 个废字段（current_card_id / phase / words_learned / generated_content），仅保留 current_word + attempt_assessment。LLM output token 成本下降，input token 不变。
 
-剩余优先动作:
-- 量化 `buildSystemPrompt` 裸 prompt、课程定义、history window 各自占比
-- 只传 currentCard / nextCard / clearedCardIds / 最近必要历史,把稳定规则尽量固化到服务端代码或短 system prompt
-- 目标先设为 avg input < 1500;是否继续压到 1000 以下看教学质量是否受损
+**2026-05-26 已完成**:Prompt input quantification 已持久化到 `interaction_logs.model_calls.llm.inputBreakdown`,报告可拆 static rules / phase rules / course definition / lesson state / summary constraints / history / separators。
+
+**2026-05-27/28 已完成**:Prompt Slimming v1 把代表 fixture total chars 从 5065 降到 3527（-30.4%）,static_rules 从 2481 降到 1206（-51.4%）,course_definition 从 1260 降到 997（-20.9%）。后续 smoke 11/11 通过,Eval 未报 speech_card_alignment / premature_closing / token_data_integrity。
+
+如果真实 Eval 仍指向成本/延迟,候选动作:
+- 对真实课 largest bucket 做二次定位:static_rules、course_definition、lesson_state、history 哪个重新变大就压哪个
+- 只在有数据证明必要时继续缩 course_definition / lesson_state;不能牺牲 `asrAliases`、`drillParts`、current/next card 控制和 closing 安全
+- 如果首音频仍主要卡在 MiMo first-token 或 TTS 合成,优先评估更快模型 / prompt 首句策略 / TTS 占位或缓存,不要只盯 input token
 
 ### 2. Hybrid 预渲染话术架构 — LLM 退化为决策器 *(park,等实测决策)*
 
@@ -105,7 +110,6 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 2. **课程产出 Codex skill** — SOP 已稳定在 `.trellis/spec/frontend/course-authoring.md`,10 门课沿用同一模板没出问题;Codex skill 化仍未做,等触发场景再启动(用户扩展课程节奏 / 引入第二位作课者)。
 3. **兴趣 / 困惑记忆** — 在词汇表现之外识别 confusion / engagement,等真实报告证明有价值再做。
 4. **长期语音 UX** — VAD 自动停止 / 连续对话 / WebSocket 退避重连 / 开场白 TTS 预加载。
-5. **Lint 配置整理** — `pnpm lint` 目前会触发 Next.js 交互式初始化;等要把 lint 纳入质量门时,补 ESLint 配置或调整脚本,避免交互式命令阻塞 CI / agent。
 
 ---
 
@@ -123,3 +127,8 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 - 2026-05-22 — **Teacher Agent UX P0 四项修复(R1-R4)**:actions/TTS 时序、ASR 字面 verify、normalize 放宽(允许跳卡)、closing guard 始终注入 + 服务端 speech 扫描替换
 - 2026-05-23 — **Lesson voice regression stabilization + 轻量诊断闭环**:push-to-talk ASR 建连/关闭竞态、pointer/Space hold、speech/show_card 出口一致性、dev 强切 reinforcement 解锁、smoke UI 跟读与 speech/card 一致性断言;原"日志整理"长期项关闭
 - 2026-05-24 — **代码库清扫 A+B+C**:删 6 项死代码(logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage / getNextWordCardId);mockStreamLLM 修正为合法 show_card shape;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content)
+- 2026-05-24 — **Guard pipeline 重构(D)**:`src/lib/agent/guards/` 拆出 closing / premature-closing / normalize / speech-card-align pipeline,`streamUserInput` 收窄,行为不变
+- 2026-05-25 — **R-C canonical matching + explicit ASR aliases**:修复 `ice cream` / `icecream` 类 ASR 命中问题,课程可显式声明 `asrAliases`
+- 2026-05-26 — **Prompt input quantification + Eval v1**:LLM prompt bucket 持久化,lesson-report 输出 session health / cost-context / teaching-loop / agent behavior / next-iteration signals
+- 2026-05-27/28 — **Prompt Slimming v1**:代表 fixture input chars -30.4%,static_rules -51.4%,course_definition 小幅压缩并通过 smoke / Eval 风险门
+- 2026-05-28 — **ESLint gate**:`pnpm lint` 改为非交互式可通过,lint 配置整理从远期 backlog 关闭
