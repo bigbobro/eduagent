@@ -27,6 +27,78 @@ These are the modules that turn raw LLM output + ASR text into safe lesson state
 
 ---
 
+## SessionStore Boundary
+
+`src/lib/agent/session-store.ts` owns active lesson session storage. The default
+runtime implementation is `InMemorySessionStore`, so process restarts still
+invalidate active session IDs; this boundary exists so future SQLite-backed
+resume work replaces the store instead of spreading a second session map across
+routes or controllers.
+
+### 1. Scope / Trigger
+
+- Trigger: changes to `src/lib/agent/session.ts`,
+  `src/lib/agent/session-store.ts`, `/api/chat` session lookup, or any future
+  resume/persistence work for active lessons.
+
+### 2. Signatures
+
+- `SessionStore.get(sessionId: string): Session | undefined`
+- `SessionStore.save(session: Session): void`
+- `SessionStore.delete(sessionId: string): boolean`
+- Default: `sessionStore = new InMemorySessionStore()`.
+
+### 3. Contracts
+
+- `src/lib/agent/session.ts` may construct and mutate `Session` objects, but it
+  must read/write them through `SessionStore`.
+- Do not create additional module-level active-session maps in API routes,
+  controllers, or tests.
+- Durable mastery remains `word_performance`; `clearedCardIds` and
+  `cardProgress` are still session-local until a later resume task explicitly
+  serializes `LessonMemory`.
+- If a future store persists sessions, it must preserve the current 404 behavior
+  for missing/expired session IDs until the client resume flow is implemented.
+
+### 4. Validation & Error Matrix
+
+- Missing session ID -> `getSession()` returns `undefined`; `/api/chat` returns
+  the existing 404 JSON error.
+- `endSession()` on a missing ID -> no-op.
+- `endSession()` on an existing ID -> writes final lesson log, then deletes the
+  active session from the store.
+
+### 5. Good/Base/Bad Cases
+
+- Good: `session.ts` delegates all active-session reads/writes to
+  `SessionStore`.
+- Base: the default store remains in memory and restart resume is still out of
+  scope.
+- Bad: adding a second `Map<string, Session>` in `/api/chat` or a controller to
+  special-case resume.
+
+### 6. Tests Required
+
+- `src/lib/agent/session-store.test.ts`: save/get/delete behavior.
+- Existing session/API/controller tests continue to cover `createSession`,
+  `getSession`, `endSession`, `setSessionPhase`, `recordQuizAnswer`, and
+  `streamUserInput` through the default store.
+- `pnpm smoke:lesson` after touching `src/lib/agent/**`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const sessions = new Map<string, Session>();
+```
+
+#### Correct
+
+```ts
+const session = sessionStore.get(sessionId);
+```
+
 ## actions / TTS Timing
 
 ### Convention: buffer show_card until TTS finishes

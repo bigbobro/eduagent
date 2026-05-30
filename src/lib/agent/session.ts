@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Course, PhaseName } from '@/types/course';
 import { LessonMemory, PromptInputBreakdown, TokenUsage } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
+import { sessionStore, type Session } from './session-store';
 import {
   createMemory,
   addUserMessage,
@@ -19,18 +20,6 @@ import { prematureClosingGuard } from './guards/premature-closing-guard';
 import { normalizeActions } from './guards/normalize-actions';
 import { speechCardAlign } from './guards/speech-card-align';
 
-export interface Session {
-  id: string;
-  courseId: string;
-  course: Course;
-  memory: LessonMemory;
-  tokenUsage: TokenUsage;
-  startTime: Date;
-  currentPhase: PhaseName;
-}
-
-const sessions = new Map<string, Session>();
-
 export function createSession(course: Course): Session {
   const id = uuidv4();
   const session: Session = {
@@ -46,24 +35,24 @@ export function createSession(course: Course): Session {
     startTime: new Date(),
     currentPhase: 'intro',
   };
-  sessions.set(id, session);
+  sessionStore.save(session);
   createLessonLog(id, course.id);
   return session;
 }
 
 export function getSession(id: string): Session | undefined {
-  return sessions.get(id);
+  return sessionStore.get(id);
 }
 
 export function endSession(sessionId: string): void {
-  const session = sessions.get(sessionId);
+  const session = sessionStore.get(sessionId);
   if (!session) return;
   finishLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
-  sessions.delete(sessionId);
+  sessionStore.delete(sessionId);
 }
 
 export function setSessionPhase(sessionId: string, phase: PhaseName): void {
-  const session = sessions.get(sessionId);
+  const session = sessionStore.get(sessionId);
   if (!session) return;
   session.currentPhase = phase;
 }
@@ -74,7 +63,7 @@ export function recordQuizAnswer(
   answer: string,
   correct: boolean,
 ): boolean {
-  const session = sessions.get(sessionId);
+  const session = sessionStore.get(sessionId);
   if (!session) return false;
   session.memory.totalInteractions += 1;
   insertInteraction(session.id, {
@@ -104,7 +93,7 @@ export async function* streamUserInput(
   signal?: AbortSignal
 ): AsyncGenerator<StreamUserEvent> {
   // 1. Session lookup + user message
-  const session = sessions.get(sessionId);
+  const session = sessionStore.get(sessionId);
   if (!session) {
     yield { type: 'error', message: `Session ${sessionId} not found` };
     return;

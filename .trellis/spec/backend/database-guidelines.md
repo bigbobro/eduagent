@@ -9,7 +9,8 @@ separate migration framework.
   `process.env.DATABASE_PATH || './db/eduagent.db'`, enables WAL mode, and turns
   on foreign keys.
 - Initialize tables through `ensureInitialized()` in `src/lib/init.ts`, which
-  calls `initDatabase()` once after env validation. The `/api/chat` route does
+  calls `initDatabase()` once after env validation. `initDatabase()` runs
+  versioned migrations from `src/lib/db/schema.ts`. The `/api/chat` route does
   this because lesson sessions create and finish logs.
 - Read-only aggregate API routes call `ensureDatabaseInitialized()` from
   `src/lib/init.ts` before reading. They must not require voice/provider env
@@ -26,7 +27,7 @@ separate migration framework.
 
 ### 2. Signatures
 
-- `ensureDatabaseInitialized(): void` -> creates SQLite tables only.
+- `ensureDatabaseInitialized(): void` -> runs SQLite migrations only.
 - `ensureInitialized(): void` -> validates provider env, then calls
   `ensureDatabaseInitialized()`.
 - `GET /api/progress`, `GET /api/stats`, `GET /api/sessions` -> call
@@ -34,8 +35,7 @@ separate migration framework.
 
 ### 3. Contracts
 
-- Aggregate routes must create the schema if `DATABASE_PATH` points to a new
-  file.
+- Aggregate routes must run migrations if `DATABASE_PATH` points to a new file.
 - Aggregate routes must not validate `DOUBAO_*` or `MIMO_*` env variables.
 - `/api/chat` continues to use `ensureInitialized()` because it needs provider
   readiness and writes lesson logs.
@@ -82,8 +82,8 @@ export async function GET() {
 
 ## Schema Conventions
 
-Schema lives in `src/lib/db/schema.ts` and is created with
-`CREATE TABLE IF NOT EXISTS`:
+Schema lives in `src/lib/db/schema.ts` and is applied through explicit,
+versioned migrations. Migration v1 is `initial_lesson_schema` and creates:
 
 - `lesson_logs`: one row per lesson session. Stores `id`, `course_id`,
   `start_time`, `end_time`, `interaction_count`, and serialized `token_usage`.
@@ -170,12 +170,86 @@ return { word: c.english, zh: c.chinese, attempts, correct };
 return { word: c.english, zh: c.chinese, imageUrl: c.imageUrl, attempts, correct };
 ```
 
-## Migrations
+## Scenario: SQLite Migration Runner
 
-There is no migration history yet. Schema changes currently belong in
-`initDatabase()` with compatible `CREATE TABLE IF NOT EXISTS` or additive
-changes. If a change needs backfill, document it in `docs/architecture.md` and
-add a script under `scripts/` rather than hiding it in a route handler.
+### 1. Scope / Trigger
+
+- Trigger: changes to `src/lib/db/schema.ts`, SQLite tables, migration version
+  markers, `src/lib/init.ts`, or first-run DB initialization.
+- Reason: local DBs may already contain tables from the pre-migration era, while
+  fresh temp DBs need a complete bootstrap path.
+
+### 2. Signatures
+
+- `initDatabase(): void` -> runs migrations against `getDb()`.
+- `runMigrations(db: Database.Database): void` -> applies pending migrations to
+  the provided DB handle.
+- `getSchemaVersion(db: Database.Database): number` -> returns the highest
+  applied version after migrations have created `schema_migrations`.
+- Table: `schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+  applied_at TEXT NOT NULL)`.
+
+### 3. Contracts
+
+- `schema_migrations` is created before checking applied versions.
+- Migration versions are monotonically increasing integers.
+- Each migration must be idempotent against an existing local DB. Use additive
+  DDL such as `CREATE TABLE IF NOT EXISTS` or guarded `ALTER TABLE` checks.
+- Migration v1 is `initial_lesson_schema` and owns `lesson_logs`,
+  `interaction_logs`, and `word_performance`.
+- Never hide schema backfills in route handlers. If a change needs data
+  rewriting, document it in `docs/architecture.md` and add a script under
+  `scripts/`.
+
+### 4. Validation & Error Matrix
+
+- Fresh DB -> creates `schema_migrations` and all v1 lesson tables.
+- Existing v1 tables without marker -> inserts v1 marker without dropping data.
+- Repeated run -> no duplicate marker rows and no table/data loss.
+- Missing provider env -> aggregate routes still run migrations through
+  `ensureDatabaseInitialized()` without provider validation.
+
+### 5. Good/Base/Bad Cases
+
+- Good: temp `DATABASE_PATH` then `/api/progress` creates schema and returns an
+  empty progress snapshot.
+- Base: existing `db/eduagent.db` gains `schema_migrations.version=1` and keeps
+  old lesson rows.
+- Bad: route handler catches `no such table` and creates or backfills tables
+  locally.
+
+### 6. Tests Required
+
+- `src/lib/db/schema.test.ts`: fresh DB bootstrap, idempotent repeated run, and
+  existing schema without marker preserves lesson data.
+- `tests/api/fresh-db-init.test.ts`: aggregate APIs return 200 against a fresh
+  temp DB before `/api/chat`.
+- `pnpm run smoke` with temp `DATABASE_PATH`, `VOICE_MOCK=true`, and mock MiMo
+  env.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+export async function GET() {
+  try {
+    return NextResponse.json(buildProgressSnapshot(getDb(), allCourses));
+  } catch {
+    getDb().exec('CREATE TABLE ...');
+    return NextResponse.json(buildProgressSnapshot(getDb(), allCourses));
+  }
+}
+```
+
+#### Correct
+
+```ts
+export async function GET() {
+  ensureDatabaseInitialized();
+  return NextResponse.json(buildProgressSnapshot(getDb(), allCourses));
+}
+```
 
 ## Tests
 

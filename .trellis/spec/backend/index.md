@@ -23,11 +23,11 @@ lesson logs, MiMo LLM streaming, and Doubao ASR/TTS proxy modules.
 | Guide | Description | Status |
 |-------|-------------|--------|
 | [Directory Structure](./directory-structure.md) | Backend module ownership and routing | Filled |
-| [Database Guidelines](./database-guidelines.md) | SQLite schema, query helpers, progress aggregators | Filled |
+| [Database Guidelines](./database-guidelines.md) | SQLite migrations, query helpers, progress aggregators | Filled |
 | [Error Handling](./error-handling.md) | API, SSE, WebSocket, provider, and client error patterns | Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Required tests and review gates for backend changes | Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Current console logging style and sensitive-data limits | Filled |
-| [Agent Layer](./agent-layer.md) | memory/session/prompt contracts: actions timing, ASR verify, R5/R7 (legacy, superseded by R-C 2026-05-23), R6 closing guard currentWord exempt, state_update schema (R-C server-authoritative), Guard Pipeline (R-D 2026-05-24 — GuardFn[] in src/lib/agent/guards/), prompt input quantification, lesson report Eval v1, test fixtures & mocks | Filled |
+| [Agent Layer](./agent-layer.md) | memory/session/prompt contracts: SessionStore boundary, actions timing, ASR verify, R5/R7 (legacy, superseded by R-C 2026-05-23), R6 closing guard currentWord exempt, state_update schema (R-C server-authoritative), Guard Pipeline (R-D 2026-05-24 — GuardFn[] in src/lib/agent/guards/), prompt input quantification, lesson report Eval v1, test fixtures & mocks | Filled |
 
 ## Quality Check
 

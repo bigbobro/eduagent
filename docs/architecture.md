@@ -5,7 +5,7 @@
 > 维护规则见 `/CLAUDE.md`。
 > 跟读"答对"的分层产品规则见 `docs/superpowers/specs/2026-05-25-pronunciation-assessment-design.md`。
 
-最近重大同步:**Reliability P0/P1 修复(2026-05-30)** — 只读聚合 API(`/api/progress` / `/api/stats` / `/api/sessions`)现在会初始化 SQLite schema,不再依赖 `/api/chat` 先创建表;TTS proxy 会在 Doubao `ConnectionStarted` 前按顺序缓存 `session-start` / `text-chunk` / `session-finish` / `session-cancel`,避免本地 WS 已 open 但 upstream 未 ready 时丢开场白;`LessonController.startLesson()` / `PhasedLessonController.startLesson()` 返回启动是否成功,`PhasedLessonView` 失败时回到可重试的未开始界面。上次重大同步:**Guard pipeline 重构(2026-05-24)** — 把 `streamUserInput` 里的 4 段内联 guard 逻辑拆成 `src/lib/agent/guards/` 下的独立模块(GuardContext / GuardFn / runPipeline + closingGuard / prematureClosingGuard / normalizeActions / speechCardAlign);`streamUserInput` 从 169 行压缩到 60 行;每个 guard 有独立单测;行为不变。上次重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:**SessionStore + SQLite migrations(2026-05-30)** — 活动课堂 session 现在通过 `SessionStore` 边界读写,当前实现仍是进程内 `InMemorySessionStore`,但 `session.ts` 不再直接拥有 module-level Map;SQLite 初始化改为 `schema_migrations` + versioned migration runner,现有三张表作为 v1 `initial_lesson_schema` 幂等创建。上次重大同步:**Reliability P0/P1 修复(2026-05-30)** — 只读聚合 API(`/api/progress` / `/api/stats` / `/api/sessions`)现在会初始化 SQLite schema,不再依赖 `/api/chat` 先创建表;TTS proxy 会在 Doubao `ConnectionStarted` 前按顺序缓存 `session-start` / `text-chunk` / `session-finish` / `session-cancel`,避免本地 WS 已 open 但 upstream 未 ready 时丢开场白;`LessonController.startLesson()` / `PhasedLessonController.startLesson()` 返回启动是否成功,`PhasedLessonView` 失败时回到可重试的未开始界面。上次重大同步:**Guard pipeline 重构(2026-05-24)** — 把 `streamUserInput` 里的 4 段内联 guard 逻辑拆成 `src/lib/agent/guards/` 下的独立模块(GuardContext / GuardFn / runPipeline + closingGuard / prematureClosingGuard / normalizeActions / speechCardAlign);`streamUserInput` 从 169 行压缩到 60 行;每个 guard 有独立单测;行为不变。上次重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 **当前运行范围**:本项目现阶段只作为本地电脑浏览器工具使用,默认访问方式是桌面浏览器打开 `localhost`。暂不支持 iPadOS app、移动端 Web、或面向公网发布后的移动兼容。
 
@@ -49,7 +49,8 @@
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
 | `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,8 状态机,统一编排 ASR + SSE + TTS + 静态 quiz TTS** |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
-| `src/lib/agent/session.ts` | LLM 一轮对话骨架:session 查找 + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn |
+| `src/lib/agent/session-store.ts` | 活动课堂 session 的存取边界;当前默认实现是进程内 `InMemorySessionStore`,后续 SQLite resume 应替换这里而不是在 `session.ts` 里加第二套 Map |
+| `src/lib/agent/session.ts` | LLM 一轮对话骨架:通过 `SessionStore` 查找 session + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn |
 | `src/lib/agent/guards/` | **Guard pipeline**(见下方 §Agent Guard Pipeline) |
 | `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta;导出 `sanitizeSpeech` 剥离 `xxx_yyy` 这种 card_id token,防止 TTS 把 `_` 读成"下划线 / underscore"** |
 | `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史、当前词精确尝试判定 |
@@ -74,7 +75,7 @@
 | `src/components/journal/JournalPage.tsx` | 魔法书双页,展示 progress 聚合的词卡 |
 | `src/components/parents/PINGateFrame.tsx` / `ParentsPage.tsx` | 家长阁楼 PIN 解锁 + stats/session dashboard |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
-| `src/lib/db/schema.ts` + `queries.ts` | SQLite 表结构 + 查询封装 |
+| `src/lib/db/schema.ts` + `queries.ts` | SQLite migration runner / 表结构 + 查询封装;`schema_migrations` 记录已执行版本 |
 
 ---
 
@@ -363,7 +364,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 ## 8. 已知不足(指向 TODO.md 详情)
 
-- **课程 Session resume**:`sessions` 是 module-level in-memory Map,server 重启 / 刷新 / 断网 = 客户端旧 sessionId 失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。需 SQLite 持久化 + client resume 流程。
+- **课程 Session resume**:活动 session 已有 `SessionStore` 边界,但默认实现仍是进程内 `InMemorySessionStore`;server 重启 / 刷新 / 断网后客户端旧 sessionId 仍会失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。完整 resume 仍需 SQLite-backed store + client resume 流程。
 - ~~**actions 与 TTS 时序**~~ — **已修复(R1)**:`pendingActions` 缓冲机制,`show_card` emit 推迟到 `tts.session-finished`
 - **MiMo first-token 4 秒**:首音频延迟主要瓶颈,前端无法优化
 - **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。当前由教学循环 v1.1 的 LLM `attempt_assessment` 基于 raw ASR + currentCardId + drillParts 做课堂内容错判定,真实儿童语音效果等下一节课实测
@@ -540,7 +541,7 @@ fetch /api/stats      → ParentsPage 数据卡(总分钟 + 掌握词数;streak/
 voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonController)
 ```
 
-`/api/progress` / `/api/sessions` / `/api/stats` 是只读业务接口,但会在查询前调用 `ensureDatabaseInitialized()` 建表。这样 fresh checkout 或临时 `DATABASE_PATH` 不需要先跑一节课或命中 `/api/chat`。
+`/api/progress` / `/api/sessions` / `/api/stats` 是只读业务接口,但会在查询前调用 `ensureDatabaseInitialized()` 跑 SQLite migrations。这样 fresh checkout 或临时 `DATABASE_PATH` 不需要先跑一节课或命中 `/api/chat`。当前 migration v1 创建 `lesson_logs` / `interaction_logs` / `word_performance`,并在 `schema_migrations` 写入版本 marker;已有本地 DB 若缺少 marker,会幂等补写而不删除课堂数据。
 
 ### Mastery 派生
 
