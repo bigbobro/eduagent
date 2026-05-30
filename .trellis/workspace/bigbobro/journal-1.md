@@ -748,3 +748,36 @@ Cleared stale Trellis runtime session fallback and configured the Next.js ESLint
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: SessionStore and database migrations
+
+**Date**: 2026-05-30
+**Task**: SessionStore and database migrations
+**Branch**: `main`
+
+### Summary
+
+Added an in-memory SessionStore boundary for active lesson sessions, converted SQLite initialization to versioned migrations, updated architecture/spec docs, and verified with lint, typecheck, tests, temp-DB smoke, and lesson smoke.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6ee3fbb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

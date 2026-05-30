@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-05-28
+- **Total Sessions**: 23
+- **Last Active**: 2026-05-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~750 | Active |
+| `journal-1.md` | ~783 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-05-30 | SessionStore and database migrations | `6ee3fbb` | `main` |
 | 22 | 2026-05-28 | Configure ESLint Gate | `843e1b3` | `main` |
 | 21 | 2026-05-28 | Prompt Slimming v1 | `046c22d` | `main` |
 | 20 | 2026-05-27 | Document Eval architecture design | `6709432` | `main` |
