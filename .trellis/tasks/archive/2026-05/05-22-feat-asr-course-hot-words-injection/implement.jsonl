@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Agent layer contracts — R1-R7 history. Hot_words 链路接通涉及 LessonController(actions flush 时机)与 R1 一致;实施时须保证 cardId 更新不破坏 R1 pendingActions flush 顺序。"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required backend test patterns; fixture-based ASR regression 是 quality 强制项。"}
-{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "asr-proxy 已有 [asr xxxx] hot_words 日志;实施时遵循同款 tag 风格。"}
-{"file": "docs/DOUBAO Protocol/asr.md", "reason": "豆包 ASR 协议权威:corpus.context = JSON string with hotwords[]; 双向流式 100 tokens 限制;无 weight 字段。"}
-{"file": "docs/lesson-reports/2026-05-22-427f287b.md", "reason": "报告 #3 的轮次级证据(n=3-13 cat 卡 12 轮),AC4 sanity check 要复现这种场景。"}
-{"file": "docs/architecture.md", "reason": "§2 模块清单第 43 行 asr-proxy 描述需要修正(R4),把新的 W2 hot_words 注入流写进 §3 数据流。"}

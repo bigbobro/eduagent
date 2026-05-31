@@ -1,5 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"backend quality gate and relevant commands"}
-{"file":".trellis/spec/backend/database-guidelines.md","reason":"verify aggregation preserves DB contracts and empty-data cases"}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"verify tests, typecheck, and docs sync"}
-{"file":".trellis/spec/backend/agent-layer.md","reason":"verify lesson-report and prompt breakdown contract remains intact"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"verify structured eval JSON survives DB/script/report boundary"}

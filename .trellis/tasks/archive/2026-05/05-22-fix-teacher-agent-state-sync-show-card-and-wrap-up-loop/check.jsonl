@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Verify R5/R6/R7 changes match agent layer contracts (no breaking of R1-R4 prior guards)."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify mini scenario tests follow required patterns; ensure type-check + state machine boundary tests are present."}
-{"file": "docs/lesson-reports/2026-05-22-427f287b.md", "reason": "Cross-check mini scenarios against the report's turn-level evidence (AC7-AC10)."}
-{"file": "docs/architecture.md", "reason": "DoD requires §6 updated with R5/R6/R7. Check must confirm the doc sync happened."}
-{"file": "CLAUDE.md", "reason": "Project rules: secrets, test automation, doc sync at commit time, voice test fixture preference."}

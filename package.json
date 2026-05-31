@@ -1,7 +1,8 @@
 {
-  "name": "eduagent-tmp",
+  "name": "eduagent",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "next build",

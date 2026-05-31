@@ -1,8 +1,0 @@
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "最核心契约。D 的目标就是把 R4/R6 closing guard、R-B premature-closing、R-C normalize、speech-card-align 这 4 个 guard 行为不变迁出，必须读懂每条契约才能搬"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "D 拍板了 guard 失败降级（跳过继续），与本 spec 的 LLM/SSE 错误处理对齐"}
-{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "session.ts 现有 console.log（[normalize] snapshot / [session] closing guard / [session] premature-closing 等）必须搬到对应 guard 模块且格式不变，否则 lesson-report 解析会破"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "纯重构 0 行为变化，必须靠 pnpm test + smoke:lesson 守住"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "normalize 留 memory.ts 还是搬 guards/ — 跨模块复用决策，参考本 guide"}
-{"file": "CLAUDE.md", "reason": "动 src/lib/agent/** 必须先跑 pnpm smoke:lesson；D 全程命中"}
-{"file": ".trellis/tasks/05-24-codebase-cleanup-and-refactor/prd.md", "reason": "父任务 PRD，含范围划界与依赖（D 依赖 cleanup-quick-wins 先完成）"}
-{"file": ".trellis/tasks/05-24-cleanup-quick-wins/prd.md", "reason": "兄弟任务 PRD：D 开始前先确认 C 段（prompt schema 瘦身）已落地，stateUpdate shape 已收窄到 current_word + attempt_assessment"}

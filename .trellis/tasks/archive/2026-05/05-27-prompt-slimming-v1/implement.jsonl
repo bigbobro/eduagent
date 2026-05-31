@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/index.md", "reason": "Entry point for backend/agent prompt and reporting work."}
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Prompt, guard, Eval, and lesson agent behavior contracts that slimming must preserve."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required verification gates for prompt/reporting changes."}
-{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Prompt changes cross session, guard, reporting, and Eval boundaries."}
-{"file": ".trellis/tasks/archive/2026-05/05-26-prompt-input-slimming/prd.md", "reason": "Baseline prompt input quantification and follow-up recommendation."}
-{"file": ".trellis/tasks/archive/2026-05/05-26-eval-v1-lesson-quality-scorecard/prd.md", "reason": "Eval v1 metrics and next-iteration signal contract."}

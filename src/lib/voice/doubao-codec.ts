@@ -1,5 +1,5 @@
 // 豆包二进制协议编解码,大端序整数。
-// spec: docs/superpowers/specs/2026-05-01-voice-pipeline-doubao-design.md §3 / §4
+// See project protocol summaries in docs/DOUBAO Protocol/.
 
 export const MessageType = {
   FullClientRequest: 0x01,

@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Verify hot_words wiring doesn't break R1 pendingActions flush invariant."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check fixture regression follows quality patterns; baseline-vs-with diff must be asserted, not just observed."}
-{"file": "docs/DOUBAO Protocol/asr.md", "reason": "Cross-check hot_words payload structure matches protocol (request.corpus.context JSON, hotwords field name)."}
-{"file": "docs/lesson-reports/2026-05-22-427f287b.md", "reason": "AC4 sanity check must address the cat-stuck-12-rounds scenario from this report."}
-{"file": "CLAUDE.md", "reason": "Project rules: test automation strict, no real credentials in fixtures or reports, doc sync at commit time."}

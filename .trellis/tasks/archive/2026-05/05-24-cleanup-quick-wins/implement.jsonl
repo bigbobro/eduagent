@@ -1,6 +1,0 @@
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "核心契约。A/C 改动会触及 R4/R5/R6/R-B/R-C 与 state_update schema，必须先读 agent-layer 确认不破坏 closing guard / show_card / current_word 等已落地约束"}
-{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "logger.ts 全文删除前确认现有 console.log 风格是否覆盖 logger.ts 的职责，避免删后失去观测点"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "A/B/C 都要走的验收门：pnpm test + tsc + smoke:lesson；本 spec 列出 backend 改动的质量闸"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "C 删 prompt 字段后，服务端必须保持宽松解析未知字段；本 spec 描述 LLM/SSE 错误处理模式"}
-{"file": "CLAUDE.md", "reason": "强制规则：动 src/lib/agent/** 必须先跑 pnpm smoke:lesson；A/C 触发，必须遵守"}
-{"file": ".trellis/tasks/05-24-codebase-cleanup-and-refactor/prd.md", "reason": "父任务 PRD，含范围划界（E 砍/F park 的决策）与 4 类总体执行顺序"}

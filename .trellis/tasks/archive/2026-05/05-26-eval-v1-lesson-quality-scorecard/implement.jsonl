@@ -1,6 +1,0 @@
-{"file":".trellis/spec/backend/index.md","reason":"backend script/report data layer pre-development checklist"}
-{"file":".trellis/spec/backend/database-guidelines.md","reason":"SQLite aggregation and pure injectable report-data patterns"}
-{"file":".trellis/spec/backend/quality-guidelines.md","reason":"required backend test/typecheck/doc sync expectations"}
-{"file":".trellis/spec/backend/agent-layer.md","reason":"prompt input breakdown and lesson report contract"}
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"report data flows across DB, script JSON, and report consumers"}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"search/reuse guidance before adding report helpers"}

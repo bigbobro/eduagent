@@ -8,8 +8,7 @@
 
 - **主入口**:`README.md`(项目介绍 + 怎么跑)
 - **当前架构事实文档**:`docs/architecture.md`(living doc,master 上系统的现状)
-- **历史迭代设计**:`docs/superpowers/specs/*` 与 `docs/superpowers/plans/*`(每次大改的设计快照,只读)
-- **第三方协议参考**:`docs/DOUBAO Protocol/{asr,tts}.md`
+- **第三方协议参考摘要**:`docs/DOUBAO Protocol/{asr,tts}.md`
 - **后续待办**:`docs/TODO.md`
 - **性能基线**:`docs/voice-benchmarks.md`
 
@@ -40,7 +39,7 @@
 ## 协议层踩坑前查文档
 
 碰到豆包 ASR/TTS 报错时,**第一动作不是 grep 代码**,是:
-1. 看 `docs/DOUBAO Protocol/{asr,tts}.md` 找官方原文
+1. 看 `docs/DOUBAO Protocol/{asr,tts}.md` 找本项目协议摘要和官方链接
 2. 看 user memory 里 `project_doubao_v3_{asr,tts}_protocol.md` 摘的踩坑点
 3. 确认不是已知坑后,再动手调试
 
@@ -156,7 +155,7 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 
 ## 常见操作速查
 
-- 添加新课程:先读 `.trellis/spec/frontend/course-authoring.md`;在 `src/data/courses/<id>.ts` 新建 `Course` 对象,append 到 `src/data/courses/index.ts` 的 `allCourses` 数组,并补课程专属校验。
+- 添加新课程:参考 `src/data/courses/food.ts` 和 `src/data/courses/*.test.ts`;在 `src/data/courses/<id>.ts` 新建 `Course` 对象,append 到 `src/data/courses/index.ts` 的 `allCourses` 数组,并补课程专属校验。
 - 切换音色:改 `.env.local` 的 `DOUBAO_TTS_DEFAULT_SPEAKER`,重启 dev
 - 临时打点测延迟:参考 commit `2ea7b89` 之前的 `[bench]` 字段,验收后必须删
 - 排查"按住说话没识别":先看 dev server 终端 `[asr xxxxxxxx]` 行,看 pcmCount / finalSeen

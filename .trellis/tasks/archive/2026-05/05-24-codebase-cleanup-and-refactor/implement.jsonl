@@ -1,3 +1,0 @@
-{"file": ".trellis/tasks/05-24-cleanup-quick-wins/prd.md", "reason": "子任务 1 PRD（A+B+C）。父任务不直接 implement，由 agent 派发到子任务执行"}
-{"file": ".trellis/tasks/05-24-guard-pipeline-refactor/prd.md", "reason": "子任务 2 PRD（D）。依赖子任务 1 完成后再启动"}
-{"file": "CLAUDE.md", "reason": "全局协作规则 + smoke 强制门"}

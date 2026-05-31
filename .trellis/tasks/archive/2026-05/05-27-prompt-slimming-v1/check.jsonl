@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Review prompt slimming against behavior contracts and Eval signal expectations."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify test, typecheck, smoke, and docs gates."}
-{"file": ".trellis/tasks/archive/2026-05/05-26-prompt-input-slimming/prd.md", "reason": "Check before/after measurement against the baseline."}
-{"file": ".trellis/tasks/archive/2026-05/05-26-eval-v1-lesson-quality-scorecard/prd.md", "reason": "Check Eval v1 post-change signals and boundaries."}

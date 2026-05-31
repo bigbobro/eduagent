@@ -107,7 +107,7 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 ## 远期 backlog
 
 1. **Session persistence / resume** — `sessions` 是 in-memory Map,server 重启 / 刷新会让客户端 sessionId 失效。9 分钟一节课中断概率低,真被坑了再升回当前 backlog。
-2. **课程产出 Codex skill** — SOP 已稳定在 `.trellis/spec/frontend/course-authoring.md`,10 门课沿用同一模板没出问题;Codex skill 化仍未做,等触发场景再启动(用户扩展课程节奏 / 引入第二位作课者)。
+2. **课程产出自动化** — 课程作者ing SOP 已在本地 agent 工作流中稳定,10 门课沿用同一模板没出问题;公开仓库先不提交 agent 过程文件,等用户扩展课程节奏 / 引入第二位作课者时再决定是否产品化。
 3. **兴趣 / 困惑记忆** — 在词汇表现之外识别 confusion / engagement,等真实报告证明有价值再做。
 4. **长期语音 UX** — VAD 自动停止 / 连续对话 / WebSocket 退避重连 / 开场白 TTS 预加载。
 

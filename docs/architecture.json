@@ -57,7 +57,7 @@
       "first_module_to_read": "src/lib/voice/lesson-controller.ts",
       "first_route_to_open": "src/app/page.tsx",
       "course_to_imitate": "src/data/courses/food.ts",
-      "course_authoring_standard": ".trellis/spec/frontend/course-authoring.md",
+      "course_authoring_standard": "docs/architecture.md and src/data/courses/*.test.ts",
       "todo_backlog": "docs/TODO.md",
       "performance_baseline": "docs/voice-benchmarks.md"
     },
@@ -499,7 +499,7 @@
       "public/worklets": "AudioWorklet modules served by Next.",
       "scripts": "Dev / smoke / report scripts."
     },
-    "course_authoring": "See .trellis/spec/frontend/course-authoring.md; every card needs drillParts; courses now must define phases.",
+    "course_authoring": "Every card needs drillParts; courses must define phases and pass the course data tests.",
     "commit_style": "subject = type(scope): summary (e.g. fix(voice): ...); body = '-' bullets explaining substantive changes; Co-Authored-By footer required.",
     "secrets_policy": "Real credentials never appear in docs/commits/PRs even in private repos. Use placeholders. Leak playbook: rotate → git filter-repo --replace-text → force push → add a rule to CLAUDE.md."
   }

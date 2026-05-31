@@ -1,4 +1,0 @@
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "验收闸：pnpm test + tsc + smoke:lesson；review 改动是否符合 backend 质量标准"}
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "校验：A/C 改动后 R4/R5/R6/R-B/R-C 行为不变；state_update 仍能正确读出 current_word + attempt_assessment"}
-{"file": "CLAUDE.md", "reason": "校验：文档同步 architecture.md + TODO.md；smoke:lesson 是否真跑过"}
-{"file": ".trellis/tasks/05-24-cleanup-quick-wins/prd.md", "reason": "对照本任务 PRD 验收清单逐条勾选"}

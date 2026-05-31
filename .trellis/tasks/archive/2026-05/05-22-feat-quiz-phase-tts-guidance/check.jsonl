@@ -1,5 +1,0 @@
-{"file": ".trellis/spec/backend/agent-layer.md", "reason": "Verify speakStatic doesn't break R1 actions/TTS timing invariant (no collision with main-line tts.startSession)."}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Check quiz components follow useEffect / state-machine listener cleanup conventions."}
-{"file": "docs/DOUBAO Protocol/tts.md", "reason": "Cross-check TTS session lifecycle handling — finishSession before session-finished must be safe."}
-{"file": "docs/lesson-reports/2026-05-22-427f287b.md", "reason": "AC3 sanity check must address n=61-70 silent quiz scenarios."}
-{"file": "CLAUDE.md", "reason": "Project rules: test automation strict (speakStatic logic must be unit-tested even though UI interaction is manual), doc sync at commit time."}

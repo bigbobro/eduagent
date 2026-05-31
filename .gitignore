@@ -41,6 +41,10 @@ tmp/imagegen/
 .claude/settings.local.json
 .superpowers/
 
+# local process workspaces
+.trellis/
+docs/superpowers/
+
 # vercel
 .vercel
 
