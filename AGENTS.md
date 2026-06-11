@@ -3,10 +3,7 @@
 
 These instructions are for AI assistants working in this project.
 
-This local workspace is managed by Trellis. The public repository intentionally
-does not track `.trellis/`; if the directory is absent, use README and `docs/`
-as the source of truth. In this local checkout, Trellis working knowledge lives
-under `.trellis/`:
+This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
 
 - `.trellis/workflow.md` — development phases, when to create tasks, skill routing
 - `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
