@@ -29,6 +29,16 @@ import { spaceCourse } from './space';
 import { hobbiesCourse } from './hobbies';
 import { magicCourse } from './magic';
 import { treatsCourse } from './treats';
+import { toolsCourse } from './tools';
+import { cityPlacesCourse } from './city-places';
+import { constructionCourse } from './construction';
+import { artSuppliesCourse } from './art-supplies';
+import { technologyCourse } from './technology';
+import { tablewareCourse } from './tableware';
+import { campingCourse } from './camping';
+import { safetyCourse } from './safety';
+import { cleaningCourse } from './cleaning';
+import { travelCourse } from './travel';
 
 export const allCourses: Course[] = [
   foodCourse,
@@ -61,6 +71,16 @@ export const allCourses: Course[] = [
   hobbiesCourse,
   magicCourse,
   treatsCourse,
+  toolsCourse,
+  cityPlacesCourse,
+  constructionCourse,
+  artSuppliesCourse,
+  technologyCourse,
+  tablewareCourse,
+  campingCourse,
+  safetyCourse,
+  cleaningCourse,
+  travelCourse,
 ];
 
 export function getCourseById(id: string): Course | undefined {

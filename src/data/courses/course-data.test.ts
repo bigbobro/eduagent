@@ -49,6 +49,16 @@ describe('course drill data', () => {
       'hobbies',
       'magic',
       'treats',
+      'tools',
+      'city-places',
+      'construction',
+      'art-supplies',
+      'technology',
+      'tableware',
+      'camping',
+      'safety',
+      'cleaning',
+      'travel',
     ]);
   });
 

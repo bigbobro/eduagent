@@ -38,6 +38,16 @@ describe('/api/courses', () => {
       'hobbies',
       'magic',
       'treats',
+      'tools',
+      'city-places',
+      'construction',
+      'art-supplies',
+      'technology',
+      'tableware',
+      'camping',
+      'safety',
+      'cleaning',
+      'travel',
     ]);
     expect(courses.find((course: { id: string }) => course.id === 'colors')?.tone).toBe('sky');
     expect(courses.find((course: { id: string }) => course.id === 'sports')?.tone).toBe('mint');

@@ -138,6 +138,15 @@ Before asking questions like "what does the code look like?", gather context you
 * Look for existing PRDs/specs/templates
 * Look for command usage examples, README, ADRs if any
 
+### EduAgent course-authoring gate
+
+If the task is about adding, generating, expanding, or regenerating courses,
+course materials, word cards, sentence cards, or course artwork, read
+`.trellis/spec/frontend/course-authoring.md` before asking scope questions.
+Add it to the PRD `Technical Notes` and carry its Course Generation Contract
+into the task requirements, including ImageGen batch workflow and the
+no-base64 / no-bulk-image-payload chat rule.
+
 Write findings into PRD:
 
 * Add to `What I already know`
