@@ -70,7 +70,8 @@ vi.mock('@/lib/audio/pcm-player', () => {
   class PcmPlayer {
     onIdle = vi.fn();
     enqueue = vi.fn();
-    stop = vi.fn();
+    stop = vi.fn(async () => {}); // Now async
+    prewarm = vi.fn(async () => {}); // New prewarm method
     dispose = vi.fn(async () => {});
     isIdle = vi.fn(() => true);
   }

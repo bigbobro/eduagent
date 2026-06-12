@@ -35,6 +35,7 @@ export class LessonController {
   private asr: AsrClient | null = null;
   private player = new PcmPlayer(24000);
   private recorder: RecorderHandle | null = null;
+  private recorderLock = false; // Prevent rapid Space press race
   private chatAbort: AbortController | null = null;
   private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
   private speechFinishFallbackTimer: ReturnType<typeof setTimeout> | null = null;
@@ -88,7 +89,7 @@ export class LessonController {
     this.clearedCardIds = [];
     this.syncAsrSessionContext();
     this.setState('greeting');
-    // 1) 并行启动:TTS 长连 + mic 预热(权限框、AudioContext、Worklet、MediaStream 全提前就绪)
+    // 1) 并行启动:TTS 长连 + mic 预热 + player 预热(权限框、AudioContext、Worklet、MediaStream 全提前就绪)
     //    开场白播完用户按住空格那一刻,worklet node 只需 connect 一下,几乎瞬间就能出 PCM。
     await Promise.all([
       this.tts.open().catch((e) => {
@@ -97,6 +98,9 @@ export class LessonController {
       }),
       prewarmRecorder().catch((e) => {
         console.warn('[lesson] mic prewarm failed (will retry on first press):', e);
+      }),
+      this.player.prewarm().catch((e) => {
+        console.warn('[lesson] player prewarm failed:', e);
       }),
     ]);
     this.bindTtsHandlers();
@@ -140,7 +144,7 @@ export class LessonController {
     await this.stopRecording();
     try { this.asr?.close(); } catch {}
     this.asr = null;
-    this.player.stop();
+    await this.player.stop();
     this.speechStreamFinished = false;
     this.routeCurrentAsrToChat = true;
     this.failStaticSpeech(new Error('Lesson ended'));
@@ -215,7 +219,9 @@ export class LessonController {
   async startListening(options: StartListeningOptions = {}): Promise<void> {
     if (this.state === 'listening') return;
     if (this.state !== 'awaiting') return; // speaking 时不打断 — 老师说完才能再说
+    if (this.recorderLock) return; // Prevent race condition from rapid Space press
 
+    this.recorderLock = true;
     this.routeCurrentAsrToChat = options.routeToChat ?? true;
     this.setState('listening');
     this.emit('subtitle-clear');
@@ -274,11 +280,13 @@ export class LessonController {
         return;
       }
       this.recorder = recorder;
+      this.recorderLock = false; // Release lock after recorder ready
       if (this.listenStartup === startup) this.listenStartup = null;
       if (startup.stopRequestedAt !== null) {
         await this.finishListening(startup.stopRequestedAt);
       }
     } catch (e) {
+      this.recorderLock = false; // Release lock on error
       if (this.listenStartup === startup) this.listenStartup = null;
       this.routeCurrentAsrToChat = true;
       this.emit('error', { message: '麦克风开不了哦,请允许权限' });
@@ -308,6 +316,7 @@ export class LessonController {
       await this.stopRecording();
       try { this.asr?.close(); } catch {}
       this.asr = null;
+      this.recorderLock = false; // Release lock on short press
       this.routeCurrentAsrToChat = true;
       this.emit('subtitle-clear');
       this.emit('error', { message: '太短啦~按住多说一会儿' });
@@ -315,6 +324,7 @@ export class LessonController {
       return;
     }
     await this.stopRecording();
+    this.recorderLock = false; // Release lock after recording stopped
     this.listenStoppedAt = performance.now();
     // 关键:不能立刻 close — close 会让 proxy 立刻断 upstream,豆包没机会回 final。
     // 改发 finish 控制帧:proxy 转发负序号终止包给豆包,等 final 自然返回再 close。
@@ -450,6 +460,18 @@ export class LessonController {
     });
     this.tts.on('reconnected', () => {
       this.emit('subtitle-clear');
+    });
+    this.tts.on('session-lost', () => {
+      // TTS reconnect cleared stale session — flush pending actions to unblock UI
+      if (this.pendingActions) {
+        this.syncAsrSessionContextFromActions(this.pendingActions);
+        this.emit('actions', this.pendingActions);
+        this.pendingActions = null;
+      }
+      // Return to awaiting if stuck in speaking/quiz-speaking
+      if (this.state === 'speaking' || this.state === 'quiz-speaking') {
+        this.setState('awaiting');
+      }
     });
   }
 
@@ -590,7 +612,8 @@ export class LessonController {
     this.staticSpeech = null;
     clearTimeout(pending.timeout);
     this.speechStreamFinished = true;
-    this.player.stop();
+    // Stop player async but don't await (failStaticSpeech is sync callback)
+    this.player.stop().catch(() => {});
     if (this.state === 'quiz-speaking') {
       this.setState('awaiting');
     }

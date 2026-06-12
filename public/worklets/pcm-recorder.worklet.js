@@ -20,6 +20,8 @@ class PcmRecorder extends AudioWorkletProcessor {
           this._buf = new Int16Array(SAMPLES_PER_CHUNK);
           this._offset = 0;
         }
+        // Send ack to confirm flush completed
+        this.port.postMessage({ type: 'flush-ack' });
       }
     };
   }

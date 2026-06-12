@@ -75,18 +75,35 @@ export async function startRecorder(opts: {
   const source = await ensureSource();
   const node = new AudioWorkletNode(ctx, 'pcm-recorder');
   source.connect(node);
+
+  let flushAckReceived = false;
+
   // 不连 destination — 否则会回灌
   node.port.onmessage = (e) => {
-    opts.onChunk(e.data as ArrayBuffer);
+    const msg = e.data;
+    if (msg && typeof msg === 'object' && msg.type === 'flush-ack') {
+      flushAckReceived = true;
+    } else {
+      opts.onChunk(msg as ArrayBuffer);
+    }
   };
+
   return {
     stop: async () => {
       try {
-        // 通知 worklet flush 残余 PCM(< 200ms),让 onChunk 多收一个尾包,
-        // 然后等一帧 (50ms) 让 message 处理完,再断 onmessage 防止竞态。
+        // 通知 worklet flush 残余 PCM(< 200ms),等待 ack 确认,
+        // 然后再断 onmessage 防止竞态。
         // 没这个的话,用户松手时 worklet 当前 buffer 里 0-199ms 数据被丢,体感是"尾字截断"。
-        try { node.port.postMessage({ type: 'flush' }); } catch {}
-        await new Promise((r) => setTimeout(r, 50));
+        try {
+          node.port.postMessage({ type: 'flush' });
+        } catch {}
+
+        // Wait up to 100ms for flush ack, then proceed
+        const deadline = Date.now() + 100;
+        while (!flushAckReceived && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
+
         node.port.onmessage = null;
         node.disconnect();
         // 不 disconnect source — 留着给下次 startRecorder 复用

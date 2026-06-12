@@ -1,5 +1,7 @@
-const MIMO_BASE_URL = process.env.MIMO_BASE_URL || 'https://token-plan-cn.xiaomimimo.com/v1';
-const MIMO_API_KEY = process.env.MIMO_API_KEY || '';
+import { getConfig } from '../config';
+import { createLogger } from '../logger';
+
+const log = createLogger('mimo-llm');
 
 export interface LLMUsage {
   inputTokens: number;
@@ -28,17 +30,20 @@ export async function* streamLLM(
     yield* mockStreamLLM();
     return;
   }
+  const config = getConfig();
   const start = Date.now();
   const apiMessages = [{ role: 'system', content: systemPrompt }, ...messages];
 
-  const res = await fetch(`${MIMO_BASE_URL}/chat/completions`, {
+  log.debug('Calling MiMo LLM', { model: config.mimoModel, messageCount: apiMessages.length });
+
+  const res = await fetch(`${config.mimoApiBase}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${MIMO_API_KEY}`,
+      Authorization: `Bearer ${config.mimoApiKey}`,
     },
     body: JSON.stringify({
-      model: 'mimo-v2.5-pro',
+      model: config.mimoModel,
       messages: apiMessages,
       response_format: { type: 'json_object' },
       temperature: 0.7,
@@ -50,7 +55,10 @@ export async function* streamLLM(
 
   if (!res.ok || !res.body) {
     const errorBody = await res.text().catch(() => '');
-    throw new Error(`MiMo LLM stream error: ${res.status} ${res.statusText} - ${errorBody}`);
+    // Sanitize error to prevent info disclosure (don't leak full API response body to client)
+    const sanitized = `MiMo LLM API error: ${res.status} ${res.statusText}`;
+    log.error('MiMo LLM request failed', { status: res.status, statusText: res.statusText });
+    throw new Error(sanitized);
   }
 
   const reader = res.body.getReader();

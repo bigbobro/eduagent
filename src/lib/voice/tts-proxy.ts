@@ -38,11 +38,12 @@ export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void
     'X-Api-Connect-Id': connectId,
   };
 
-  const upstream = options.createUpstream?.(DOUBAO_TTS_URL, { headers }) ?? new WsClient(DOUBAO_TTS_URL, { headers });
+  const upstream = options.createUpstream?.(DOUBAO_TTS_URL, { headers }) ?? new WsClient(DOUBAO_TTS_URL, { headers, handshakeTimeout: 10000 });
   let connectionReady = false;
   let currentSession: PendingSession | null = null;
   let closed = false;
   const pendingControlFrames: Array<() => void> = [];
+  const MAX_PENDING_CONTROL_FRAMES = 100;
 
   const closeAll = (code: number = 1000) => {
     if (closed) return;
@@ -54,6 +55,11 @@ export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void
   const sendWhenReady = (sendFrame: () => void) => {
     if (connectionReady && upstream.readyState === upstream.OPEN) {
       sendFrame();
+      return;
+    }
+    if (pendingControlFrames.length >= MAX_PENDING_CONTROL_FRAMES) {
+      console.warn(`[tts ${connectId.slice(0, 8)}] Control frame buffer overflow, rejecting connection`);
+      closeAll(1008);
       return;
     }
     pendingControlFrames.push(sendFrame);

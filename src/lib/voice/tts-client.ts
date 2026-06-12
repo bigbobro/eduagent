@@ -5,6 +5,7 @@ type TtsEventName =
   | 'connection-started'
   | 'session-started'
   | 'session-finished'
+  | 'session-lost' // New event for lost sessions during reconnect
   | 'subtitle'
   | 'sentence-end'
   | 'pcm'
@@ -77,6 +78,13 @@ export class TtsClient {
 
   private attemptReconnect(): void {
     if (this.intentionallyClosed) return;
+
+    // Emit session-lost if a session was active during disconnect
+    if (this.currentSessionId) {
+      this.emit('session-lost', { sessionId: this.currentSessionId });
+      this.currentSessionId = null; // Clear stale session
+    }
+
     if (this.reconnectAttempt >= RECONNECT_MAX_RETRIES) {
       this.emit('error', {
         code: 'reconnect-failed',

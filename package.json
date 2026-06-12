@@ -22,7 +22,8 @@
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

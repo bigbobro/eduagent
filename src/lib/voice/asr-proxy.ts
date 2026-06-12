@@ -16,6 +16,10 @@ const DOUBAO_ASR_URL = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_asyn
 
 const wss = new WebSocketServer({ noServer: true });
 
+// Cache hot-words computation per courseId to avoid redundant work
+const hotWordsCache = new Map<string, { words: string[], timestamp: number }>();
+const HOT_WORDS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 export interface AsrSessionInfo {
   courseId?: string;
   targetWords?: string[];
@@ -105,11 +109,21 @@ function buildHotWords(session: AsrSessionInfo): string[] {
 }
 
 function getCourseTargetWords(courseId: string): string[] {
+  // Check cache first
+  const cached = hotWordsCache.get(courseId);
+  if (cached && Date.now() - cached.timestamp < HOT_WORDS_CACHE_TTL_MS) {
+    return cached.words;
+  }
+
   const course = getCourseById(courseId);
   if (!course) return [];
-  return course.cards
+  const words = course.cards
     .filter((card) => card.kind === 'word')
     .map((card) => card.english);
+
+  // Update cache
+  hotWordsCache.set(courseId, { words, timestamp: Date.now() });
+  return words;
 }
 
 function getCardWindowHotWords(
@@ -172,7 +186,7 @@ function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
     'X-Api-Sequence': '-1',
   };
 
-  const upstream = new WsClient(DOUBAO_ASR_URL, { headers });
+  const upstream = new WsClient(DOUBAO_ASR_URL, { headers, handshakeTimeout: 10000 });
   let sequence = 1;
   let upstreamReady = false;
   let closed = false;
@@ -183,6 +197,8 @@ function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
   // 没这个 buffer,用户按住瞬间到 upstream open 这段时间的 PCM 全部丢失,导致前几个字识别不出。
   const pendingPcm: Buffer[] = [];
   let pendingFinish = false;
+  const MAX_PENDING_PCM_BYTES = 10 * 1024 * 1024; // 10MB backpressure limit
+  let pendingPcmBytes = 0;
 
   const closeAll = (code: number = 1000, reason: string = '') => {
     if (closed) return;
@@ -275,6 +291,12 @@ function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
         upstream.send(encodeAudioOnlyRequest(pcm, sequence++));
       } else {
         // upstream 握手中,先缓存
+        pendingPcmBytes += pcm.length;
+        if (pendingPcmBytes > MAX_PENDING_PCM_BYTES) {
+          console.log(`${tag} PCM buffer overflow (${pendingPcmBytes} bytes), rejecting connection`);
+          closeAll(1008, 'PCM buffer overflow');
+          return;
+        }
         pendingPcm.push(pcm);
       }
       return;

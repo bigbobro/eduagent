@@ -2,6 +2,7 @@
  * 流式 PCM 播放器(Int16, mono, 24kHz)。
  * - enqueue 把一个 chunk 立刻排入,自动按累积 nextStartTime 衔接。
  * - stop 清空队列、停止所有正在响的源。
+ * - prewarm 提前创建 AudioContext,消除首次播放的爆音/延迟。
  */
 export class PcmPlayer {
   private ctx: AudioContext | null = null;
@@ -20,6 +21,18 @@ export class PcmPlayer {
       this.nextStartTime = this.ctx.currentTime;
     }
     return this.ctx;
+  }
+
+  /**
+   * 预热 AudioContext,消除首次播放的初始化延迟和爆音。
+   * 应在 lesson 启动时调用(与 prewarmRecorder 并行)。
+   */
+  async prewarm(): Promise<void> {
+    this.ensureContext();
+    // Resume context if suspended (Safari may suspend on creation)
+    if (this.ctx && this.ctx.state === 'suspended') {
+      await this.ctx.resume();
+    }
   }
 
   /** 立刻把 PCM (Int16, little-endian) chunk 排入播放队列。 */
@@ -46,12 +59,25 @@ export class PcmPlayer {
     };
   }
 
-  /** 立即停止所有正在响的 source,清空队列。 */
-  stop(): void {
-    this.active.forEach((src) => {
-      try { src.stop(); } catch {}
-    });
+  /**
+   * 立即停止所有正在响的 source,清空队列。
+   * 改为异步以避免同步迭代 50+ sources 造成主线程卡顿。
+   */
+  async stop(): Promise<void> {
+    const sources = Array.from(this.active);
     this.active.clear();
+
+    // Stop all sources asynchronously to avoid blocking main thread
+    await Promise.all(
+      sources.map(async (src) => {
+        try {
+          src.stop();
+        } catch (e) {
+          // Expected: stop() may throw if already stopped
+        }
+      })
+    );
+
     if (this.ctx) {
       this.nextStartTime = this.ctx.currentTime;
     }

@@ -214,9 +214,13 @@ export class PhasedLessonController {
   }
 
   private async performTransition(to: PhaseName): Promise<void> {
-    if (this.transitionInFlight) {
-      await this.transitionInFlight.catch(() => {});
+    // Atomic check-and-set to prevent race condition from double transition calls
+    const existingTransition = this.transitionInFlight;
+    if (existingTransition) {
+      await existingTransition.catch(() => {});
       if (to === this.currentPhase) return;
+      // After waiting, check again if another transition started
+      if (this.transitionInFlight && this.transitionInFlight !== existingTransition) return;
     }
 
     const run = this.performTransitionNow(to);
