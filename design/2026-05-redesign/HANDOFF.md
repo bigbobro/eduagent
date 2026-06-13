@@ -1,5 +1,7 @@
 # EduAGENT 前端重构 · Handoff
 
+> ✅ **已于 2026-05-20 实施完毕** — 本目录为历史设计存档,不是待办。实现产物见 `src/components/magic/`、`src/components/lesson/`、`src/components/{home,journal,parents}/`;运行时代码以 `src/` 为唯一事实来源,本文档仅留作设计意图参考。
+
 > 移交对象: 实现 agent (Claude Code / Cursor / 人类工程师)
 > 设计源文件: `EduAGENT.html` + 同目录 `.jsx` 文件 (React + 原生 JSX,不依赖框架)
 > 目标代码库: `claude-design-frontend` (Next.js 14 App Router, TailwindCSS, framer-motion)
