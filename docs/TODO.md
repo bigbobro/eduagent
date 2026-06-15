@@ -20,6 +20,54 @@
 
 ---
 
+## 项目体检 backlog(2026-06-15 全量多 agent review)
+
+> 一次 10 维度 + 对抗验证的全量 review,确认 50 条(12×P1 / 23×P2 / 15×P3),剔除 3 条误报。
+> **§1 闭环可靠性簇已完成**(见下方「已完成记录」2026-06-15)。其余按性价比排序如下,
+> 每项带 `file:line` + effort,下一次开任务可直接挑一条 brainstorm。基线当时:typecheck/lint
+> clean,294 测试,40 门课。**单用户本地阶段**:多数 P2/P3 不需架构重构,按痛点挑。
+
+### P1 候选(高性价比,建议优先)
+
+1. **MiMo base-URL 配置陷阱 + DATABASE_PATH 双默认** — [config.ts:48](../src/lib/config.ts#L48) · low
+   - `config.ts:48` 读 `MIMO_API_BASE`,但 `.env.example`/`.env.local`/`init.ts`/两个测试全用 `MIMO_BASE_URL` → **env override 被静默忽略**,永远走 config.ts:11 硬编码默认。
+   - 两处域名拼写不一致:config 默认 `xiaomim**om**o.com` vs env `xiaomim**im**o.com`。运行时用的是 config 默认且能跑 → 那个才是对的。**陷阱:只改变量名让它读 `MIMO_BASE_URL` 会切到 `.env` 的另一个拼写,可能把好的跑挂——必须同时统一域名。**
+   - 先确认哪个域名真能解析 → config 读 `MIMO_BASE_URL`(`MIMO_API_BASE` 留 alias)+ 三处域名统一 + 启动日志打 resolved URL。顺带修 `DATABASE_PATH` `./data` vs `./db` 双默认。
+
+2. **WS upgrade 无 Origin 校验 + ws 补丁** — [server.ts:36](../server.ts#L36) · low
+   - WebSocket 不受同源策略约束:dev server 跑着时任何打开的网页都能连 `ws://localhost:3000/api/voice/{asr,tts}` 用服务端豆包凭据烧额度。~5 行 Origin 白名单。
+   - 顺带 `pnpm update ws`(8.20.0→8.20.1,内存泄露 CVE,在语音数据路径)。可选:ASR/TTS query 参数加长度上限。
+
+3. **首音频延迟**(THE 核心指标) — [session.ts:113](../src/lib/agent/session.ts#L113) · high
+   - 服务端把整段 LLM JSON 收完才吐第一个 speech-delta(~2.2s 尾延迟,见 voice-benchmarks.md)。
+   - 低成本:`thinking` 态放预渲染 "嗯…" filler 掩盖延迟(voice-benchmarks option 3)。高成本:句子边界跑可在前缀判定的廉价 guard 后提前喂 TTS。顺带调 ASR `end_window_size`(asr-proxy.ts:90,每轮尾延迟旋钮)。
+
+### P2(稳健性 / 数据正确性 / 工程化)
+
+4. **关闭页面课堂不结算** — [session.ts:47](../src/lib/agent/session.ts#L47) · low — `finishLessonLog` 只在 `action:'end'`(普通 fetch)触发,关 tab/刷新/崩溃 → `end_time` 永远 NULL、时长统计为 0。改 `navigator.sendBeacon` + 每轮增量 UPDATE(顺带覆盖崩溃)。
+5. **测试盲区补强** · medium — `asr-proxy.ts:177` 的 `bridge()` 握手/PCM 缓冲时序零单测(照 tts-proxy 的可注入 fake 模式);LLM 流错误/abort 路径;tts-client 重连退避。
+6. **CI workflow** — 无 `.github/` · low — 加一个 `VOICE_MOCK=true` workflow 把 294 测试+typecheck+lint+build 变成真门禁;顺带 `server.ts` 被默认 typecheck 排除([tsconfig.json:25](../tsconfig.json#L25)),加跑两个 tsconfig 的 `typecheck` script。
+7. **logger 迁移收尾 + 降噪** — [logger.ts](../src/lib/logger.ts) · medium — 结构化 logger 13 模块只 1 个用;[memory.ts:202](../src/lib/agent/memory.ts#L202) 每轮无条件 warn 级打诊断快照(违反"验收后删打点")。二选一并 gate 热路径日志。
+8. **chat route 加固 + DB 生命周期** · low — [route.ts](../src/app/api/chat/route.ts) `req.json()` 无 zod 校验;无 graceful shutdown(WAL 不 checkpoint);in-memory session 无淘汰;DB word-performance 与内存 R2 真相分叉([session.ts:176](../src/lib/agent/session.ts#L176))。
+9. **Next.js 15 升级** — [package.json:22](../package.json#L22) · medium — 14.2.35 是 14.x 冻结末端,5 个 high CVE(含 WS-upgrade SSRF,命中自定义 server)只在 15.x 修。当独立任务做(custom server + framer-motion transpile),非对外暴露前可缓。
+10. **文档漂移** · low — 课程数 README 30 / architecture.md 10 / 实际 40;architecture.md 说 logger.ts 已删但它活着;MIMO 变量名(随 P1#1 一起修)。数字写成"见 index.ts"防再漂。
+11. **前端交互打磨** · low — Quiz 双击双答([QuizPickWordFrame.tsx:43](../src/components/lesson/QuizPickWordFrame.tsx#L43));[ReinforceFrame.tsx:42](../src/components/lesson/ReinforceFrame.tsx#L42) 未 memo 的 onAnswer 每渲染重挂 listener;locked 按钮仍可聚焦 + push-to-talk 缺 aria-pressed。
+
+### ⭐ 儿童产品专项(critic 补,10 维度系统性漏掉——因为"用户是孩子")
+
+> 纯工程视角看不到。单用户本地阶段多为 P2,但作为**风险类别**价值最高。
+
+- **LLM 输出无内容安全过滤** · P2 — [orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,零审核。加"只说目标词汇+鼓励语"约束检查或关键词 guard。
+- **孩子语音转写永久明文留存** · P2 — [session.ts:189](../src/lib/agent/session.ts#L189) 每轮写 ASR 原文进 SQLite,全仓库无删除/TTL/清理。加保留策略 + "清除历史"入口。
+- **家长门禁是纯客户端摆设** · P2 — `pin.ts` 硬编码 salt + localStorage;`/api/stats`、`/api/sessions` 服务端零鉴权,谁打都能拿孩子全部进度。
+- **其它** · P3 — 无 CSP/Permissions-Policy;麦克风权限被拒无面向孩子 UI([recorder.ts:58](../src/lib/audio/recorder.ts#L58) 只 console.warn);SQLite 无备份/损坏恢复;错误只进 console 无遥测(=总得手动贴日志的根因);无 `.nvmrc`/engines(better-sqlite3 跨 Node 版本会崩);`/api/chat` 无 rate-limit。
+
+### P3 / 维护性(顺手做,单用户阶段低优先)
+
+手写 emitter ×4、`safeParse` ×2、`markWordCorrect/Incorrect` 重复、死 `resetConfig`、assistant-history-as-prose、`PcmPlayer.dispose` 不 await stop、死 `cancelSession`/无 barge-in、`buildPromptInput` 每轮算两次、未文档化的 `NEXT_PUBLIC_DOUBAO_TTS_DEFAULT_SPEAKER`。只在为高优项改到那个文件时顺手清。
+
+---
+
 ## 当前 backlog
 
 ### 1. Prompt / latency optimization v2 — 真实 Eval 继续指向成本/延迟时再启动
@@ -132,3 +180,4 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 - 2026-05-26 — **Prompt input quantification + Eval v1**:LLM prompt bucket 持久化,lesson-report 输出 session health / cost-context / teaching-loop / agent behavior / next-iteration signals
 - 2026-05-27/28 — **Prompt Slimming v1**:代表 fixture input chars -30.4%,static_rules -51.4%,course_definition 小幅压缩并通过 smoke / Eval 风险门
 - 2026-05-28 — **ESLint gate**:`pnpm lint` 改为非交互式可通过,lint 配置整理从远期 backlog 关闭
+- 2026-06-15 — **§1 闭环可靠性簇**(全量 review 第一项):修 6 bug + id-7 —— recorderLock 错误路径泄漏、speech-finish 兜底定时器丢 pendingActions、SpeechExtractor 跨 chunk 丢 speech、consumeSSE 无 try/finally、LLM 卡死双层超时(server 15s / client 20s watchdog)、controller error 首次有 UI 横幅、malformed 输出友好重试。+10 单测(294 过),smoke 13/13,architecture.md 同步。余下 review 项见上方「项目体检 backlog」
