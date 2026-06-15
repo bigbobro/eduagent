@@ -222,7 +222,7 @@ controller.endLesson:
 - `greeting → awaiting`:开场白 TTS session-finished
 - `awaiting → listening`:用户按下空格(必经 awaiting,**不支持**从 speaking 打断)
 - `listening → awaiting`:松开 + 录音 < 800ms(短按拦截)
-- `listening → thinking`:松开 + 录音 ≥ 800ms,等 ASR final
+- `listening → thinking`:松开 + 录音 ≥ 800ms,等 ASR final(LLM 回合进 thinking 时本地播占位音 filler 遮蔽首 token 死等)
 - `thinking → awaiting`:5 秒 ASR-final 兜底超时,或 final text 为空,或 20s `chatWatchdog` 超时(LLM/路由卡死),或服务端 SSE `error`(含 15s LLM 超时)
 - `thinking → speaking`:收到第一个 speech-delta(`onFirstSpeech`)
 - `speaking → awaiting`:TTS session-finished(或 1.5s speech-finish 兜底,两者都 flushPendingActions)
@@ -335,6 +335,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 | 短按 < 800ms 前端拦截 | 不进 thinking 不空等;若 keyup 早于 ASR/recorder startup settle,先记录 stoppedAt,等 startup settle 后再 close,避免撕掉 connecting WS 产生假 upstream error | 豆包对 < 1.5s 录音置信度不够,大概率 timeout;真实短按是本地 UX 事件,不应被记录成 provider 故障 |
 | 5s 不 9s 的 ASR final 兜底 | 用户更快感知失败 | 9s 太长,影响"再说一次"的连续性 |
 | LLM 卡死双层超时(server 15s / client 20s) | 正常链路 ~6s 出首声(首 token ~4s + 生成 ~2.2s),15s 留安全余量;client 20s 后备 | 上游接受连接后中途卡死(无 [DONE])会让课堂永远停在 thinking;server 超时把卡死转成 SSE error,client watchdog 兜住整路由无响应的情况 |
+| thinking 占位音 filler | 进 thinking 立刻本地播一段预渲染「嗯,让老师看看哦~」(`scripts/gen-filler.ts` 生成 `public/audio/thinking-filler.pcm`,同 TTS 音色),遮蔽首 token 死等 | 真实首音频 ~6s 里 ~4s 是 MiMo 上游首 token、代码省不掉;占位音零正确性风险(纯本地 `PcmPlayer.enqueue`,**不起 TTS session** — 该生命周期脆弱),仅 LLM 回合放、reinforcement 跟读(routeToChat:false)不放。**切音色需重跑 `pnpm tsx scripts/gen-filler.ts`** 重生成资源 |
 | 不打断(speaking 时空格忽略) | 简化优先 | 实测打断后 inflight PCM 难完全清干净;后续再加 |
 | ~~字幕领先音频~~ → **R1 已修复** | actions(`show_card`)缓冲到 `tts.session-finished` 再 emit | 实测 bd78d967 报告确认 UX 杀手;`pendingActions` in `LessonController` 解决;TTS error 路径也释放 |
 | 词汇正确性判定 | **R2:raw ASR 字面 verify**:raw ASR 命中当前卡的英文或课程显式 `asrAliases` 才计 hit;比较前会折叠大小写、标点、空格、连字符等分隔符 | LLM 曾把 "Kite." 判成 cat correct;字面 verify 截断过度容错;`ice cream` / `ice-cream` / `icecream` 这类 compound word 分隔符差异不应阻断进度;`pie`/`派` 这类中英同音词必须由课程显式 alias 放宽,不能默认把所有中文释义当成英文通过 |

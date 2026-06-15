@@ -29,18 +29,21 @@
 
 ### P1 候选(高性价比,建议优先)
 
-1. **MiMo base-URL 配置陷阱 + DATABASE_PATH 双默认** — [config.ts:48](../src/lib/config.ts#L48) · low
+> **✅ 全部完成(2026-06-16)** —— ① 配置 + ② WS Origin 合并见 commit `aa3f443`;③ 首音频占位音见下方完成记录。下列保留作背景。
+
+1. ✅ **MiMo base-URL 配置陷阱 + DATABASE_PATH 双默认** — [config.ts:48](../src/lib/config.ts#L48) · low
    - `config.ts:48` 读 `MIMO_API_BASE`,但 `.env.example`/`.env.local`/`init.ts`/两个测试全用 `MIMO_BASE_URL` → **env override 被静默忽略**,永远走 config.ts:11 硬编码默认。
    - 两处域名拼写不一致:config 默认 `xiaomim**om**o.com` vs env `xiaomim**im**o.com`。运行时用的是 config 默认且能跑 → 那个才是对的。**陷阱:只改变量名让它读 `MIMO_BASE_URL` 会切到 `.env` 的另一个拼写,可能把好的跑挂——必须同时统一域名。**
    - 先确认哪个域名真能解析 → config 读 `MIMO_BASE_URL`(`MIMO_API_BASE` 留 alias)+ 三处域名统一 + 启动日志打 resolved URL。顺带修 `DATABASE_PATH` `./data` vs `./db` 双默认。
 
-2. **WS upgrade 无 Origin 校验 + ws 补丁** — [server.ts:36](../server.ts#L36) · low
+2. ✅ **WS upgrade 无 Origin 校验 + ws 补丁** — [server.ts:36](../server.ts#L36) · low
    - WebSocket 不受同源策略约束:dev server 跑着时任何打开的网页都能连 `ws://localhost:3000/api/voice/{asr,tts}` 用服务端豆包凭据烧额度。~5 行 Origin 白名单。
    - 顺带 `pnpm update ws`(8.20.0→8.20.1,内存泄露 CVE,在语音数据路径)。可选:ASR/TTS query 参数加长度上限。
 
-3. **首音频延迟**(THE 核心指标) — [session.ts:113](../src/lib/agent/session.ts#L113) · high
-   - 服务端把整段 LLM JSON 收完才吐第一个 speech-delta(~2.2s 尾延迟,见 voice-benchmarks.md)。
-   - 低成本:`thinking` 态放预渲染 "嗯…" filler 掩盖延迟(voice-benchmarks option 3)。高成本:句子边界跑可在前缀判定的廉价 guard 后提前喂 TTS。顺带调 ASR `end_window_size`(asr-proxy.ts:90,每轮尾延迟旋钮)。
+3. ✅ **首音频延迟**(THE 核心指标) — [session.ts:113](../src/lib/agent/session.ts#L113) · 选了低成本占位音
+   - 已实施 thinking 占位音 filler(option 3):预渲染同音色「嗯,让老师看看哦~」,本地 `PcmPlayer.enqueue`、不起 TTS session,仅 LLM 回合放。**遮蔽体感,不减真实延迟**(~4s 上游首 token 仍在)。
+   - 未做:句子流式提前喂 TTS(高风险,park);ASR `end_window_size` 经核实对 finish-driven 流程是 no-op,未改(见 voice-benchmarks.md)。
+   - **真正减首音频延迟**的下一步仍是「换更快 LLM 模型 / prompt 首句策略 / Hybrid 预渲染」——见远期 backlog。
 
 ### P2(稳健性 / 数据正确性 / 工程化)
 
@@ -180,4 +183,6 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 - 2026-05-26 — **Prompt input quantification + Eval v1**:LLM prompt bucket 持久化,lesson-report 输出 session health / cost-context / teaching-loop / agent behavior / next-iteration signals
 - 2026-05-27/28 — **Prompt Slimming v1**:代表 fixture input chars -30.4%,static_rules -51.4%,course_definition 小幅压缩并通过 smoke / Eval 风险门
 - 2026-05-28 — **ESLint gate**:`pnpm lint` 改为非交互式可通过,lint 配置整理从远期 backlog 关闭
+- 2026-06-16 — **P1 ③ 首音频占位音 filler**:进 thinking 本地播预渲染同音色「嗯,让老师看看哦~」(`scripts/gen-filler.ts` 生成 `public/audio/thinking-filler.pcm`),不起 TTS session、仅 LLM 回合放。遮蔽体感不减真实延迟;ASR end_window 核实为 no-op 未改。+3 单测(304 过),smoke 13/13。
+- 2026-06-16 — **P1 ①② 配置 + WS 安全**(commit `aa3f443`):config 改读 `MIMO_BASE_URL`(+MIMO_API_BASE alias)、修死域名默认(实测 xiaomimimo 通/xiaomimomo 死)、删死代码 databasePath;server.ts 加 `isAllowedWsOrigin` 拒跨站 WS 劫持、ws 升 ^8.21.0。+7 单测,live LLM 端到端验证。
 - 2026-06-15 — **§1 闭环可靠性簇**(全量 review 第一项):修 6 bug + id-7 —— recorderLock 错误路径泄漏、speech-finish 兜底定时器丢 pendingActions、SpeechExtractor 跨 chunk 丢 speech、consumeSSE 无 try/finally、LLM 卡死双层超时(server 15s / client 20s watchdog)、controller error 首次有 UI 横幅、malformed 输出友好重试。+10 单测(294 过),smoke 13/13,architecture.md 同步。余下 review 项见上方「项目体检 backlog」
