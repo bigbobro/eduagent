@@ -82,6 +82,25 @@ describe('StreamingSpeechExtractor', () => {
     }
     expect(complete).toBe(true);
   });
+
+  // bug 3: a non-speech value split across a feed() chunk boundary derails the streaming parser
+  // (skip helpers only scan the current chunk), but finalize() must still recover the speech from
+  // the fully-parsed buffer.
+  it('recovers speech via finalize when a nested value is split across a chunk boundary', () => {
+    const ex = new StreamingSpeechExtractor();
+    const streamed = feedAll(ex, ['{"state_update":{"evidence":"abc', 'def"},"speech":"WORLD"}']);
+    expect(streamed).toBe(''); // streaming parser lost it
+    const result = ex.finalize();
+    expect(result.speech).toBe('WORLD'); // ...but finalize recovers it
+    expect(result.malformed).toBeUndefined();
+  });
+
+  it('finalize prefers the parsed speech when a string value is split across a boundary', () => {
+    const ex = new StreamingSpeechExtractor();
+    feedAll(ex, ['{"x":"a\\', '"b","speech":"ZZZ"}']);
+    const result = ex.finalize();
+    expect(result.speech).toBe('ZZZ');
+  });
 });
 
 describe('sanitizeSpeech', () => {

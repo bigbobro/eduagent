@@ -351,3 +351,142 @@ describe('R1: actions buffered until TTS session-finished', () => {
     expect((controller as any).pendingActions).toBeNull();
   });
 });
+
+describe('§1 loop-reliability fixes', () => {
+  beforeEach(() => {
+    asrInstances.length = 0;
+    asrOpenQueue.length = 0;
+    ttsInstances.length = 0;
+    setAsrSessionContextMock.mockClear();
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function makeSseResponse(frames: string): Response {
+    const encoder = new TextEncoder();
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(frames));
+        controller.close();
+      },
+    }), { status: 200, headers: { 'X-Session-Id': 'test-session' } });
+  }
+
+  // bug 1: recorderLock must be released on every startListening failure path, or push-to-talk
+  // is permanently dead until the controller is recreated.
+  it('releases recorderLock after asr.open() rejects so a retry still works', async () => {
+    asrOpenQueue.push(() => Promise.reject(new Error('asr down')));
+    const controller = new LessonController();
+    const errors: string[] = [];
+    (controller as any).sessionId = 'session-1';
+    (controller as any).setState('awaiting');
+    controller.on('error', (err) => errors.push(err.message));
+
+    await controller.startListening();
+    expect(errors).toContain('ASR 连接失败,请重试');
+    expect(controller.getState()).toBe('awaiting');
+    expect((controller as any).recorderLock).toBe(false);
+
+    // Second press must NOT be short-circuited by a stuck lock.
+    await controller.startListening();
+    expect(controller.getState()).toBe('listening');
+    expect(asrInstances).toHaveLength(2);
+  });
+
+  // bug 2: the speech-finish fallback timer must flush buffered actions, otherwise the card on
+  // screen desyncs from what the teacher just said when the TTS finish frame is dropped.
+  it('flushes pendingActions when the speech-finish fallback timer fires', () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new LessonController();
+      (controller as any).bindTtsHandlers();
+      (controller as any).courseId = 'animals';
+      (controller as any).setState('speaking');
+      (controller as any).pendingActions = [{ tool: 'show_card', params: { card_id: 'dog' } }];
+      const actionsReceived: any[] = [];
+      controller.on('actions', (a) => actionsReceived.push(a));
+
+      (controller as any).armSpeechFinishFallback();
+      expect(actionsReceived).toHaveLength(0);
+
+      vi.advanceTimersByTime(1500);
+
+      expect(actionsReceived).toHaveLength(1);
+      expect(actionsReceived[0]).toEqual([{ tool: 'show_card', params: { card_id: 'dog' } }]);
+      expect((controller as any).pendingActions).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // bug 6: consumeSSE must release the reader lock even when the stream errors.
+  it('releases the SSE reader lock and skips afterDone when the stream errors', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('stream boom'));
+      },
+    });
+    const controller = new LessonController();
+    (controller as any).bindTtsHandlers();
+    const afterDone = vi.fn();
+
+    await expect((controller as any).consumeSSE(body, afterDone)).rejects.toThrow('stream boom');
+    expect(body.locked).toBe(false);
+    expect(afterDone).not.toHaveBeenCalled();
+  });
+
+  // bug 4 (client): a hung /api/chat must self-rescue via the watchdog.
+  it('client watchdog aborts and recovers to awaiting when no SSE event arrives', () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new LessonController();
+      (controller as any).chatAbort = new AbortController();
+      (controller as any).setState('thinking');
+      const errors: string[] = [];
+      controller.on('error', (err) => errors.push(err.message));
+
+      (controller as any).armChatWatchdog();
+      vi.advanceTimersByTime(20000);
+
+      expect(errors).toContain('我有点没反应过来…我们再聊一句?');
+      expect(controller.getState()).toBe('awaiting');
+      expect((controller as any).chatAbort.signal.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('first SSE event clears the chat watchdog so it cannot misfire mid-response', () => {
+    const controller = new LessonController();
+    (controller as any).bindTtsHandlers();
+    (controller as any).chatAbort = new AbortController();
+    (controller as any).setState('thinking');
+
+    (controller as any).armChatWatchdog();
+    expect((controller as any).chatWatchdogTimer).not.toBeNull();
+
+    (controller as any).handleSseEvent('progress_snapshot', { clearedCardIds: [] }, () => {}, () => {});
+
+    expect((controller as any).chatWatchdogTimer).toBeNull();
+  });
+
+  // bug 4 (server timeout surfaces as an SSE error): client must recover from thinking.
+  it('recovers to awaiting when the server sends an SSE error while thinking', async () => {
+    const frames = 'event: error\ndata: {"message":"MiMo LLM API error: 504"}\n\n';
+    vi.stubGlobal('fetch', vi.fn(async () => makeSseResponse(frames)));
+    const controller = new LessonController();
+    (controller as any).bindTtsHandlers();
+    (controller as any).setState('thinking');
+    const errors: string[] = [];
+    controller.on('error', (err) => errors.push(err.message));
+
+    const res = await fetch('/api/chat', { method: 'POST', body: '{}' });
+    await (controller as any).consumeSSE((res as any).body, () => {});
+
+    expect(controller.getState()).toBe('awaiting');
+    expect(errors).toContain('我有点没反应过来…我们再聊一句?');
+  });
+});

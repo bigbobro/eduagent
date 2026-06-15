@@ -3,6 +3,11 @@ import { createLogger } from '../logger';
 
 const log = createLogger('mimo-llm');
 
+// Bounded overall deadline for a single LLM turn. Normal path is ~6s (first token ~4s + generation
+// ~2.2s); 15s leaves safe margin while preventing a stalled upstream from freezing the lesson.
+// The client has a 20s watchdog as a backstop (see lesson-controller.ts CHAT_WATCHDOG_MS).
+const LLM_TIMEOUT_MS = 15000;
+
 export interface LLMUsage {
   inputTokens: number;
   outputTokens: number;
@@ -36,6 +41,12 @@ export async function* streamLLM(
 
   log.debug('Calling MiMo LLM', { model: config.mimoModel, messageCount: apiMessages.length });
 
+  // Aborting this signal also rejects the in-progress reader.read(), so one deadline covers both a
+  // connect stall and a mid-stream stall. Combined with the caller's cancel signal so a client
+  // disconnect still aborts immediately.
+  const timeoutSignal = AbortSignal.timeout(LLM_TIMEOUT_MS);
+  const fetchSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
   const res = await fetch(`${config.mimoApiBase}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -50,7 +61,7 @@ export async function* streamLLM(
       stream: true,
       stream_options: { include_usage: true },
     }),
-    signal,
+    signal: fetchSignal,
   });
 
   if (!res.ok || !res.body) {

@@ -39,6 +39,7 @@ export class LessonController {
   private chatAbort: AbortController | null = null;
   private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
   private speechFinishFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private chatWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
   private listenStartedAt = 0;
   private listenStoppedAt = 0;
   private speechStreamFinished = false;
@@ -56,6 +57,9 @@ export class LessonController {
   } | null = null;
   private static readonly SPEECH_FINISH_FALLBACK_MS = 1500;
   private static readonly STATIC_SPEECH_TIMEOUT_MS = 10000;
+  // Client backstop: server-side LLM deadline is 15s (see mimo/llm.ts). If no SSE event arrives
+  // within this window the whole route is unresponsive — abort and self-rescue to awaiting.
+  private static readonly CHAT_WATCHDOG_MS = 20000;
 
   constructor() {
     this.player.onIdle(() => this.maybeReturnToAwaiting());
@@ -135,6 +139,7 @@ export class LessonController {
       clearTimeout(this.speechFinishFallbackTimer);
       this.speechFinishFallbackTimer = null;
     }
+    this.clearChatWatchdog();
     this.pendingActions = null;
     this.courseId = null;
     this.currentAsrCardId = null;
@@ -255,6 +260,7 @@ export class LessonController {
     } catch (e) {
       this.listenStartup = null;
       if (this.asr === asr) this.asr = null;
+      this.recorderLock = false; // Release lock on recorder start failure
       this.routeCurrentAsrToChat = true;
       this.emit('error', { message: '麦克风开不了哦,请允许权限' });
       this.setState('awaiting');
@@ -265,6 +271,7 @@ export class LessonController {
     } catch {
       if (this.listenStartup === startup) this.listenStartup = null;
       if (this.asr === asr) this.asr = null;
+      this.recorderLock = false; // Release lock on ASR open failure
       this.routeCurrentAsrToChat = true;
       this.emit('error', { message: 'ASR 连接失败,请重试' });
       // 录音也得清干净
@@ -277,6 +284,7 @@ export class LessonController {
       if (this.asr !== asr || this.getState() !== 'listening') {
         await recorder.stop();
         if (this.listenStartup === startup) this.listenStartup = null;
+        this.recorderLock = false; // Release lock when listening was cancelled mid-startup
         return;
       }
       this.recorder = recorder;
@@ -380,6 +388,7 @@ export class LessonController {
       ? Math.round(performance.now() - this.listenStoppedAt)
       : 0;
     this.chatAbort = new AbortController();
+    this.armChatWatchdog();
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -414,6 +423,8 @@ export class LessonController {
         this.emit('error', { message: '我有点没反应过来…我们再聊一句?' });
         this.setState('awaiting');
       }
+    } finally {
+      this.clearChatWatchdog();
     }
   }
 
@@ -438,20 +449,12 @@ export class LessonController {
       this.speechStreamFinished = true;
       // Flush buffered actions now that TTS has finished speaking — this ensures
       // the card shown on screen matches the word the teacher just finished saying.
-      if (this.pendingActions) {
-        this.syncAsrSessionContextFromActions(this.pendingActions);
-        this.emit('actions', this.pendingActions);
-        this.pendingActions = null;
-      }
+      this.flushPendingActions();
       this.maybeReturnToAwaiting();
     });
     this.tts.on('error', (err: { message: string }) => {
       // On TTS error, release any buffered actions so the UI doesn't stay stale.
-      if (this.pendingActions) {
-        this.syncAsrSessionContextFromActions(this.pendingActions);
-        this.emit('actions', this.pendingActions);
-        this.pendingActions = null;
-      }
+      this.flushPendingActions();
       this.failStaticSpeech(new Error(err.message || 'TTS failed'));
       this.emit('error', err);
     });
@@ -463,11 +466,7 @@ export class LessonController {
     });
     this.tts.on('session-lost', () => {
       // TTS reconnect cleared stale session — flush pending actions to unblock UI
-      if (this.pendingActions) {
-        this.syncAsrSessionContextFromActions(this.pendingActions);
-        this.emit('actions', this.pendingActions);
-        this.pendingActions = null;
-      }
+      this.flushPendingActions();
       // Return to awaiting if stuck in speaking/quiz-speaking
       if (this.state === 'speaking' || this.state === 'quiz-speaking') {
         this.setState('awaiting');
@@ -502,27 +501,33 @@ export class LessonController {
       }
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
 
-      let idx: number;
-      while ((idx = buf.indexOf('\n\n')) >= 0) {
-        const frame = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        const lines = frame.split('\n');
-        let event = '';
-        let data = '';
-        for (const line of lines) {
-          if (line.startsWith('event: ')) event = line.slice(7).trim();
-          else if (line.startsWith('data: ')) data += line.slice(6);
+        let idx: number;
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const lines = frame.split('\n');
+          let event = '';
+          let data = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) event = line.slice(7).trim();
+            else if (line.startsWith('data: ')) data += line.slice(6);
+          }
+          if (!event) continue;
+          let payload: any = {};
+          try { payload = JSON.parse(data); } catch {}
+          this.handleSseEvent(event, payload, ensureTtsSession, onFirstSpeech);
         }
-        if (!event) continue;
-        let payload: any = {};
-        try { payload = JSON.parse(data); } catch {}
-        this.handleSseEvent(event, payload, ensureTtsSession, onFirstSpeech);
       }
+    } finally {
+      // Always release the reader lock, even if read() throws or the stream is aborted —
+      // otherwise the lock leaks and afterDone's continuation is silently skipped.
+      reader.releaseLock();
     }
     afterDone();
   }
@@ -533,6 +538,8 @@ export class LessonController {
     ensureTtsSession: () => void,
     onFirstSpeech: () => void
   ): void {
+    // Any SSE event means the server is responding — the request is not hung.
+    this.clearChatWatchdog();
     switch (event) {
       case 'speech-delta':
         ensureTtsSession();
@@ -559,7 +566,15 @@ export class LessonController {
         this.armSpeechFinishFallback();
         break;
       case 'error':
-        this.emit('error', { message: payload.message || 'unknown' });
+        // Server-side failure (LLM timeout, session lost, ...). Log the raw reason for debugging
+        // but show the child a gentle nudge, and recover if we were still waiting on the response.
+        console.warn('[lesson] sse error:', payload.message);
+        this.emit('error', { message: '我有点没反应过来…我们再聊一句?' });
+        if (this.state === 'thinking' || this.state === 'speaking') {
+          this.pendingActions = null;
+          this.routeCurrentAsrToChat = true;
+          this.setState('awaiting');
+        }
         break;
     }
   }
@@ -573,11 +588,48 @@ export class LessonController {
     this.resolveStaticSpeech();
   }
 
+  // Release SSE-buffered actions to the UI and sync ASR card context. Called from every
+  // path that ends a TTS speech turn (session-finished / error / session-lost / fallback timer)
+  // so the on-screen card never desyncs from what the teacher just said.
+  private flushPendingActions(): void {
+    if (!this.pendingActions) return;
+    this.syncAsrSessionContextFromActions(this.pendingActions);
+    this.emit('actions', this.pendingActions);
+    this.pendingActions = null;
+  }
+
+  // Client backstop for a stalled /api/chat: if no SSE event arrives within CHAT_WATCHDOG_MS,
+  // the request is hung — abort it and recover to awaiting with a gentle nudge. Cleared on the
+  // first SSE event (handleSseEvent) and in handleAsrFinal's finally; the state guard prevents
+  // misfiring during a long but legitimate teacher utterance.
+  private armChatWatchdog(): void {
+    this.clearChatWatchdog();
+    this.chatWatchdogTimer = setTimeout(() => {
+      this.chatWatchdogTimer = null;
+      if (this.state !== 'thinking') return;
+      this.chatAbort?.abort();
+      this.pendingActions = null;
+      this.routeCurrentAsrToChat = true;
+      this.emit('error', { message: '我有点没反应过来…我们再聊一句?' });
+      this.setState('awaiting');
+    }, LessonController.CHAT_WATCHDOG_MS);
+  }
+
+  private clearChatWatchdog(): void {
+    if (this.chatWatchdogTimer) {
+      clearTimeout(this.chatWatchdogTimer);
+      this.chatWatchdogTimer = null;
+    }
+  }
+
   private armSpeechFinishFallback(): void {
     if (this.speechFinishFallbackTimer) clearTimeout(this.speechFinishFallbackTimer);
     this.speechFinishFallbackTimer = setTimeout(() => {
       this.speechFinishFallbackTimer = null;
       this.speechStreamFinished = true;
+      // The TTS finish frame never arrived — flush buffered actions so the card still
+      // syncs to what the teacher said (otherwise: "画面切到 X，老师还让读 Y" desync).
+      this.flushPendingActions();
       this.maybeReturnToAwaiting();
     }, LessonController.SPEECH_FINISH_FALLBACK_MS);
   }

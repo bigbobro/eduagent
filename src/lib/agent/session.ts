@@ -135,6 +135,13 @@ export async function* streamUserInput(
   const result = extractor.finalize();
   result.speech = sanitizeSpeech(result.speech);
 
+  // id-7: unparseable LLM output with no recoverable speech would otherwise be a silent turn
+  // (teacher says nothing, no actions). Surface it so the client shows a gentle retry + recovers.
+  if (result.malformed && !result.speech.trim()) {
+    yield { type: 'error', message: 'LLM output unparseable (malformed JSON, no speech)' };
+    return;
+  }
+
   // 4. Run guard pipeline (ORDER SENSITIVE — see guards/index.ts)
   const initialCtx: GuardContext = {
     speech: result.speech, actions: result.actions, stateUpdate: result.state_update,

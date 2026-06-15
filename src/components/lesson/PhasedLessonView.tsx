@@ -57,6 +57,8 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const [introActiveCardId, setIntroActiveCardId] = useState<string | null>(null);
   const [clearedWordCount, setClearedWordCount] = useState(0);
   const [lessonRun, setLessonRun] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
 
@@ -69,14 +71,23 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     const onProgress = (next: ProgressSnapshot) => {
       setClearedWordCount(next.clearedCardIds.filter((cardId) => wordCardIds.has(cardId)).length);
     };
+    const onError = (err: { message: string }) => {
+      if (!err?.message) return;
+      setErrorMsg(err.message);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+      errorTimerRef.current = setTimeout(() => setErrorMsg(null), 4000);
+    };
     v2Ref.current = v2;
     phasedRef.current = phased;
     v2.on('progress', onProgress);
+    v2.on('error', onError);
     phased.on('phase-change', onPhaseChange);
     phased.on('intro-busy-change', onIntroBusyChange);
     phased.on('intro-active-card-change', onIntroActiveCardChange);
     return () => {
       v2.off('progress', onProgress);
+      v2.off('error', onError);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       phased.off('phase-change', onPhaseChange);
       phased.off('intro-busy-change', onIntroBusyChange);
       phased.off('intro-active-card-change', onIntroActiveCardChange);
@@ -125,6 +136,16 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         <h1 className="font-zh text-xl text-ink">{course.title}</h1>
         <div className="w-20" />
       </header>
+
+      {errorMsg && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="absolute left-1/2 top-16 z-40 max-w-[90vw] -translate-x-1/2 rounded-paper-pill border-2 border-ink bg-butter px-5 py-2.5 text-center font-zh text-base text-ink shadow-paper"
+        >
+          {errorMsg}
+        </div>
+      )}
 
       {process.env.NODE_ENV === 'development' && started && (
         <DevPhasePanel

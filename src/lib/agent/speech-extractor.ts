@@ -184,8 +184,13 @@ export class StreamingSpeechExtractor {
     } catch {
       malformed = true;
     }
+    // Prefer the fully-parsed speech when the JSON is well-formed: the streaming state machine can
+    // lose the whole speech value when a preceding non-speech value is split across a feed() chunk
+    // boundary (skipUntilStringEnd / skipNested only scan the current chunk). The parsed buffer is
+    // authoritative; fall back to the streamed value only when JSON.parse failed.
+    const speech = typeof parsed?.speech === 'string' ? parsed.speech : this.speech;
     return {
-      speech: this.speech,
+      speech,
       actions: parsed?.actions ?? [],
       state_update: parsed?.state_update ?? {},
       malformed: malformed || undefined,
