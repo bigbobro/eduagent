@@ -8,7 +8,7 @@ import { z } from 'zod'
 const configSchema = z.object({
   // MiMo LLM
   mimoApiKey: z.string().min(1, 'MIMO_API_KEY is required'),
-  mimoApiBase: z.string().url().default('https://token-plan-cn.xiaomimomo.com/v1'),
+  mimoApiBase: z.string().url().default('https://token-plan-cn.xiaomimimo.com/v1'),
   mimoModel: z.string().default('mimo-v2.5-pro'),
 
   // Doubao Voice (ASR + TTS)
@@ -19,9 +19,6 @@ const configSchema = z.object({
   doubaoAsrWsUrl: z.string().url().default('wss://openspeech.bytedance.com/api/v3/sauc/bigmodel'),
   doubaoTtsWsUrl: z.string().url().default('wss://openspeech.bytedance.com/api/v2/tts'),
   doubaoTtsDefaultSpeaker: z.string().default('BV001_streaming'),
-
-  // Database
-  databasePath: z.string().default('./data/eduagent.db'),
 
   // Development
   voiceMock: z.boolean().default(false),
@@ -45,7 +42,9 @@ export function getConfig(): AppConfig {
 
   const raw = {
     mimoApiKey: process.env.MIMO_API_KEY,
-    mimoApiBase: process.env.MIMO_API_BASE,
+    // Canonical env var is MIMO_BASE_URL (see .env.example / init.ts); MIMO_API_BASE kept as a
+    // backward-compat alias. Reading the wrong name silently dropped the override → dead default.
+    mimoApiBase: process.env.MIMO_BASE_URL ?? process.env.MIMO_API_BASE,
     mimoModel: process.env.MIMO_MODEL,
 
     doubaoAppId: process.env.DOUBAO_APP_ID,
@@ -55,8 +54,6 @@ export function getConfig(): AppConfig {
     doubaoAsrWsUrl: process.env.DOUBAO_ASR_WS_URL,
     doubaoTtsWsUrl: process.env.DOUBAO_TTS_WS_URL,
     doubaoTtsDefaultSpeaker: process.env.DOUBAO_TTS_DEFAULT_SPEAKER,
-
-    databasePath: process.env.DATABASE_PATH,
 
     voiceMock: process.env.VOICE_MOCK === 'true',
     voiceMockError: process.env.VOICE_MOCK_ERROR || 'none',

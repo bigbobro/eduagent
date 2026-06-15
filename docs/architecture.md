@@ -31,7 +31,7 @@
                                  SQLite (lessons/turns/word_performance)
 ```
 
-**为什么自定义 Next.js server**:Next.js App Router 不支持 WebSocket `upgrade` 事件。`server.ts` 接管 HTTP server,把 `/api/voice/asr` 与 `/api/voice/tts` 的 upgrade 请求转给对应 proxy 模块,其它请求让 Next.js 处理。
+**为什么自定义 Next.js server**:Next.js App Router 不支持 WebSocket `upgrade` 事件。`server.ts` 接管 HTTP server,把 `/api/voice/asr` 与 `/api/voice/tts` 的 upgrade 请求转给对应 proxy 模块,其它请求让 Next.js 处理。upgrade 前先按 `isAllowedWsOrigin`(loopback + 配置端口白名单,`src/lib/voice/ws-origin.ts`)校验 `Origin`,拒绝跨站 WS 劫持(CSWSH,会盗用服务端豆包凭据);缺失 `Origin` 的非浏览器客户端放行。
 
 ---
 

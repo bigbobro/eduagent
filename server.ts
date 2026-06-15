@@ -10,6 +10,7 @@ loadEnv({ path: resolve(process.cwd(), '.env.local') });
 // Validate configuration before starting server
 import { getConfig } from './src/lib/config';
 import { createLogger } from './src/lib/logger';
+import { isAllowedWsOrigin } from './src/lib/voice/ws-origin';
 
 const config = getConfig(); // Fail fast if config invalid
 const log = createLogger('server');
@@ -19,7 +20,7 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 async function main() {
-  log.info('Starting EduAgent server', { port: config.port, dev, voiceMock: config.voiceMock });
+  log.info('Starting EduAgent server', { port: config.port, dev, voiceMock: config.voiceMock, mimoApiBase: config.mimoApiBase });
 
   await app.prepare();
 
@@ -33,6 +34,12 @@ async function main() {
 
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const url = req.url || '';
+    // Reject cross-origin WS upgrades (CSWSH) before bridging to Doubao with server credentials.
+    if (!isAllowedWsOrigin(req.headers.origin, config.port)) {
+      log.warn('Rejected WS upgrade from disallowed origin', { origin: req.headers.origin, url });
+      socket.destroy();
+      return;
+    }
     if (url.startsWith('/api/voice/asr')) {
       handleASRUpgrade(req, socket, head);
     } else if (url.startsWith('/api/voice/tts')) {
