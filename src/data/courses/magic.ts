@@ -16,7 +16,7 @@ export const magicCourse: Course = {
     { id: 'crown', english: 'crown', chinese: '皇冠', imageUrl: '/images/magic/crown.png', kind: 'word', drillParts: ["crown"], difficulty: 1, tags: ['magic'] },
     { id: 'fairy', english: 'fairy', chinese: '仙女', imageUrl: '/images/magic/fairy.png', kind: 'word', drillParts: ["fair","y"], difficulty: 1, tags: ['magic'] },
     { id: 'giant', english: 'giant', chinese: '巨人', imageUrl: '/images/magic/giant.png', kind: 'word', drillParts: ["gi","ant"], difficulty: 1, tags: ['magic'] },
-    { id: 'knight', english: 'knight', chinese: '骑士', imageUrl: '/images/magic/knight.png', kind: 'word', drillParts: ["knight"], difficulty: 1, tags: ['magic'] },
+    { id: 'knight', english: 'knight', chinese: '骑士', imageUrl: '/images/magic/knight.png', kind: 'word', drillParts: ["knight"], asrAliases: ["night", "夜晚"], difficulty: 1, tags: ['magic'] },
     { id: 'prince', english: 'prince', chinese: '王子', imageUrl: '/images/magic/prince.png', kind: 'word', drillParts: ["prince"], difficulty: 1, tags: ['magic'] },
     { id: 'princess', english: 'princess', chinese: '公主', imageUrl: '/images/magic/princess.png', kind: 'word', drillParts: ["prin","cess"], difficulty: 2, tags: ['magic'] },
     { id: 'sentence_castle', english: 'This is a castle.', chinese: '这是一座城堡。', imageUrl: '/images/magic/castle.png', kind: 'sentence', drillParts: ["This is","a castle"], difficulty: 1, tags: ['magic', 'sentence'] },
