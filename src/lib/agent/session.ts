@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Course, PhaseName } from '@/types/course';
+import { Course, PhaseName, WordCard } from '@/types/course';
 import { LessonMemory, PromptInputBreakdown, TokenUsage } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
 import { sessionStore, type Session } from './session-store';
@@ -78,6 +78,76 @@ export function recordQuizAnswer(
   return true;
 }
 
+export interface DebugSkipWordResult {
+  skippedCardId: string | null;
+  nextCardId: string | null;
+  clearedCardIds: string[];
+  totalAttempts: number;
+  currentPhase: PhaseName;
+}
+
+export function debugSkipCurrentWord(sessionId: string): DebugSkipWordResult | null {
+  const session = sessionStore.get(sessionId);
+  if (!session) return null;
+
+  const wordCards = session.course.cards.filter((card): card is WordCard => card.kind === 'word');
+  const wordCardIds = new Set(wordCards.map((card) => card.id));
+  const progress = { ...session.memory.cardProgress };
+  const currentWordId = resolveWordCardId(session.course, session.memory.currentCardId);
+  const firstUncleared = (excludeId = '') => session.course.teachingHints.newCardIds.find(
+    (id) => wordCardIds.has(id) && id !== excludeId && progress[id] !== 'cleared',
+  ) || '';
+  const skippedCardId = currentWordId && progress[currentWordId] !== 'cleared'
+    ? currentWordId
+    : firstUncleared();
+
+  if (!skippedCardId) {
+    return {
+      skippedCardId: null,
+      nextCardId: null,
+      clearedCardIds: [...session.memory.clearedCardIds],
+      totalAttempts: getTotalAttempts(session.memory),
+      currentPhase: session.currentPhase,
+    };
+  }
+
+  const skippedCard = wordCards.find((card) => card.id === skippedCardId);
+  progress[skippedCardId] = 'cleared';
+  const correctCount = { ...session.memory.cardCorrectCount, [skippedCardId]: 2 };
+  const attemptStreak = { ...session.memory.cardAttemptStreak, [skippedCardId]: 0 };
+  const clearedCardIds = session.memory.clearedCardIds.includes(skippedCardId)
+    ? session.memory.clearedCardIds
+    : [...session.memory.clearedCardIds, skippedCardId];
+  const wordsLearned = skippedCard?.english && !session.memory.wordsLearned.includes(skippedCard.english)
+    ? [...session.memory.wordsLearned, skippedCard.english]
+    : session.memory.wordsLearned;
+  const nextCardId = firstUncleared(skippedCardId);
+  const nextCard = wordCards.find((card) => card.id === nextCardId);
+  if (nextCardId && progress[nextCardId] === 'untouched') {
+    progress[nextCardId] = 'attempted';
+  }
+
+  session.memory = {
+    ...session.memory,
+    cardProgress: progress,
+    cardCorrectCount: correctCount,
+    cardAttemptStreak: attemptStreak,
+    clearedCardIds,
+    wordsLearned,
+    currentCardId: nextCardId || skippedCardId,
+    currentWord: nextCard?.english || skippedCard?.english || session.memory.currentWord,
+  };
+  sessionStore.save(session);
+
+  return {
+    skippedCardId,
+    nextCardId: nextCardId || null,
+    clearedCardIds: [...clearedCardIds],
+    totalAttempts: getTotalAttempts(session.memory),
+    currentPhase: session.currentPhase,
+  };
+}
+
 export type StreamUserEvent =
   | { type: 'speech-delta'; text: string }
   | { type: 'speech-end' }
@@ -90,7 +160,12 @@ export async function* streamUserInput(
   sessionId: string,
   userText: string,
   asrResult?: { latency: number; tokens: number },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  // The child's literal transcript, used ONLY for R2 literal-hit counting (切卡). For a real
+  // utterance this equals userText (default). System turns (lesson start / phase transition /
+  // "请老师再说") pass '' so their instruction text — which may contain the target word — is
+  // never miscounted as the child saying it.
+  rawAsrText: string = userText
 ): AsyncGenerator<StreamUserEvent> {
   // 1. Session lookup + user message
   const session = sessionStore.get(sessionId);
@@ -145,7 +220,7 @@ export async function* streamUserInput(
   // 4. Run guard pipeline (ORDER SENSITIVE — see guards/index.ts)
   const initialCtx: GuardContext = {
     speech: result.speech, actions: result.actions, stateUpdate: result.state_update,
-    memory: session.memory, course: session.course, asrText: userText, currentPhase: session.currentPhase,
+    memory: session.memory, course: session.course, asrText: rawAsrText, currentPhase: session.currentPhase,
   };
   const finalCtx = runPipeline(initialCtx, [
     closingGuard,           // R4/R6: unlearned-word closing override
@@ -160,7 +235,7 @@ export async function* streamUserInput(
   yield { type: 'actions', actions: finalCtx.actions, state_update: finalCtx.stateUpdate };
 
   // 6. Commit memory + accounting + log
-  commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency, inputBreakdown });
+  commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency, inputBreakdown }, rawAsrText);
 
   // 7. Yield progress snapshot + done
   let totalAttempts = 0;
@@ -175,10 +250,11 @@ function commitTurn(
   userText: string,
   asrResult: { latency: number; tokens: number } | undefined,
   llm: { inputTokens: number; outputTokens: number; llmLatency: number; inputBreakdown?: PromptInputBreakdown },
+  rawAsrText: string,
 ): void {
   const beforePerformance = new Map(session.memory.wordPerformance);
   session.memory = commitAssistantStreamResult(
-    session.memory, session.course, ctx.speech, ctx.actions, ctx.stateUpdate, userText
+    session.memory, session.course, ctx.speech, ctx.actions, ctx.stateUpdate, rawAsrText
   );
   const assessment = ctx.stateUpdate.attempt_assessment;
   if (assessment && ctx.stateUpdate.current_word) {
@@ -210,4 +286,24 @@ function commitTurn(
       tts: { latency: 0, characters: ctx.speech.length },
     },
   });
+}
+
+function getTotalAttempts(memory: LessonMemory): number {
+  let totalAttempts = 0;
+  memory.wordPerformance.forEach((performance) => {
+    totalAttempts += performance.attempts;
+  });
+  return totalAttempts;
+}
+
+function resolveWordCardId(course: Course, cardId: string): string {
+  if (!cardId) return '';
+  const wordCards = course.cards.filter((card): card is WordCard => card.kind === 'word');
+  const wordCardIds = new Set(wordCards.map((card) => card.id));
+  if (wordCardIds.has(cardId)) return cardId;
+  const sentenceWordId = cardId.startsWith('sentence_') ? cardId.slice('sentence_'.length) : '';
+  if (wordCardIds.has(sentenceWordId)) return sentenceWordId;
+  const card = course.cards.find((item) => item.id === cardId);
+  if (!card?.imageUrl) return '';
+  return wordCards.find((wordCard) => wordCard.imageUrl === card.imageUrl)?.id || '';
 }

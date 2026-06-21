@@ -25,7 +25,7 @@ describe('LessonMandalaV2', () => {
     expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="recording"]')).toBeTruthy();
   });
 
-  it('maps thinking to tryAgain before the current card is cleared', () => {
+  it('keeps thinking on a neutral card state before the current card is cleared', () => {
     const controller = mockController('awaiting');
     const { container } = render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
 
@@ -33,7 +33,8 @@ describe('LessonMandalaV2', () => {
       controller.handlers.get('state')?.('thinking');
     });
 
-    expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="tryAgain"]')).toBeTruthy();
+    expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="listening"]')).toBeTruthy();
+    expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="tryAgain"]')).toBeFalsy();
   });
 
   it('maps cleared progress for the current card to the correct state', () => {

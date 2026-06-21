@@ -40,8 +40,8 @@
    - WebSocket 不受同源策略约束:dev server 跑着时任何打开的网页都能连 `ws://localhost:3000/api/voice/{asr,tts}` 用服务端豆包凭据烧额度。~5 行 Origin 白名单。
    - 顺带 `pnpm update ws`(8.20.0→8.20.1,内存泄露 CVE,在语音数据路径)。可选:ASR/TTS query 参数加长度上限。
 
-3. ✅ **首音频延迟**(THE 核心指标) — [session.ts:113](../src/lib/agent/session.ts#L113) · 选了低成本占位音
-   - 已实施 thinking 占位音 filler(option 3):预渲染同音色「嗯,让老师看看哦~」,本地 `PcmPlayer.enqueue`、不起 TTS session,仅 LLM 回合放。**遮蔽体感,不减真实延迟**(~4s 上游首 token 仍在)。
+3. ✅ **首音频延迟**(THE 核心指标) — [session.ts:113](../src/lib/agent/session.ts#L113) · 低成本占位音已停用
+   - thinking 占位音 filler(option 3)已停用:实测会在 ASR/LLM/TTS 正常运行时插入「嗯,让老师看看哦~」,听感像系统没检测到孩子发音。
    - 未做:句子流式提前喂 TTS(高风险,park);ASR `end_window_size` 经核实对 finish-driven 流程是 no-op,未改(见 voice-benchmarks.md)。
    - **真正减首音频延迟**的下一步仍是「换更快 LLM 模型 / prompt 首句策略 / Hybrid 预渲染」——见远期 backlog。
 
@@ -184,5 +184,6 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 - 2026-05-27/28 — **Prompt Slimming v1**:代表 fixture input chars -30.4%,static_rules -51.4%,course_definition 小幅压缩并通过 smoke / Eval 风险门
 - 2026-05-28 — **ESLint gate**:`pnpm lint` 改为非交互式可通过,lint 配置整理从远期 backlog 关闭
 - 2026-06-16 — **P1 ③ 首音频占位音 filler**:进 thinking 本地播预渲染同音色「嗯,让老师看看哦~」(`scripts/gen-filler.ts` 生成 `public/audio/thinking-filler.pcm`),不起 TTS session、仅 LLM 回合放。遮蔽体感不减真实延迟;ASR end_window 核实为 no-op 未改。+3 单测(304 过),smoke 13/13。
+- 2026-06-21 — **停用 thinking 占位音 filler**:实测会在 ASR/LLM/TTS 正常运行时误导性插入「让老师看看哦」,`LessonController` 不再 fetch/enqueue `thinking-filler.pcm`;首音频延迟继续等待更快 LLM / prompt 首句策略 / Hybrid 预渲染。
 - 2026-06-16 — **P1 ①② 配置 + WS 安全**(commit `aa3f443`):config 改读 `MIMO_BASE_URL`(+MIMO_API_BASE alias)、修死域名默认(实测 xiaomimimo 通/xiaomimomo 死)、删死代码 databasePath;server.ts 加 `isAllowedWsOrigin` 拒跨站 WS 劫持、ws 升 ^8.21.0。+7 单测,live LLM 端到端验证。
 - 2026-06-15 — **§1 闭环可靠性簇**(全量 review 第一项):修 6 bug + id-7 —— recorderLock 错误路径泄漏、speech-finish 兜底定时器丢 pendingActions、SpeechExtractor 跨 chunk 丢 speech、consumeSSE 无 try/finally、LLM 卡死双层超时(server 15s / client 20s watchdog)、controller error 首次有 UI 横幅、malformed 输出友好重试。+10 单测(294 过),smoke 13/13,architecture.md 同步。余下 review 项见上方「项目体检 backlog」

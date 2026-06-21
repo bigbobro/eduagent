@@ -83,9 +83,7 @@ export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
     ? 'recording'
     : currentCard && clearedCardIds.has(currentCard.id)
       ? 'correct'
-      : state === 'thinking'
-        ? 'tryAgain'
-        : 'listening';
+      : 'listening';
   const catMood = cardState === 'correct' ? 'cheer' : state === 'thinking' ? 'think' : 'happy';
 
   useSpacebar({
@@ -100,6 +98,9 @@ export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
     if (!canAskTeacher) return;
     void controller.sendCustomAction({
       action: 'message',
+      // System turn: re-explain the current card without counting as a child attempt (no R2 hit,
+      // no card advance). See route.ts message branch + streamUserInput rawAsrText.
+      system: true,
       text: [
         `(孩子刚刚没听清,请重新介绍当前卡片 ${currentCard.id}: ${currentCard.english} / ${currentCard.chinese})`,
         '必须先 show_card 当前卡片,不要切换到其它卡。',

@@ -18,7 +18,7 @@
 
 > **下一步:** 首音频 6 秒主要被 MiMo first-token(4 秒)拖累,前端再优化也只能省几百 ms。要么:① 换更快的 LLM 模型;② prompt 改造让 LLM 强制最先吐 speech 字段(目前依赖状态机解析 — 如果 LLM 先吐 actions/state_update,SpeechExtractor 要等到 speech 字段才 emit,首字延迟更大);③ 客户端在 thinking 状态播一句"嗯..."占位音遮蔽延迟。
 >
-> **2026-06-15 更新:已实施 ③ 占位音。** 进 `thinking` 立刻本地播一段预渲染「嗯,让老师看看哦~」(`scripts/gen-filler.ts` 同音色生成 `public/audio/thinking-filler.pcm`,~3s),用 `PcmPlayer.enqueue` 本地播放、不起 TTS session(零正确性风险),仅 LLM 回合放。**注意:这是遮蔽体感,不减真实首音频延迟**——~4s 上游首 token 仍在。真正减延迟仍需 ① 换更快模型或重构。
+> **2026-06-21 更新:③ 占位音已停用。** 实测发现本地预渲染「嗯,让老师看看哦~」会在 ASR/LLM/TTS 正常运行时插入,听感像系统没检测到孩子发音,因此 `LessonController` 不再 fetch 或 enqueue `public/audio/thinking-filler.pcm`。真正减延迟仍需 ① 换更快模型或重构。
 > **ASR `end_window_size`(800ms)未改:** 本项目 push-to-talk 在松手时发 `finish` 负序号控制帧强制终结,不依赖豆包静音窗口自动终结,故 `end_window_size` 不 gate 我们的延迟,降它是 no-op(还会影响潜在的自动终结路径),因此保持不动。
 
 ## 已观测到的固定延迟

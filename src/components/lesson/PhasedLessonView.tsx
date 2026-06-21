@@ -23,9 +23,11 @@ const DEV_PHASE_OPTIONS: PhaseName[] = ['intro', 'interactive', 'reinforcement',
 function DevPhasePanel({
   currentPhase,
   onJump,
+  onSkipWord,
 }: {
   currentPhase: PhaseName;
   onJump: (to: PhaseName) => void;
+  onSkipWord: () => void;
 }) {
   return (
     <div className="fixed bottom-4 right-4 z-50 bg-black/80 text-white rounded-lg px-3 py-2 text-xs font-mono shadow-lg pointer-events-auto">
@@ -43,6 +45,14 @@ function DevPhasePanel({
           </button>
         ))}
       </div>
+      <button
+        type="button"
+        onClick={onSkipWord}
+        disabled={currentPhase !== 'interactive'}
+        className="mt-1 w-full px-2 py-1 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        skip word
+      </button>
     </div>
   );
 }
@@ -151,6 +161,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         <DevPhasePanel
           currentPhase={phase}
           onJump={(to) => phasedRef.current?.forceTransition(to)}
+          onSkipWord={() => void v2Ref.current?.debugSkipCurrentWord()}
         />
       )}
 

@@ -123,6 +123,21 @@ describe('LessonController', () => {
     expect(states).toContain('awaiting');
   });
 
+  it('drops the stale word-card hot-word context for reinforcement (routeToChat:false)', async () => {
+    const controller = new LessonController();
+    (controller as any).sessionId = 'session-1';
+    (controller as any).courseId = 'magic';
+    (controller as any).currentAsrCardId = 'princess'; // frozen last interactive word card
+    (controller as any).setState('awaiting');
+
+    await controller.startListening({ routeToChat: false });
+
+    // cardId is dropped → asr-proxy falls back to the whole-course hot words instead of a single
+    // frozen "princess" that biases recognition against the reinforcement sentence.
+    expect((controller as any).currentAsrCardId).toBeNull();
+    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({ courseId: 'magic' });
+  });
+
   it('routes regular ASR final utterances to chat', async () => {
     const controller = new LessonController();
     (controller as any).sessionId = 'session-1';
@@ -137,6 +152,33 @@ describe('LessonController', () => {
         body: expect.stringContaining('"action":"message"'),
       }));
     });
+  });
+
+  it('debug-skips the current word without starting TTS', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      skippedCardId: 'apple',
+      nextCardId: 'banana',
+      clearedCardIds: ['apple'],
+      totalAttempts: 0,
+      currentPhase: 'interactive',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const controller = new LessonController();
+    const progress = vi.fn();
+    const actions = vi.fn();
+    (controller as any).sessionId = 'session-1';
+    controller.on('progress', progress);
+    controller.on('actions', actions);
+
+    await controller.debugSkipCurrentWord();
+
+    expect(fetch).toHaveBeenCalledWith('/api/chat', expect.objectContaining({
+      method: 'POST',
+      body: expect.stringContaining('"action":"debug-skip-word"'),
+    }));
+    expect(progress).toHaveBeenCalledWith(expect.objectContaining({ clearedCardIds: ['apple'] }));
+    expect(actions).toHaveBeenCalledWith([{ tool: 'show_card', params: { card_id: 'banana' } }]);
+    expect(ttsInstances[0]?.startSession).not.toHaveBeenCalled();
   });
 
   it('returns false and resets to idle when lesson start fails', async () => {
@@ -491,7 +533,7 @@ describe('§1 loop-reliability fixes', () => {
   });
 });
 
-describe('thinking filler (first-audio latency masking)', () => {
+describe('thinking wait behavior', () => {
   beforeEach(() => {
     asrInstances.length = 0;
     asrOpenQueue.length = 0;
@@ -504,41 +546,14 @@ describe('thinking filler (first-audio latency masking)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('plays the filler when entering thinking on an LLM turn', async () => {
+  it('does NOT play local audio while waiting for chat after ASR final', async () => {
     const controller = new LessonController();
-    const filler = new Uint8Array([1, 2, 3, 4]).buffer;
-    (controller as any).fillerPcm = filler;
     (controller as any).sessionId = 'session-1';
     (controller as any).routeCurrentAsrToChat = true;
-    (controller as any).listenStartedAt = 1;
-    (controller as any).setState('listening');
+    (controller as any).setState('thinking');
 
-    await (controller as any).finishListening(1000); // recordedMs = 999 ≥ 800
-
-    expect(controller.getState()).toBe('thinking');
-    expect((controller as any).player.enqueue).toHaveBeenCalledWith(filler);
-  });
-
-  it('does NOT play the filler for a non-routed reinforcement turn', async () => {
-    const controller = new LessonController();
-    (controller as any).fillerPcm = new Uint8Array([1, 2, 3, 4]).buffer;
-    (controller as any).sessionId = 'session-1';
-    (controller as any).routeCurrentAsrToChat = false;
-    (controller as any).listenStartedAt = 1;
-    (controller as any).setState('listening');
-
-    await (controller as any).finishListening(1000);
+    await (controller as any).handleAsrFinal('cat');
 
     expect((controller as any).player.enqueue).not.toHaveBeenCalled();
-  });
-
-  it('loadFiller fetches and caches the PCM asset', async () => {
-    const controller = new LessonController();
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([5, 6, 7, 8]).buffer, { status: 200 })));
-
-    await (controller as any).loadFiller();
-
-    expect((controller as any).fillerPcm).toBeInstanceOf(ArrayBuffer);
-    expect((controller as any).fillerPcm.byteLength).toBe(4);
   });
 });

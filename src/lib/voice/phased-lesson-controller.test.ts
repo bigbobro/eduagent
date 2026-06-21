@@ -86,6 +86,24 @@ describe('PhasedLessonController phase transitions', () => {
     expect(phaseChanges).toContain('reinforcement');
   });
 
+  it('transitions to reinforcement immediately when debug skip clears the last word while awaiting', async () => {
+    await ctrl.startLesson();
+    (ctrl as any).currentPhase = 'interactive';
+    const phaseChanges: PhaseName[] = [];
+    const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
+    ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
+
+    v2.emit('state', 'awaiting');
+    v2.emit('progress', {
+      clearedCardIds: wordCards.map((card) => card.id),
+      totalAttempts: 0,
+      currentPhase: 'interactive',
+    });
+
+    await vi.waitFor(() => expect(phaseChanges).toContain('reinforcement'));
+    expect(v2.sendCustomAction).toHaveBeenCalledWith({ action: 'phase-transition', to: 'reinforcement' });
+  });
+
   it('interactive to reinforcement when max attempts reached', async () => {
     await ctrl.startLesson();
     (ctrl as any).currentPhase = 'interactive';

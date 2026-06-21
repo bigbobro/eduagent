@@ -1,9 +1,8 @@
-// gen-filler.ts — generate the "thinking" filler audio once, offline.
+// gen-filler.ts — legacy helper for generating the disabled "thinking" filler audio.
 //
-// The lesson plays a short, content-free filler ("嗯，让老师看看哦~") the moment it enters the
-// `thinking` state, to mask the ~4-6s MiMo-first-token dead air after the child speaks. To avoid
-// juggling a TTS session at turn time (fragile — see §1 reliability work), the filler is a
-// pre-rendered PCM buffer the client just enqueues into PcmPlayer locally.
+// LessonController no longer loads or plays this asset. The filler was disabled because it can
+// speak while ASR/LLM/TTS are working normally, which sounds like the system missed the child.
+// Keep this script only as a disposable tool if that product direction is revisited.
 //
 // This script drives the SAME client-facing TTS protocol the browser uses (session-start →
 // text-chunk → session-finish over /api/voice/tts), captures the returned PCM frames, and writes

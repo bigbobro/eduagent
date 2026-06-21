@@ -7,7 +7,9 @@ function sseFrame(event: string, data: object): string {
 export function streamUserInputToSSE(
   sessionId: string,
   userText: string,
-  asrResult?: { latency: number; tokens: number }
+  asrResult?: { latency: number; tokens: number },
+  // R2 literal-hit text. Defaults to userText (real utterance); system turns pass '' to opt out.
+  rawAsrText: string = userText
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const ac = new AbortController();
@@ -18,7 +20,7 @@ export function streamUserInputToSSE(
   return new ReadableStream({
     async start(controller) {
       try {
-        for await (const ev of streamUserInput(sessionId, userText, asrResult, ac.signal)) {
+        for await (const ev of streamUserInput(sessionId, userText, asrResult, ac.signal, rawAsrText)) {
           if (ev.type === 'speech-delta') {
             speechBuf += ev.text;
           } else if (ev.type === 'speech-end') {

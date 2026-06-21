@@ -158,6 +158,11 @@ export class PhasedLessonController {
   private onV2Progress = (snapshot: ProgressSnapshot) => {
     this.lastSnapshot = snapshot;
     this.maybeArmTransition();
+    if (this.pendingTransition && this.v2.getState() === 'awaiting') {
+      const target = this.pendingTransition;
+      this.pendingTransition = null;
+      void this.performTransition(target);
+    }
   };
 
   private onV2State = (state: string) => {
