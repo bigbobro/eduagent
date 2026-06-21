@@ -14,7 +14,7 @@ export const toolsCourse: Course = {
     { id: 'tape', english: 'tape', chinese: '胶带', imageUrl: '/images/tools/tape.png', kind: 'word', drillParts: ['tape'], difficulty: 1, tags: ['tools'] },
     { id: 'glue', english: 'glue', chinese: '胶水', imageUrl: '/images/tools/glue.png', kind: 'word', drillParts: ['glue'], difficulty: 1, tags: ['tools'] },
     { id: 'scissors', english: 'scissors', chinese: '剪刀', imageUrl: '/images/tools/scissors.png', kind: 'word', drillParts: ['scis', 'sors'], difficulty: 2, tags: ['tools'] },
-    { id: 'toolbox', english: 'toolbox', chinese: '工具箱', imageUrl: '/images/tools/toolbox.png', kind: 'word', drillParts: ['tool', 'box'], difficulty: 1, tags: ['tools'] },
+    { id: 'toolbox', english: 'toolbox', chinese: '工具箱', imageUrl: '/images/tools/toolbox.png', kind: 'word', drillParts: ['tool', 'box'], asrAliases: ['true box'], difficulty: 1, tags: ['tools'] },
     { id: 'nail', english: 'nail', chinese: '钉子', imageUrl: '/images/tools/nail.png', kind: 'word', drillParts: ['nail'], difficulty: 1, tags: ['tools'] },
     { id: 'screw', english: 'screw', chinese: '螺丝', imageUrl: '/images/tools/screw.png', kind: 'word', drillParts: ['screw'], difficulty: 1, tags: ['tools'] },
     { id: 'pliers', english: 'pliers', chinese: '钳子', imageUrl: '/images/tools/pliers.png', kind: 'word', drillParts: ['pli', 'ers'], difficulty: 2, tags: ['tools'] },

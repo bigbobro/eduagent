@@ -10,7 +10,7 @@ export const tablewareCourse: Course = {
     { id: 'plate', english: 'plate', chinese: '盘子', imageUrl: '/images/tableware/plate.png', kind: 'word', drillParts: ['plate'], difficulty: 1, tags: ['tableware'] },
     { id: 'bowl', english: 'bowl', chinese: '碗', imageUrl: '/images/tableware/bowl.png', kind: 'word', drillParts: ['bowl'], difficulty: 1, tags: ['tableware'] },
     { id: 'spoon', english: 'spoon', chinese: '勺子', imageUrl: '/images/tableware/spoon.png', kind: 'word', drillParts: ['spoon'], difficulty: 1, tags: ['tableware'] },
-    { id: 'fork', english: 'fork', chinese: '叉子', imageUrl: '/images/tableware/fork.png', kind: 'word', drillParts: ['fork'], difficulty: 1, tags: ['tableware'] },
+    { id: 'fork', english: 'fork', chinese: '叉子', imageUrl: '/images/tableware/fork.png', kind: 'word', drillParts: ['fork'], asrAliases: ['fool'], difficulty: 1, tags: ['tableware'] },
     { id: 'knife', english: 'knife', chinese: '餐刀', imageUrl: '/images/tableware/knife.png', kind: 'word', drillParts: ['knife'], difficulty: 1, tags: ['tableware'] },
     { id: 'chopsticks', english: 'chopsticks', chinese: '筷子', imageUrl: '/images/tableware/chopsticks.png', kind: 'word', drillParts: ['chop', 'sticks'], difficulty: 2, tags: ['tableware'] },
     { id: 'napkin', english: 'napkin', chinese: '餐巾', imageUrl: '/images/tableware/napkin.png', kind: 'word', drillParts: ['nap', 'kin'], difficulty: 1, tags: ['tableware'] },

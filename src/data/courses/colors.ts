@@ -17,7 +17,7 @@ export const colorsCourse: Course = {
     { id: 'black', english: 'black', chinese: '黑色', imageUrl: '/images/colors/black.png', kind: 'word', drillParts: ['black'], difficulty: 1, tags: ['color'] },
     { id: 'white', english: 'white', chinese: '白色', imageUrl: '/images/colors/white.png', kind: 'word', drillParts: ['white'], difficulty: 1, tags: ['color'] },
     { id: 'brown', english: 'brown', chinese: '棕色', imageUrl: '/images/colors/brown.png', kind: 'word', drillParts: ['brown'], difficulty: 1, tags: ['color'] },
-    { id: 'gray', english: 'gray', chinese: '灰色', imageUrl: '/images/colors/gray.png', kind: 'word', drillParts: ['gray'], difficulty: 1, tags: ['color'] },
+    { id: 'gray', english: 'gray', chinese: '灰色', imageUrl: '/images/colors/gray.png', kind: 'word', drillParts: ['gray'], asrAliases: ['grey'], difficulty: 1, tags: ['color'] },
     { id: 'gold', english: 'gold', chinese: '金色', imageUrl: '/images/colors/gold.png', kind: 'word', drillParts: ['gold'], difficulty: 1, tags: ['color'] },
     { id: 'sentence_red', english: 'It is red.', chinese: '它是红色的。', imageUrl: '/images/colors/red.png', kind: 'sentence', drillParts: ['It is', 'red'], difficulty: 1, tags: ['color', 'sentence'] },
     { id: 'sentence_blue', english: 'I see blue.', chinese: '我看见蓝色。', imageUrl: '/images/colors/blue.png', kind: 'sentence', drillParts: ['I see', 'blue'], difficulty: 1, tags: ['color', 'sentence'] },

@@ -17,7 +17,7 @@ export const safetyCourse: Course = {
     { id: 'gate', english: 'gate', chinese: '门栏', imageUrl: '/images/safety/gate.png', kind: 'word', drillParts: ['gate'], difficulty: 1, tags: ['safety'] },
     { id: 'stairs', english: 'stairs', chinese: '楼梯', imageUrl: '/images/safety/stairs.png', kind: 'word', drillParts: ['stairs'], difficulty: 1, tags: ['safety'] },
     { id: 'handrail', english: 'handrail', chinese: '扶手', imageUrl: '/images/safety/handrail.png', kind: 'word', drillParts: ['hand', 'rail'], difficulty: 1, tags: ['safety'] },
-    { id: 'kneepads', english: 'kneepads', chinese: '护膝', imageUrl: '/images/safety/kneepads.png', kind: 'word', drillParts: ['knee', 'pads'], difficulty: 1, tags: ['safety'] },
+    { id: 'kneepads', english: 'kneepads', chinese: '护膝', imageUrl: '/images/safety/kneepads.png', kind: 'word', drillParts: ['knee', 'pads'], asrAliases: ['neepads'], difficulty: 1, tags: ['safety'] },
     { id: 'elbow_pads', english: 'elbow pads', chinese: '护肘', imageUrl: '/images/safety/elbow_pads.png', kind: 'word', drillParts: ['el', 'bow', 'pads'], difficulty: 2, tags: ['safety'] },
     { id: 'sentence_bandage', english: 'I need a bandage.', chinese: '我需要一个创可贴。', imageUrl: '/images/safety/bandage.png', kind: 'sentence', drillParts: ['I need', 'a bandage'], difficulty: 1, tags: ['safety', 'sentence'] },
     { id: 'sentence_alarm', english: 'The alarm is loud.', chinese: '警报器声音很响。', imageUrl: '/images/safety/alarm.png', kind: 'sentence', drillParts: ['The alarm', 'is loud'], difficulty: 1, tags: ['safety', 'sentence'] },

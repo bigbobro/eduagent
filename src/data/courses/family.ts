@@ -14,7 +14,7 @@ export const familyCourse: Course = {
     { id: 'sister', english: 'sister', chinese: '姐妹', imageUrl: '/images/family/sister.png', kind: 'word', drillParts: ['sis', 'ter'], difficulty: 2, tags: ['family'] },
     { id: 'brother', english: 'brother', chinese: '兄弟', imageUrl: '/images/family/brother.png', kind: 'word', drillParts: ['bro', 'ther'], difficulty: 2, tags: ['family'] },
     { id: 'baby', english: 'baby', chinese: '宝宝', imageUrl: '/images/family/baby.png', kind: 'word', drillParts: ['ba', 'by'], difficulty: 1, tags: ['family'] },
-    { id: 'aunt', english: 'aunt', chinese: '阿姨', imageUrl: '/images/family/aunt.png', kind: 'word', drillParts: ['aunt'], difficulty: 2, tags: ['family'] },
+    { id: 'aunt', english: 'aunt', chinese: '阿姨', imageUrl: '/images/family/aunt.png', kind: 'word', drillParts: ['aunt'], asrAliases: ['ant'], difficulty: 2, tags: ['family'] },
     { id: 'uncle', english: 'uncle', chinese: '叔叔', imageUrl: '/images/family/uncle.png', kind: 'word', drillParts: ['un', 'cle'], difficulty: 2, tags: ['family'] },
     { id: 'cousin', english: 'cousin', chinese: '表亲', imageUrl: '/images/family/cousin.png', kind: 'word', drillParts: ['cou', 'sin'], difficulty: 2, tags: ['family'] },
     { id: 'parents', english: 'parents', chinese: '父母', imageUrl: '/images/family/parents.png', kind: 'word', drillParts: ['par', 'ents'], difficulty: 2, tags: ['family'] },

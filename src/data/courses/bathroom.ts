@@ -17,7 +17,7 @@ export const bathroomCourse: Course = {
     { id: 'bath', english: 'bath', chinese: '洗澡', imageUrl: '/images/bathroom/bath.png', kind: 'word', drillParts: ["bath"], difficulty: 1, tags: ['bathroom'] },
     { id: 'shampoo', english: 'shampoo', chinese: '洗发露', imageUrl: '/images/bathroom/shampoo.png', kind: 'word', drillParts: ["sham","poo"], difficulty: 1, tags: ['bathroom'] },
     { id: 'paper', english: 'paper', chinese: '纸巾', imageUrl: '/images/bathroom/paper.png', kind: 'word', drillParts: ["pa","per"], difficulty: 1, tags: ['bathroom'] },
-    { id: 'sink', english: 'sink', chinese: '洗手池', imageUrl: '/images/bathroom/sink.png', kind: 'word', drillParts: ["sink"], difficulty: 1, tags: ['bathroom'] },
+    { id: 'sink', english: 'sink', chinese: '洗手池', imageUrl: '/images/bathroom/sink.png', kind: 'word', drillParts: ["sink"], asrAliases: ["sing"], difficulty: 1, tags: ['bathroom'] },
     { id: 'tub', english: 'tub', chinese: '浴缸', imageUrl: '/images/bathroom/tub.png', kind: 'word', drillParts: ["tub"], difficulty: 1, tags: ['bathroom'] },
     { id: 'sentence_soap', english: 'Wash hands with soap.', chinese: '用肥皂洗手。', imageUrl: '/images/bathroom/soap.png', kind: 'sentence', drillParts: ["Wash hands","with soap"], difficulty: 1, tags: ['bathroom', 'sentence'] },
     { id: 'sentence_towel', english: 'I need a clean towel.', chinese: '我需要一条干净的毛巾。', imageUrl: '/images/bathroom/towel.png', kind: 'sentence', drillParts: ["I need","a clean towel"], difficulty: 1, tags: ['bathroom', 'sentence'] },

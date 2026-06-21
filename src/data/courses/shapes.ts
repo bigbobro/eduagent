@@ -10,7 +10,7 @@ export const shapesCourse: Course = {
     { id: 'circle', english: 'circle', chinese: '圆形', imageUrl: '/images/shapes/circle.png', kind: 'word', drillParts: ['cir', 'cle'], difficulty: 1, tags: ['shapes'] },
     { id: 'square', english: 'square', chinese: '正方形', imageUrl: '/images/shapes/square.png', kind: 'word', drillParts: ['square'], difficulty: 1, tags: ['shapes'] },
     { id: 'triangle', english: 'triangle', chinese: '三角形', imageUrl: '/images/shapes/triangle.png', kind: 'word', drillParts: ['tri', 'an', 'gle'], difficulty: 2, tags: ['shapes'] },
-    { id: 'star', english: 'star', chinese: '星形', imageUrl: '/images/shapes/star.png', kind: 'word', drillParts: ['star'], difficulty: 1, tags: ['shapes'] },
+    { id: 'star', english: 'star', chinese: '星形', imageUrl: '/images/shapes/star.png', kind: 'word', drillParts: ['star'], asrAliases: ['store'], difficulty: 1, tags: ['shapes'] },
     { id: 'heart', english: 'heart', chinese: '心形', imageUrl: '/images/shapes/heart.png', kind: 'word', drillParts: ['heart'], difficulty: 1, tags: ['shapes'] },
     { id: 'rectangle', english: 'rectangle', chinese: '长方形', imageUrl: '/images/shapes/rectangle.png', kind: 'word', drillParts: ['rec', 'tan', 'gle'], difficulty: 2, tags: ['shapes'] },
     { id: 'oval', english: 'oval', chinese: '椭圆形', imageUrl: '/images/shapes/oval.png', kind: 'word', drillParts: ['o', 'val'], difficulty: 2, tags: ['shapes'] },

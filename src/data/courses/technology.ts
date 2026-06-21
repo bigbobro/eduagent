@@ -15,7 +15,7 @@ export const technologyCourse: Course = {
     { id: 'camera', english: 'camera', chinese: '相机', imageUrl: '/images/technology/camera.png', kind: 'word', drillParts: ['cam', 'er', 'a'], difficulty: 1, tags: ['technology'] },
     { id: 'headphones', english: 'headphones', chinese: '耳机', imageUrl: '/images/technology/headphones.png', kind: 'word', drillParts: ['head', 'phones'], difficulty: 1, tags: ['technology'] },
     { id: 'microphone', english: 'microphone', chinese: '麦克风', imageUrl: '/images/technology/microphone.png', kind: 'word', drillParts: ['mi', 'cro', 'phone'], difficulty: 2, tags: ['technology'] },
-    { id: 'speaker', english: 'speaker', chinese: '音箱', imageUrl: '/images/technology/speaker.png', kind: 'word', drillParts: ['speak', 'er'], difficulty: 1, tags: ['technology'] },
+    { id: 'speaker', english: 'speaker', chinese: '音箱', imageUrl: '/images/technology/speaker.png', kind: 'word', drillParts: ['speak', 'er'], asrAliases: ['speak'], difficulty: 1, tags: ['technology'] },
     { id: 'charger', english: 'charger', chinese: '充电器', imageUrl: '/images/technology/charger.png', kind: 'word', drillParts: ['charg', 'er'], difficulty: 1, tags: ['technology'] },
     { id: 'remote', english: 'remote', chinese: '遥控器', imageUrl: '/images/technology/remote.png', kind: 'word', drillParts: ['re', 'mote'], difficulty: 1, tags: ['technology'] },
     { id: 'battery', english: 'battery', chinese: '电池', imageUrl: '/images/technology/battery.png', kind: 'word', drillParts: ['bat', 'ter', 'y'], difficulty: 1, tags: ['technology'] },

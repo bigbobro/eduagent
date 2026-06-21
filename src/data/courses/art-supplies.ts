@@ -10,7 +10,7 @@ export const artSuppliesCourse: Course = {
     { id: 'paintbrush', english: 'paintbrush', chinese: '画笔', imageUrl: '/images/art-supplies/paintbrush.png', kind: 'word', drillParts: ['paint', 'brush'], difficulty: 1, tags: ['art-supplies'] },
     { id: 'palette', english: 'palette', chinese: '调色盘', imageUrl: '/images/art-supplies/palette.png', kind: 'word', drillParts: ['pal', 'ette'], difficulty: 2, tags: ['art-supplies'] },
     { id: 'easel', english: 'easel', chinese: '画架', imageUrl: '/images/art-supplies/easel.png', kind: 'word', drillParts: ['ea', 'sel'], difficulty: 2, tags: ['art-supplies'] },
-    { id: 'canvas', english: 'canvas', chinese: '画布', imageUrl: '/images/art-supplies/canvas.png', kind: 'word', drillParts: ['can', 'vas'], difficulty: 1, tags: ['art-supplies'] },
+    { id: 'canvas', english: 'canvas', chinese: '画布', imageUrl: '/images/art-supplies/canvas.png', kind: 'word', drillParts: ['can', 'vas'], asrAliases: ['candice'], difficulty: 1, tags: ['art-supplies'] },
     { id: 'marker', english: 'marker', chinese: '马克笔', imageUrl: '/images/art-supplies/marker.png', kind: 'word', drillParts: ['mark', 'er'], difficulty: 1, tags: ['art-supplies'] },
     { id: 'chalk', english: 'chalk', chinese: '粉笔', imageUrl: '/images/art-supplies/chalk.png', kind: 'word', drillParts: ['chalk'], difficulty: 1, tags: ['art-supplies'] },
     { id: 'clay', english: 'clay', chinese: '黏土', imageUrl: '/images/art-supplies/clay.png', kind: 'word', drillParts: ['clay'], difficulty: 1, tags: ['art-supplies'] },

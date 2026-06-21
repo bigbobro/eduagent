@@ -14,7 +14,7 @@ export const instrumentsCourse: Course = {
     { id: 'flute', english: 'flute', chinese: '长笛', imageUrl: '/images/instruments/flute.png', kind: 'word', drillParts: ["flute"], difficulty: 1, tags: ['instruments'] },
     { id: 'trumpet', english: 'trumpet', chinese: '小号', imageUrl: '/images/instruments/trumpet.png', kind: 'word', drillParts: ["trum","pet"], difficulty: 1, tags: ['instruments'] },
     { id: 'bell', english: 'bell', chinese: '小铃铛', imageUrl: '/images/instruments/bell.png', kind: 'word', drillParts: ["bell"], difficulty: 1, tags: ['instruments'] },
-    { id: 'harp', english: 'harp', chinese: '竖琴', imageUrl: '/images/instruments/harp.png', kind: 'word', drillParts: ["harp"], difficulty: 1, tags: ['instruments'] },
+    { id: 'harp', english: 'harp', chinese: '竖琴', imageUrl: '/images/instruments/harp.png', kind: 'word', drillParts: ["harp"], asrAliases: ["hop"], difficulty: 1, tags: ['instruments'] },
     { id: 'music', english: 'music', chinese: '音乐', imageUrl: '/images/instruments/music.png', kind: 'word', drillParts: ["mu","sic"], difficulty: 1, tags: ['instruments'] },
     { id: 'song', english: 'song', chinese: '歌曲', imageUrl: '/images/instruments/song.png', kind: 'word', drillParts: ["song"], difficulty: 1, tags: ['instruments'] },
     { id: 'sing', english: 'sing', chinese: '唱歌', imageUrl: '/images/instruments/sing.png', kind: 'word', drillParts: ["sing"], difficulty: 1, tags: ['instruments'] },

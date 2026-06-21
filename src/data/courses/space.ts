@@ -10,7 +10,7 @@ export const spaceCourse: Course = {
     { id: 'earth', english: 'earth', chinese: '地球', imageUrl: '/images/space/earth.png', kind: 'word', drillParts: ["earth"], difficulty: 1, tags: ['space'] },
     { id: 'moon', english: 'moon', chinese: '月亮', imageUrl: '/images/space/moon.png', kind: 'word', drillParts: ["moon"], difficulty: 1, tags: ['space'] },
     { id: 'sun', english: 'sun', chinese: '太阳', imageUrl: '/images/space/sun.png', kind: 'word', drillParts: ["sun"], difficulty: 1, tags: ['space'] },
-    { id: 'star', english: 'star', chinese: '星星', imageUrl: '/images/space/star.png', kind: 'word', drillParts: ["star"], difficulty: 1, tags: ['space'] },
+    { id: 'star', english: 'star', chinese: '星星', imageUrl: '/images/space/star.png', kind: 'word', drillParts: ["star"], asrAliases: ["store"], difficulty: 1, tags: ['space'] },
     { id: 'space', english: 'space', chinese: '太空', imageUrl: '/images/space/space.png', kind: 'word', drillParts: ["space"], difficulty: 1, tags: ['space'] },
     { id: 'rocket', english: 'rocket', chinese: '火箭', imageUrl: '/images/space/rocket.png', kind: 'word', drillParts: ["rock","et"], difficulty: 1, tags: ['space'] },
     { id: 'planet', english: 'planet', chinese: '行星', imageUrl: '/images/space/planet.png', kind: 'word', drillParts: ["plan","et"], difficulty: 1, tags: ['space'] },

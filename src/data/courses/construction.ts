@@ -9,7 +9,7 @@ export const constructionCourse: Course = {
   cards: [
     { id: 'brick', english: 'brick', chinese: '砖块', imageUrl: '/images/construction/brick.png', kind: 'word', drillParts: ['brick'], difficulty: 1, tags: ['construction'] },
     { id: 'cement', english: 'cement', chinese: '水泥', imageUrl: '/images/construction/cement.png', kind: 'word', drillParts: ['ce', 'ment'], difficulty: 2, tags: ['construction'] },
-    { id: 'ladder', english: 'ladder', chinese: '梯子', imageUrl: '/images/construction/ladder.png', kind: 'word', drillParts: ['lad', 'der'], difficulty: 1, tags: ['construction'] },
+    { id: 'ladder', english: 'ladder', chinese: '梯子', imageUrl: '/images/construction/ladder.png', kind: 'word', drillParts: ['lad', 'der'], asrAliases: ['letter'], difficulty: 1, tags: ['construction'] },
     { id: 'shovel', english: 'shovel', chinese: '铲子', imageUrl: '/images/construction/shovel.png', kind: 'word', drillParts: ['shov', 'el'], difficulty: 2, tags: ['construction'] },
     { id: 'bucket', english: 'bucket', chinese: '桶', imageUrl: '/images/construction/bucket.png', kind: 'word', drillParts: ['buck', 'et'], difficulty: 1, tags: ['construction'] },
     { id: 'helmet', english: 'helmet', chinese: '安全帽', imageUrl: '/images/construction/helmet.png', kind: 'word', drillParts: ['hel', 'met'], difficulty: 1, tags: ['construction'] },

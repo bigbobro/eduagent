@@ -7,7 +7,7 @@ export const travelCourse: Course = {
   targetAge: [3, 6],
   tone: 'lilac',
   cards: [
-    { id: 'suitcase', english: 'suitcase', chinese: '行李箱', imageUrl: '/images/travel/suitcase.png', kind: 'word', drillParts: ['suit', 'case'], difficulty: 1, tags: ['travel'] },
+    { id: 'suitcase', english: 'suitcase', chinese: '行李箱', imageUrl: '/images/travel/suitcase.png', kind: 'word', drillParts: ['suit', 'case'], asrAliases: ['seatcase'], difficulty: 1, tags: ['travel'] },
     { id: 'passport', english: 'passport', chinese: '护照', imageUrl: '/images/travel/passport.png', kind: 'word', drillParts: ['pass', 'port'], difficulty: 1, tags: ['travel'] },
     { id: 'ticket', english: 'ticket', chinese: '票', imageUrl: '/images/travel/ticket.png', kind: 'word', drillParts: ['tick', 'et'], difficulty: 1, tags: ['travel'] },
     { id: 'map', english: 'map', chinese: '地图', imageUrl: '/images/travel/map.png', kind: 'word', drillParts: ['map'], difficulty: 1, tags: ['travel'] },

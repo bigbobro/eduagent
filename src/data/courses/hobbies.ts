@@ -15,7 +15,7 @@ export const hobbiesCourse: Course = {
     { id: 'swimming', english: 'swimming', chinese: '游泳', imageUrl: '/images/hobbies/swimming.png', kind: 'word', drillParts: ["swim","ming"], difficulty: 1, tags: ['hobbies'] },
     { id: 'running', english: 'running', chinese: '跑步', imageUrl: '/images/hobbies/running.png', kind: 'word', drillParts: ["run","ning"], difficulty: 1, tags: ['hobbies'] },
     { id: 'writing', english: 'writing', chinese: '写字', imageUrl: '/images/hobbies/writing.png', kind: 'word', drillParts: ["writ","ing"], difficulty: 1, tags: ['hobbies'] },
-    { id: 'skating', english: 'skating', chinese: '滑冰', imageUrl: '/images/hobbies/skating.png', kind: 'word', drillParts: ["skat","ing"], difficulty: 1, tags: ['hobbies'] },
+    { id: 'skating', english: 'skating', chinese: '滑冰', imageUrl: '/images/hobbies/skating.png', kind: 'word', drillParts: ["skat","ing"], asrAliases: ["gating"], difficulty: 1, tags: ['hobbies'] },
     { id: 'painting', english: 'painting', chinese: '涂色', imageUrl: '/images/hobbies/painting.png', kind: 'word', drillParts: ["paint","ing"], difficulty: 1, tags: ['hobbies'] },
     { id: 'biking', english: 'biking', chinese: '骑车', imageUrl: '/images/hobbies/biking.png', kind: 'word', drillParts: ["bik","ing"], difficulty: 1, tags: ['hobbies'] },
     { id: 'playing', english: 'playing', chinese: '玩耍', imageUrl: '/images/hobbies/playing.png', kind: 'word', drillParts: ["play","ing"], difficulty: 1, tags: ['hobbies'] },

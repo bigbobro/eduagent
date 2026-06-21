@@ -9,7 +9,7 @@ export const natureCourse: Course = {
   cards: [
     { id: 'sun', english: 'sun', chinese: '太阳', imageUrl: '/images/nature/sun.png', kind: 'word', drillParts: ["sun"], difficulty: 1, tags: ['nature'] },
     { id: 'moon', english: 'moon', chinese: '月亮', imageUrl: '/images/nature/moon.png', kind: 'word', drillParts: ["moon"], difficulty: 1, tags: ['nature'] },
-    { id: 'star', english: 'star', chinese: '星星', imageUrl: '/images/nature/star.png', kind: 'word', drillParts: ["star"], difficulty: 1, tags: ['nature'] },
+    { id: 'star', english: 'star', chinese: '星星', imageUrl: '/images/nature/star.png', kind: 'word', drillParts: ["star"], asrAliases: ["store"], difficulty: 1, tags: ['nature'] },
     { id: 'tree', english: 'tree', chinese: '大树', imageUrl: '/images/nature/tree.png', kind: 'word', drillParts: ["tree"], difficulty: 1, tags: ['nature'] },
     { id: 'flower', english: 'flower', chinese: '花朵', imageUrl: '/images/nature/flower.png', kind: 'word', drillParts: ["flow","er"], difficulty: 1, tags: ['nature'] },
     { id: 'grass', english: 'grass', chinese: '草地', imageUrl: '/images/nature/grass.png', kind: 'word', drillParts: ["grass"], difficulty: 1, tags: ['nature'] },

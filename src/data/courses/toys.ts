@@ -16,7 +16,7 @@ export const toysCourse: Course = {
     { id: 'car', english: 'car', chinese: '小汽车', imageUrl: '/images/toys/car.png', kind: 'word', drillParts: ['car'], difficulty: 1, tags: ['toys'] },
     { id: 'robot', english: 'robot', chinese: '机器人', imageUrl: '/images/toys/robot.png', kind: 'word', drillParts: ['ro', 'bot'], difficulty: 2, tags: ['toys'] },
     { id: 'puzzle', english: 'puzzle', chinese: '拼图', imageUrl: '/images/toys/puzzle.png', kind: 'word', drillParts: ['puz', 'zle'], difficulty: 2, tags: ['toys'] },
-    { id: 'yoyo', english: 'yoyo', chinese: '悠悠球', imageUrl: '/images/toys/yoyo.png', kind: 'word', drillParts: ['yo', 'yo'], difficulty: 1, tags: ['toys'] },
+    { id: 'yoyo', english: 'yoyo', chinese: '悠悠球', imageUrl: '/images/toys/yoyo.png', kind: 'word', drillParts: ['yo', 'yo'], asrAliases: ['悠悠'], difficulty: 1, tags: ['toys'] },
     { id: 'drum', english: 'drum', chinese: '小鼓', imageUrl: '/images/toys/drum.png', kind: 'word', drillParts: ['drum'], difficulty: 1, tags: ['toys'] },
     { id: 'plane', english: 'plane', chinese: '玩具飞机', imageUrl: '/images/toys/plane.png', kind: 'word', drillParts: ['plane'], difficulty: 1, tags: ['toys'] },
     { id: 'sentence_ball', english: 'I have a ball.', chinese: '我有一个球。', imageUrl: '/images/toys/ball.png', kind: 'sentence', drillParts: ['I have', 'a ball'], difficulty: 1, tags: ['toys', 'sentence'] },
