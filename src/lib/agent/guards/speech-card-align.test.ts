@@ -26,7 +26,7 @@ describe('speechCardAlign', () => {
     };
     const ctx = makeCtx({
       speech: '再跟老师说一次，dog！',
-      actions: [{ tool: 'show_card', params: { card_id: 'bird' } }],
+      forceCardId: 'bird',
       memory,
     });
     const result = speechCardAlign(ctx);
@@ -38,30 +38,30 @@ describe('speechCardAlign', () => {
   it('does NOT override when speech already mentions the forceCardId card', () => {
     const ctx = makeCtx({
       speech: '我们看这只小鸟 bird！',
-      actions: [{ tool: 'show_card', params: { card_id: 'bird' } }],
+      forceCardId: 'bird',
     });
     const result = speechCardAlign(ctx);
     expect(result.speech).toBe(ctx.speech);
   });
 
-  it('does NOT override when actions list has no word show_card', () => {
+  it('does NOT override when no forceCardId is set', () => {
     const ctx = makeCtx({
       speech: '很好！',
-      actions: [],
+      forceCardId: undefined,
     });
     const result = speechCardAlign(ctx);
     expect(result.speech).toBe(ctx.speech);
   });
 
-  it('overrides when speech mentions no word card at all but action points to a specific card', () => {
-    // speech is generic, actions force bird — since memory.currentCardId is dog (different), override
+  it('overrides when speech mentions no word card at all but forceCardId points to a specific card', () => {
+    // speech is generic, forceCardId is bird — since memory.currentCardId is dog (different), override
     const memory = {
       ...initializeCardProgress(createMemory(), animalsCourse),
       currentCardId: 'dog',
     };
     const ctx = makeCtx({
       speech: '做得很好！',
-      actions: [{ tool: 'show_card', params: { card_id: 'bird' } }],
+      forceCardId: 'bird',
       memory,
     });
     const result = speechCardAlign(ctx);

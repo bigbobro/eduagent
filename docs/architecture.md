@@ -262,6 +262,7 @@ interface GuardContext {
   course: Course;
   asrText?: string;        // 孩子真实说的 raw ASR(仅用于 R2 字面计数);系统轮传 '' 不计
   currentPhase: PhaseName;
+  forceCardId?: string;    // normalizeActions 选定的权威词卡;由 normalizeActions 写、speechCardAlign 读
 }
 ```
 
@@ -273,10 +274,10 @@ interface GuardContext {
 |------|-------|------|------|
 | 1 | `closingGuard` | `closing-guard.ts` | R4/R6:speech 含未学词时替换安全模板;`memory.currentWord` 与 `state_update.current_word` 豁免 |
 | 2 | `prematureClosingGuard` | `premature-closing-guard.ts` | R-B:interactive 阶段说"下次再来"等软关闭词时覆盖 speech 并强推下一个 untouched 词卡 |
-| 3 | `normalizeActions` | `normalize-actions.ts` | R-C wrapper:调 `normalizeAssistantActions(memory.ts)`,服务端权威选牌 |
-| 4 | `speechCardAlign` | `speech-card-align.ts` | speech 提到的词卡与 normalizeActions 结果不一致时替换 speech |
+| 3 | `normalizeActions` | `normalize-actions.ts` | R-C wrapper:调 `normalizeAssistantActions(memory.ts)`,服务端权威选牌,并把选定词卡写入 `ctx.forceCardId` |
+| 4 | `speechCardAlign` | `speech-card-align.ts` | 读 `ctx.forceCardId`,speech 未提到该卡却提到别的词卡时替换 speech |
 
-**为什么顺序敏感**:guard 4(`speechCardAlign`)读取 guard 3(`normalizeActions`)写入的 `ctx.actions` 来确定 forceCardId。如果顺序颠倒,speechCardAlign 会读到 normalize 前的 LLM 原始 actions,得出错误的对齐判断。
+**为什么顺序敏感**:guard 4(`speechCardAlign`)读取 guard 3(`normalizeActions`)写入的 `ctx.forceCardId`(显式字段,不再倒扫 `ctx.actions` 自行再推导词卡)。如果顺序颠倒,speechCardAlign 读到的 `forceCardId` 为空,直接放行不做对齐。
 
 ### runPipeline 失败策略
 

@@ -22,6 +22,8 @@ describe('normalizeActions wrapper', () => {
     expect(Array.isArray(result.actions)).toBe(true);
     // With cat as first uncleared and the LLM emitting show_card:cat, normalize keeps it
     expect(result.actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'cat')).toBe(true);
+    // and exposes the selected card explicitly for speechCardAlign
+    expect(result.forceCardId).toBe('cat');
   });
 
   it('passes asrText through to normalizeAssistantActions for R2 hit detection', () => {
@@ -49,5 +51,6 @@ describe('normalizeActions wrapper', () => {
     const result = normalizeActions(ctx);
     // After 2nd R2 hit, dog is cleared, normalize should advance to bird
     expect(result.actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'bird')).toBe(true);
+    expect(result.forceCardId).toBe('bird');
   });
 });

@@ -12,6 +12,9 @@ export interface GuardContext {
   course: Course;
   asrText?: string;
   currentPhase: PhaseName;
+  // The word card normalizeActions selected as authoritative this turn (R-C).
+  // Set by normalizeActions; read by speechCardAlign so it does not re-derive the card.
+  forceCardId?: string;
 }
 
 export type GuardFn = (ctx: GuardContext) => GuardContext;
@@ -23,11 +26,12 @@ export type GuardFn = (ctx: GuardContext) => GuardContext;
  * ORDER IS SENSITIVE — do not reorder without understanding dependencies:
  *   1. closingGuard          — R4/R6: replace speech that lists unlearned words
  *   2. prematureClosingGuard — R-B: replace soft-closing phrases when cards remain
- *   3. normalizeActions      — R-C: server-authoritative card selection
- *   4. speechCardAlign       — align speech to the card selected by normalizeActions
+ *   3. normalizeActions      — R-C: server-authoritative card selection; sets ctx.forceCardId
+ *   4. speechCardAlign       — align speech to ctx.forceCardId
  *
  * normalizeActions must run before speechCardAlign (speechCardAlign reads the
- * normalized action list to determine the forceCardId for alignment).
+ * forceCardId that normalizeActions writes to ctx — an explicit field, not a
+ * re-scan of the action list).
  */
 export function runPipeline(ctx: GuardContext, guards: GuardFn[]): GuardContext {
   return guards.reduce((acc, guard) => {
