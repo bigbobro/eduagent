@@ -359,12 +359,14 @@ function applyAttemptAssessment(
   return memory;
 }
 
-function getR2MatchTargets(card: WordCard): string[] {
+// Exported for the asr-confusables coverage guard (src/data/courses/asr-confusables.test.ts),
+// so it checks alias coverage with the exact production R2 matching semantics.
+export function getR2MatchTargets(card: WordCard): string[] {
   const candidates = [card.english, ...(card.asrAliases || [])];
   return Array.from(new Set(candidates.map(normalizeR2MatchText).filter(Boolean)));
 }
 
-function normalizeR2MatchText(value: string): string {
+export function normalizeR2MatchText(value: string): string {
   return Array.from(value.toLowerCase())
     .filter((char) => /[a-z0-9]/.test(char) || /[\u3400-\u9fff]/.test(char))
     .join('');

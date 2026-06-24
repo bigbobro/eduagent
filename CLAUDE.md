@@ -156,7 +156,7 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 ## 常见操作速查
 
 - 添加新课程:参考 `src/data/courses/food.ts`;在 `src/data/courses/<id>.ts` 新建 `Course` 对象,append 到 `src/data/courses/index.ts` 的 `allCourses` 数组,并把 id 加进 `course-data.test.ts` 的 catalog 列表。**结构校验是统一的**——`course-data.test.ts` 会对 `allCourses` 跑 `validateCourse()`(`src/data/courses/course-validator.ts`),无需再写课程专属的结构测试。只有当你想钉死某门课的文案(tone / caption / 句子)时,才往 `CONTENT_SPOT_CHECKS` 加一条 spot-check。
-- **造课必查同音/易误识词(强制 checklist)**:R2 切卡靠 raw ASR 字面命中目标词,凡是 ASR 大概率听错的目标词不补 `asrAliases` 就会**永远过不去**(踩坑案例:`knight` 被听成 `night`/`夜晚`;`bee` 被听成字母 `B`)。判定不能凭感觉,**用探针实测**:`pnpm tsx scripts/asr-word-scan.ts --only <courseId>`(TTS 标准发音→ASR,直连 Doubao,需 `.env.local` 凭据)。脚本报 MISS 的词,把它实际吐出的文本(英文同音词 / 字母 / 必要时中文)加进该卡 `asrAliases`。注意:① 中文别名要谨慎——加了等于允许孩子说中文也算对,只有"连正确英文发音都被转成中文"才加;② 别名是英文常见短 token(如裸 `b`/`i`)时有轻微误命中风险(仅在该卡当前轮、且需 2 次命中才 clear,风险可控)。探针只覆盖"标准发音被听错"这一类,孩子发音不准仍需真人课验证。
+- **造课必查同音/易误识词(强制 checklist)**:R2 切卡靠 raw ASR 字面命中目标词,凡是 ASR 大概率听错的目标词不补 `asrAliases` 就会**永远过不去**(踩坑案例:`knight` 被听成 `night`/`夜晚`;`bee` 被听成字母 `B`)。判定不能凭感觉,**用探针实测**:`pnpm tsx scripts/asr-word-scan.ts --only <courseId>`(TTS 标准发音→ASR,直连 Doubao,需 `.env.local` 凭据)。脚本报 MISS 的词,把它实际吐出的文本(英文同音词 / 字母 / 必要时中文)加进该卡 `asrAliases`。注意:① 中文别名要谨慎——加了等于允许孩子说中文也算对,只有"连正确英文发音都被转成中文"才加;② 别名是英文常见短 token(如裸 `b`/`i`)时有轻微误命中风险(仅在该卡当前轮、且需 2 次命中才 clear,风险可控)。探针只覆盖"标准发音被听错"这一类,孩子发音不准仍需真人课验证。把每个 MISS 记进 `src/data/courses/asr-confusables.ts` 并补对应卡 `asrAliases`;`asr-confusables.test.ts` 会用生产 R2 语义断言所有记录的 MISS 都被覆盖(跨全部课程)。
 - 切换音色:改 `.env.local` 的 `DOUBAO_TTS_DEFAULT_SPEAKER`,重启 dev
 - 临时打点测延迟:参考 commit `2ea7b89` 之前的 `[bench]` 字段,验收后必须删
 - 排查"按住说话没识别":先看 dev server 终端 `[asr xxxxxxxx]` 行,看 pcmCount / finalSeen
