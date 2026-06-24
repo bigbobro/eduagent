@@ -169,7 +169,9 @@ export function normalizeAssistantActions(
   response: AgentResponse,
   rawAsrText?: string
 ): ToolAction[] {
-  const assessedMemory = applyAttemptAssessment(memory, course, response, rawAsrText);
+  // Silent: this derivation only needs forceCardId and discards assessedMemory; the
+  // authoritative pass (commitAssistantStreamResult) emits the R-C logs once per turn.
+  const assessedMemory = applyAttemptAssessment(memory, course, response, rawAsrText, true);
   const wordCardIds = new Set(course.cards.filter((c) => c.kind === 'word').map((c) => c.id));
   const findFirstUncleared = (excludeId: string = '') => course.teachingHints.newCardIds.find(
     (id) => wordCardIds.has(id) && id !== excludeId && assessedMemory.cardProgress[id] !== 'cleared',
@@ -268,7 +270,13 @@ function applyAttemptAssessment(
   course: Course,
   response: AgentResponse,
   rawAsrText?: string,
+  silent: boolean = false,
 ): LessonMemory {
+  // `silent` suppresses R-C logs for the normalizeAssistantActions derivation pass,
+  // which discards its result (it only needs forceCardId). The authoritative pass in
+  // commitAssistantStreamResult logs. This keeps the read-only guard pipeline intact
+  // while emitting each clearance/hit log exactly once per turn.
+  const warn: typeof console.warn = silent ? () => {} : console.warn;
   const targetCardId = memory.currentCardId;
   if (!targetCardId) return memory;
   const targetCard = course.cards.find((c) => c.id === targetCardId);
@@ -303,10 +311,10 @@ function applyAttemptAssessment(
       if (targetCard.english) {
         wordsLearned = mergeUnique(memory.wordsLearned, [targetCard.english]);
       }
-      console.warn('[memory] R-C cleared (2nd R2 hit):', targetCardId);
+      warn('[memory] R-C cleared (2nd R2 hit):', targetCardId);
     } else {
       progress[targetCardId] = 'attempted';
-      console.warn('[memory] R-C hit', { card: targetCardId, count: nextCount });
+      warn('[memory] R-C hit', { card: targetCardId, count: nextCount });
     }
     memory = updateWordPerformance(memory, targetCard.english, true);
     return {
@@ -323,7 +331,7 @@ function applyAttemptAssessment(
   const assessment = response.state_update.attempt_assessment;
   if (!assessment || !assessment.card_id) return memory;
   if (assessment.card_id !== targetCardId) {
-    console.warn('[memory] applyAttemptAssessment: assessment.card_id', assessment.card_id, '!= currentCardId', targetCardId, '— ignoring');
+    warn('[memory] applyAttemptAssessment: assessment.card_id', assessment.card_id, '!= currentCardId', targetCardId, '— ignoring');
     return memory;
   }
   if (memory.cardProgress[targetCardId] === 'cleared') {
@@ -337,7 +345,7 @@ function applyAttemptAssessment(
   if (assessment.result === 'correct') {
     // LLM said correct but ASR did not contain the target token. Don't downgrade further
     // than current state; this is likely an LLM mis-judgment. Leave streak as-is.
-    console.warn('[memory] R-C: LLM correct but ASR lacks target — no progress credited. asr=', rawAsrText, 'target=', targetTokens.join('|'));
+    warn('[memory] R-C: LLM correct but ASR lacks target — no progress credited. asr=', rawAsrText, 'target=', targetTokens.join('|'));
     return memory;
   }
   if (assessment.result === 'close' || assessment.result === 'wrong') {
