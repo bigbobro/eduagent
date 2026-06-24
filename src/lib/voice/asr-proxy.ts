@@ -174,7 +174,11 @@ function dedupeWords(words: string[]): string[] {
   return result;
 }
 
-function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
+interface AsrBridgeOptions {
+  createUpstream?: (url: string, options: { headers: Record<string, string> }) => WsClient;
+}
+
+export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: AsrBridgeOptions = {}): void {
   const requestId = randomUUID();
   const tag = `[asr ${requestId.slice(0, 8)}]`;
   console.log(`${tag} bridge open`);
@@ -186,7 +190,7 @@ function bridge(clientWs: WsClient, session: AsrSessionInfo): void {
     'X-Api-Sequence': '-1',
   };
 
-  const upstream = new WsClient(DOUBAO_ASR_URL, { headers, handshakeTimeout: 10000 });
+  const upstream = options.createUpstream?.(DOUBAO_ASR_URL, { headers }) ?? new WsClient(DOUBAO_ASR_URL, { headers, handshakeTimeout: 10000 });
   let sequence = 1;
   let upstreamReady = false;
   let closed = false;
