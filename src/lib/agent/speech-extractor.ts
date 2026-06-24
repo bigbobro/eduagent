@@ -12,11 +12,6 @@ type State =
 
 const SPEECH_KEY = 'speech';
 
-export interface FeedResult {
-  speechDelta?: string;
-  complete?: boolean;
-}
-
 export interface ExtractedResult {
   speech: string;
   actions: AgentResponse['actions'];
@@ -32,10 +27,11 @@ export class StreamingSpeechExtractor {
   private speech = '';
   private unicodeBuf = '';
 
-  feed(chunk: string): FeedResult {
+  // Accumulates the raw buffer (for finalize's JSON.parse) and incrementally decodes
+  // the speech value into this.speech as a fallback for when JSON.parse fails. The
+  // result is consumed only via finalize(); feed() itself returns nothing.
+  feed(chunk: string): void {
     this.buffer += chunk;
-    let speechDelta = '';
-    let complete = false;
 
     for (let i = 0; i < chunk.length; i++) {
       const c = chunk[i];
@@ -97,11 +93,9 @@ export class StreamingSpeechExtractor {
         case 'IN_STRING':
           if (c === '"') {
             this.state = 'DONE';
-            complete = true;
           } else if (c === '\\') {
             this.state = 'IN_STRING_ESCAPE';
           } else {
-            speechDelta += c;
             this.speech += c;
           }
           break;
@@ -112,7 +106,6 @@ export class StreamingSpeechExtractor {
             this.unicodeBuf = '';
           } else {
             const ch = decodeSimpleEscape(c);
-            speechDelta += ch;
             this.speech += ch;
             this.state = 'IN_STRING';
           }
@@ -122,7 +115,6 @@ export class StreamingSpeechExtractor {
           this.unicodeBuf += c;
           if (this.unicodeBuf.length === 4) {
             const ch = String.fromCharCode(parseInt(this.unicodeBuf, 16));
-            speechDelta += ch;
             this.speech += ch;
             this.state = 'IN_STRING';
           }
@@ -133,11 +125,6 @@ export class StreamingSpeechExtractor {
           break;
       }
     }
-
-    const result: FeedResult = {};
-    if (speechDelta) result.speechDelta = speechDelta;
-    if (complete) result.complete = true;
-    return result;
   }
 
   private skipUntilStringEnd(chunk: string, start: number): number {

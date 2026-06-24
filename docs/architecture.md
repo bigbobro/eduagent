@@ -325,7 +325,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 | 决策 | 选择 | 为什么 |
 |------|------|--------|
-| 流式 JSON 提取 | `SpeechExtractor` 状态机解析单个 LLM 响应;`finalize()` 在整段 JSON 可解析时优先用解析出的 `speech` | 节省一次 LLM 调用 + 首字延迟最优;约 100 行。skip 助手只扫当前 chunk,值跨 SSE chunk 边界会丢流式 speech,故 finalize 以完整 buffer 为权威(流式 delta 当前仅作潜在优化,未入链) |
+| 流式 JSON 提取 | `SpeechExtractor` 状态机解析单个 LLM 响应;`finalize()` 在整段 JSON 可解析时优先用解析出的 `speech` | 节省一次 LLM 调用;约 100 行。skip 助手只扫当前 chunk,值跨 SSE chunk 边界会丢流式 speech,故 finalize 以完整 buffer 为权威。`feed()` 只累积 buffer 与 `this.speech`(供 `JSON.parse` 失败时兜底),不再产出无人消费的流式 speech delta(原 `FeedResult`/`speechDelta`/`complete` 已删) |
 | TTS 音色 | 固定 `seed-tts-2.0-standard` + Tina老师2.0 + 缓存 | 稳定性优先,避免 expressive 抽卡;开场白 / 提示语 100% 一致 |
 | 不做客户端切句 | LLM token 直接透传 TTS | 豆包文档建议"更自然、情绪更饱满" |
 | 回声抑制 | 浏览器 getUserMedia 三标志位 | 简单,无服务端 DSP |

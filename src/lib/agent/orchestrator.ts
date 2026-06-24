@@ -15,18 +15,15 @@ export function streamUserInputToSSE(
   const ac = new AbortController();
 
   const sidTag = sessionId.slice(0, 8);
-  let speechBuf = '';
 
   return new ReadableStream({
     async start(controller) {
       try {
         for await (const ev of streamUserInput(sessionId, userText, asrResult, ac.signal, rawAsrText)) {
           if (ev.type === 'speech-delta') {
-            speechBuf += ev.text;
-          } else if (ev.type === 'speech-end') {
-            const s = speechBuf.replace(/\s+/g, ' ').trim();
+            // session yields the whole speech as a single delta; log it directly.
+            const s = ev.text.replace(/\s+/g, ' ').trim();
             console.log(`[agent ${sidTag}] speech="${s.slice(0, 120)}${s.length > 120 ? '…' : ''}"`);
-            speechBuf = '';
           } else if (ev.type === 'actions') {
             for (const a of ev.actions) {
               if (a.tool === 'show_card') {

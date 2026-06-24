@@ -1,58 +1,48 @@
 import { describe, it, expect } from 'vitest';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 
-function feedAll(extractor: StreamingSpeechExtractor, chunks: string[]): string {
-  let speech = '';
-  for (const c of chunks) {
-    const r = extractor.feed(c);
-    if (r.speechDelta) speech += r.speechDelta;
-  }
-  return speech;
+function feedChunks(extractor: StreamingSpeechExtractor, chunks: string[]): void {
+  for (const c of chunks) extractor.feed(c);
+}
+
+function extractSpeech(chunks: string[]): string {
+  const ex = new StreamingSpeechExtractor();
+  feedChunks(ex, chunks);
+  return ex.finalize().speech;
 }
 
 describe('StreamingSpeechExtractor', () => {
   it('extracts a simple speech field across chunks', () => {
-    const ex = new StreamingSpeechExtractor();
-    const out = feedAll(ex, [
+    expect(extractSpeech([
       '{"speech": "Hel',
       'lo! Look at',
       ' this. It\'s a boat!"',
       ', "actions": []}',
-    ]);
-    expect(out).toBe("Hello! Look at this. It's a boat!");
+    ])).toBe("Hello! Look at this. It's a boat!");
   });
 
   it('handles escape sequences \\" \\\\ \\n', () => {
-    const ex = new StreamingSpeechExtractor();
-    const out = feedAll(ex, ['{"speech":"a\\"b\\\\c\\nd"}']);
-    expect(out).toBe('a"b\\c\nd');
+    expect(extractSpeech(['{"speech":"a\\"b\\\\c\\nd"}'])).toBe('a"b\\c\nd');
   });
 
   it('handles \\uXXXX escapes', () => {
-    const ex = new StreamingSpeechExtractor();
-    const out = feedAll(ex, ['{"speech":"hi \\u4f60\\u597d"}']);
-    expect(out).toBe('hi 你好');
+    expect(extractSpeech(['{"speech":"hi \\u4f60\\u597d"}'])).toBe('hi 你好');
   });
 
   it('extracts speech even when actions appears first in JSON', () => {
-    const ex = new StreamingSpeechExtractor();
-    const out = feedAll(ex, [
+    expect(extractSpeech([
       '{"actions": [{"tool":"show_card","params":{"card_id":"car"}}], ',
       '"speech": "看小汽车!"}',
-    ]);
-    expect(out).toBe('看小汽车!');
+    ])).toBe('看小汽车!');
   });
 
   it('handles the speech key being split across chunks', () => {
-    const ex = new StreamingSpeechExtractor();
-    const out = feedAll(ex, ['{"sp', 'eec', 'h"', ': ', '"hi"}']);
-    expect(out).toBe('hi');
+    expect(extractSpeech(['{"sp', 'eec', 'h"', ': ', '"hi"}'])).toBe('hi');
   });
 
   it('finalize parses the full JSON for actions/state_update', () => {
     const ex = new StreamingSpeechExtractor();
-    const full = '{"speech":"hi","actions":[{"tool":"show_card","params":{"card_id":"car"}}],"state_update":{"current_word":"car"}}';
-    feedAll(ex, [full]);
+    feedChunks(ex, ['{"speech":"hi","actions":[{"tool":"show_card","params":{"card_id":"car"}}],"state_update":{"current_word":"car"}}']);
     const result = ex.finalize();
     expect(result.actions).toEqual([{ tool: 'show_card', params: { card_id: 'car' } }]);
     expect(result.state_update).toEqual({ current_word: 'car' });
@@ -60,46 +50,42 @@ describe('StreamingSpeechExtractor', () => {
 
   it('finalize on malformed JSON returns whatever speech was extracted with empty actions', () => {
     const ex = new StreamingSpeechExtractor();
-    feedAll(ex, ['{"speech":"hi","actions":[bad']);
+    feedChunks(ex, ['{"speech":"hi","actions":[bad']);
     const result = ex.finalize();
-    expect(result.speech).toBe('hi');
+    expect(result.speech).toBe('hi'); // from the streamed this.speech fallback
     expect(result.actions).toEqual([]);
     expect(result.malformed).toBe(true);
   });
 
-  it('does not yield from a non-speech string field that looks similar', () => {
+  it('finalize fallback decodes escapes from the streamed buffer on malformed JSON', () => {
+    // Exercises the kept IN_STRING_ESCAPE accumulation: JSON.parse fails, so finalize
+    // must return this.speech with the escape already decoded.
     const ex = new StreamingSpeechExtractor();
-    const out = feedAll(ex, ['{"speechx":"NO","speech":"YES"}']);
-    expect(out).toBe('YES');
+    feedChunks(ex, ['{"speech":"a\\nb","actions":[bad']);
+    const result = ex.finalize();
+    expect(result.speech).toBe('a\nb');
+    expect(result.malformed).toBe(true);
   });
 
-  it('marks complete: true when speech field is fully closed', () => {
-    const ex = new StreamingSpeechExtractor();
-    let complete = false;
-    for (const c of ['{"speech":"hi"', ',"actions":[]}']) {
-      const r = ex.feed(c);
-      if (r.complete) complete = true;
-    }
-    expect(complete).toBe(true);
+  it('does not extract from a non-speech string field that looks similar', () => {
+    expect(extractSpeech(['{"speechx":"NO","speech":"YES"}'])).toBe('YES');
   });
 
-  // bug 3: a non-speech value split across a feed() chunk boundary derails the streaming parser
-  // (skip helpers only scan the current chunk), but finalize() must still recover the speech from
-  // the fully-parsed buffer.
+  // bug 3: a non-speech value split across a feed() chunk boundary derails the streaming
+  // scanner (skip helpers only scan the current chunk), but finalize() must still recover
+  // the speech from the fully-parsed buffer.
   it('recovers speech via finalize when a nested value is split across a chunk boundary', () => {
     const ex = new StreamingSpeechExtractor();
-    const streamed = feedAll(ex, ['{"state_update":{"evidence":"abc', 'def"},"speech":"WORLD"}']);
-    expect(streamed).toBe(''); // streaming parser lost it
+    feedChunks(ex, ['{"state_update":{"evidence":"abc', 'def"},"speech":"WORLD"}']);
     const result = ex.finalize();
-    expect(result.speech).toBe('WORLD'); // ...but finalize recovers it
+    expect(result.speech).toBe('WORLD');
     expect(result.malformed).toBeUndefined();
   });
 
   it('finalize prefers the parsed speech when a string value is split across a boundary', () => {
     const ex = new StreamingSpeechExtractor();
-    feedAll(ex, ['{"x":"a\\', '"b","speech":"ZZZ"}']);
-    const result = ex.finalize();
-    expect(result.speech).toBe('ZZZ');
+    feedChunks(ex, ['{"x":"a\\', '"b","speech":"ZZZ"}']);
+    expect(ex.finalize().speech).toBe('ZZZ');
   });
 });
 
