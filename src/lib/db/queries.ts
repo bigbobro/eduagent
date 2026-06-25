@@ -16,6 +16,18 @@ export function finishLessonLog(id: string, interactionCount: number, tokenUsage
   ).run(new Date().toISOString(), interactionCount, JSON.stringify(tokenUsage), id);
 }
 
+// Incremental finalization: bump end_time + interaction_count on every committed turn so a
+// lesson whose client never sends action:'end' (tab close / refresh / crash) still has a
+// non-NULL end_time — otherwise stats count its duration as 0. The graceful finishLessonLog
+// stays the final flush (it also writes token_usage). end_time IS NULL is not used as a
+// liveness flag anywhere, so writing it mid-lesson is safe.
+export function touchLessonLog(id: string, interactionCount: number): void {
+  const db = getDb();
+  db.prepare(
+    'UPDATE lesson_logs SET end_time = ?, interaction_count = ? WHERE id = ?'
+  ).run(new Date().toISOString(), interactionCount, id);
+}
+
 export function insertInteraction(lessonId: string, log: InteractionLog): void {
   const db = getDb();
   db.prepare(

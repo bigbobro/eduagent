@@ -552,6 +552,8 @@ voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonControll
 
 `/api/progress` / `/api/sessions` / `/api/stats` 是只读业务接口,但会在查询前调用 `ensureDatabaseInitialized()` 跑 SQLite migrations。这样 fresh checkout 或临时 `DATABASE_PATH` 不需要先跑一节课或命中 `/api/chat`。当前 migration v1 创建 `lesson_logs` / `interaction_logs` / `word_performance`,并在 `schema_migrations` 写入版本 marker;已有本地 DB 若缺少 marker,会幂等补写而不删除课堂数据。
 
+**课堂结算是增量的**:`lesson_logs.end_time` 现在由 `touchLessonLog()` 在**每一轮提交时**写(`commitTurn` 的消息轮 + `recordQuizAnswer` 的 quiz 轮),而不是只靠优雅结课的 `finishLessonLog()`(`action:'end'`)。这样关 tab / 刷新 / 崩溃 / 断网都不会让 `end_time` 永久 NULL —— 否则 `stats.durationMs` 会把整节课时长算成 0。`finishLessonLog()` 保留为优雅结课的最终 flush(额外写 `token_usage`)。`end_time IS NULL` 不被任何地方当"进行中"标志,所以课中写它是安全的。
+
 ### Mastery 派生
 
 ```ts

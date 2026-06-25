@@ -13,7 +13,7 @@ import {
 import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/mimo/llm';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
-import { createLessonLog, finishLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
+import { createLessonLog, finishLessonLog, touchLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
 import { GuardContext, runPipeline } from './guards/index';
 import { closingGuard } from './guards/closing-guard';
 import { prematureClosingGuard } from './guards/premature-closing-guard';
@@ -75,6 +75,7 @@ export function recordQuizAnswer(
       llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
     },
   });
+  touchLessonLog(session.id, session.memory.totalInteractions);
   return true;
 }
 
@@ -286,6 +287,8 @@ function commitTurn(
       tts: { latency: 0, characters: ctx.speech.length },
     },
   });
+  // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time.
+  touchLessonLog(session.id, session.memory.totalInteractions);
 }
 
 function getTotalAttempts(memory: LessonMemory): number {

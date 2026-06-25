@@ -5,6 +5,7 @@ import type { StreamEvent } from '@/lib/mimo/llm';
 vi.mock('@/lib/db/queries', () => ({
   createLessonLog: vi.fn(),
   finishLessonLog: vi.fn(),
+  touchLessonLog: vi.fn(),
   insertInteraction: vi.fn(),
   upsertWordPerformance: vi.fn(),
 }));

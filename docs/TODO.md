@@ -47,7 +47,7 @@
 
 ### P2(稳健性 / 数据正确性 / 工程化)
 
-4. **关闭页面课堂不结算** — [session.ts:47](../src/lib/agent/session.ts#L47) · low — `finishLessonLog` 只在 `action:'end'`(普通 fetch)触发,关 tab/刷新/崩溃 → `end_time` 永远 NULL、时长统计为 0。改 `navigator.sendBeacon` + 每轮增量 UPDATE(顺带覆盖崩溃)。
+4. ✅ **关闭页面课堂不结算**(2026-06-25) — [session.ts:47](../src/lib/agent/session.ts#L47) · low — `finishLessonLog` 只在 `action:'end'` 触发,关 tab/刷新/崩溃 → `end_time` 永远 NULL、时长统计为 0。**已修**:新增 `touchLessonLog()`,在 `commitTurn`(消息轮)+ `recordQuizAnswer`(quiz 轮)每轮增量写 `end_time`+`interaction_count`,纯服务端兜住崩溃/断网。**刻意砍掉 sendBeacon**——增量 UPDATE 后 end_time 已正确,sendBeacon 只多挽回"最后一轮到关页"的几十秒空档却引入浏览器卸载脆弱性,不值。+3 单测(queries.test.ts),330 测过,smoke 12/12。
 5. **测试盲区补强** · medium — `asr-proxy.ts:177` 的 `bridge()` 握手/PCM 缓冲时序零单测(照 tts-proxy 的可注入 fake 模式);LLM 流错误/abort 路径;tts-client 重连退避。
 6. **CI workflow** — 无 `.github/` · low — 加一个 `VOICE_MOCK=true` workflow 把 294 测试+typecheck+lint+build 变成真门禁;顺带 `server.ts` 被默认 typecheck 排除([tsconfig.json:25](../tsconfig.json#L25)),加跑两个 tsconfig 的 `typecheck` script。
 7. **logger 迁移收尾 + 降噪** — [logger.ts](../src/lib/logger.ts) · medium — 结构化 logger 13 模块只 1 个用;[memory.ts:202](../src/lib/agent/memory.ts#L202) 每轮无条件 warn 级打诊断快照(违反"验收后删打点")。二选一并 gate 热路径日志。
