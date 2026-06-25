@@ -11,6 +11,7 @@ import {
   MessageType,
   Serialization,
 } from './doubao-codec';
+import { createWsTeardown } from './ws-teardown';
 
 const DOUBAO_ASR_URL = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async';
 
@@ -193,7 +194,6 @@ export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: Asr
   const upstream = options.createUpstream?.(DOUBAO_ASR_URL, { headers }) ?? new WsClient(DOUBAO_ASR_URL, { headers, handshakeTimeout: 10000 });
   let sequence = 1;
   let upstreamReady = false;
-  let closed = false;
   let pcmCount = 0;
   let finalSeen = false;
   let finishedSent = false;
@@ -204,13 +204,9 @@ export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: Asr
   const MAX_PENDING_PCM_BYTES = 10 * 1024 * 1024; // 10MB backpressure limit
   let pendingPcmBytes = 0;
 
-  const closeAll = (code: number = 1000, reason: string = '') => {
-    if (closed) return;
-    closed = true;
-    console.log(`${tag} closeAll (pcmCount=${pcmCount}, finalSeen=${finalSeen})`);
-    try { clientWs.close(code, reason); } catch {}
-    try { upstream.close(); } catch {}
-  };
+  const teardown = createWsTeardown(clientWs, upstream, () =>
+    console.log(`${tag} closeAll (pcmCount=${pcmCount}, finalSeen=${finalSeen})`));
+  const closeAll = teardown.close;
 
   upstream.on('open', () => {
     upstreamReady = true;
@@ -273,7 +269,7 @@ export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: Asr
   });
 
   upstream.on('error', (err) => {
-    if (closed) return;
+    if (teardown.isClosed()) return;
     console.log(`${tag} upstream error:`, err.message);
     if (clientWs.readyState === clientWs.OPEN) {
       clientWs.send(JSON.stringify({ type: 'error', code: 'upstream', message: err.message }));
@@ -282,7 +278,7 @@ export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: Asr
   });
 
   upstream.on('close', () => {
-    if (closed) return;
+    if (teardown.isClosed()) return;
     console.log(`${tag} upstream close`);
     closeAll();
   });

@@ -7,6 +7,7 @@ import {
   decodeTtsFrame,
   Serialization,
 } from './doubao-codec';
+import { createWsTeardown } from './ws-teardown';
 
 const DOUBAO_TTS_URL = 'wss://openspeech.bytedance.com/api/v3/tts/bidirection';
 
@@ -41,16 +42,10 @@ export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void
   const upstream = options.createUpstream?.(DOUBAO_TTS_URL, { headers }) ?? new WsClient(DOUBAO_TTS_URL, { headers, handshakeTimeout: 10000 });
   let connectionReady = false;
   let currentSession: PendingSession | null = null;
-  let closed = false;
   const pendingControlFrames: Array<() => void> = [];
   const MAX_PENDING_CONTROL_FRAMES = 100;
 
-  const closeAll = (code: number = 1000) => {
-    if (closed) return;
-    closed = true;
-    try { clientWs.close(code); } catch {}
-    try { upstream.close(); } catch {}
-  };
+  const closeAll = createWsTeardown(clientWs, upstream).close;
 
   const sendWhenReady = (sendFrame: () => void) => {
     if (connectionReady && upstream.readyState === upstream.OPEN) {
