@@ -47,6 +47,7 @@
 | `src/lib/voice/asr-client.ts` | 浏览器 ASR WS 包装,`finish()` 通知 proxy 录音结束 |
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
 | `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,8 状态机,统一编排 ASR + SSE + TTS + 静态 quiz TTS** |
+| `src/lib/voice/turn-timeout-guard.ts` | 命名一次性恢复计时器(asrFinal 5s / chatWatchdog 20s / speechFinish 1.5s)的 arm/clear/clearAll 记账;recovery 回调仍在 controller(staticSpeech 10s promise 超时不归它管) |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
 | `src/lib/agent/session-store.ts` | 活动课堂 session 的存取边界;当前默认实现是进程内 `InMemorySessionStore`,后续 SQLite resume 应替换这里而不是在 `session.ts` 里加第二套 Map |
 | `src/lib/agent/session.ts` | LLM 一轮对话骨架:通过 `SessionStore` 查找 session + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn |

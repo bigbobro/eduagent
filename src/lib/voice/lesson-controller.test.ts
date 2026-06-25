@@ -508,11 +508,11 @@ describe('§1 loop-reliability fixes', () => {
     (controller as any).setState('thinking');
 
     (controller as any).armChatWatchdog();
-    expect((controller as any).chatWatchdogTimer).not.toBeNull();
+    expect((controller as any).timers.has('chatWatchdog')).toBe(true);
 
     (controller as any).handleSseEvent('progress_snapshot', { clearedCardIds: [] }, () => {}, () => {});
 
-    expect((controller as any).chatWatchdogTimer).toBeNull();
+    expect((controller as any).timers.has('chatWatchdog')).toBe(false);
   });
 
   // bug 4 (server timeout surfaces as an SSE error): client must recover from thinking.

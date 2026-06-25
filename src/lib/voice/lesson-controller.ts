@@ -6,6 +6,7 @@ import { AsrClient, setAsrSessionContext } from './asr-client';
 import { TtsClient } from './tts-client';
 import { PcmPlayer } from '@/lib/audio/pcm-player';
 import { startRecorder, prewarmRecorder, disposeRecorder, RecorderHandle } from '@/lib/audio/recorder';
+import { TurnTimeoutGuard } from './turn-timeout-guard';
 
 export type LessonStateName =
   | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending';
@@ -37,9 +38,10 @@ export class LessonController {
   private recorder: RecorderHandle | null = null;
   private recorderLock = false; // Prevent rapid Space press race
   private chatAbort: AbortController | null = null;
-  private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
-  private speechFinishFallbackTimer: ReturnType<typeof setTimeout> | null = null;
-  private chatWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  // Named one-shot recovery timers (asrFinal / chatWatchdog / speechFinish). The
+  // arm/clear/teardown bookkeeping lives in TurnTimeoutGuard; the recovery callbacks
+  // (which touch lesson state) stay below in the methods that arm each timer.
+  private timers = new TurnTimeoutGuard();
   private listenStartedAt = 0;
   private listenStoppedAt = 0;
   private speechStreamFinished = false;
@@ -131,15 +133,7 @@ export class LessonController {
   async endLesson(): Promise<void> {
     this.setState('ending');
     this.chatAbort?.abort();
-    if (this.asrFinalTimer) {
-      clearTimeout(this.asrFinalTimer);
-      this.asrFinalTimer = null;
-    }
-    if (this.speechFinishFallbackTimer) {
-      clearTimeout(this.speechFinishFallbackTimer);
-      this.speechFinishFallbackTimer = null;
-    }
-    this.clearChatWatchdog();
+    this.timers.clearAll();
     this.pendingActions = null;
     this.courseId = null;
     this.currentAsrCardId = null;
@@ -367,16 +361,14 @@ export class LessonController {
     this.asr?.finish();
     this.setState('thinking');
     // 兜底:豆包偶发不回 final → state 永远 thinking → 按钮灰锁死。5 秒后强制自救。
-    if (this.asrFinalTimer) clearTimeout(this.asrFinalTimer);
-    this.asrFinalTimer = setTimeout(() => {
-      this.asrFinalTimer = null;
+    this.timers.arm('asrFinal', 5000, () => {
       if (this.state !== 'thinking') return;
       this.emit('error', { message: '没听清呢~再说一次' });
       try { this.asr?.close(); } catch {}
       this.asr = null;
       this.routeCurrentAsrToChat = true;
       this.setState('awaiting');
-    }, 5000);
+    });
     // ASR final 事件会触发 handleAsrFinal → /api/chat;handleAsrFinal 末尾再 close ASR WS。
   }
 
@@ -394,10 +386,7 @@ export class LessonController {
     const routeToChat = this.routeCurrentAsrToChat;
     this.routeCurrentAsrToChat = true;
     // 清兜底超时
-    if (this.asrFinalTimer) {
-      clearTimeout(this.asrFinalTimer);
-      this.asrFinalTimer = null;
-    }
+    this.timers.clear('asrFinal');
     // 收到 final 才 close ASR WS — 之前 stopListening 用 finish() 让 proxy 等 final
     this.asr?.close();
     this.asr = null;
@@ -470,10 +459,7 @@ export class LessonController {
       this.player.enqueue(pcm);
     });
     this.tts.on('session-finished', () => {
-      if (this.speechFinishFallbackTimer) {
-        clearTimeout(this.speechFinishFallbackTimer);
-        this.speechFinishFallbackTimer = null;
-      }
+      this.timers.clear('speechFinish');
       this.speechStreamFinished = true;
       // Flush buffered actions now that TTS has finished speaking — this ensures
       // the card shown on screen matches the word the teacher just finished saying.
@@ -627,35 +613,28 @@ export class LessonController {
   // first SSE event (handleSseEvent) and in handleAsrFinal's finally; the state guard prevents
   // misfiring during a long but legitimate teacher utterance.
   private armChatWatchdog(): void {
-    this.clearChatWatchdog();
-    this.chatWatchdogTimer = setTimeout(() => {
-      this.chatWatchdogTimer = null;
+    this.timers.arm('chatWatchdog', LessonController.CHAT_WATCHDOG_MS, () => {
       if (this.state !== 'thinking') return;
       this.chatAbort?.abort();
       this.pendingActions = null;
       this.routeCurrentAsrToChat = true;
       this.emit('error', { message: '我有点没反应过来…我们再聊一句?' });
       this.setState('awaiting');
-    }, LessonController.CHAT_WATCHDOG_MS);
+    });
   }
 
   private clearChatWatchdog(): void {
-    if (this.chatWatchdogTimer) {
-      clearTimeout(this.chatWatchdogTimer);
-      this.chatWatchdogTimer = null;
-    }
+    this.timers.clear('chatWatchdog');
   }
 
   private armSpeechFinishFallback(): void {
-    if (this.speechFinishFallbackTimer) clearTimeout(this.speechFinishFallbackTimer);
-    this.speechFinishFallbackTimer = setTimeout(() => {
-      this.speechFinishFallbackTimer = null;
+    this.timers.arm('speechFinish', LessonController.SPEECH_FINISH_FALLBACK_MS, () => {
       this.speechStreamFinished = true;
       // The TTS finish frame never arrived — flush buffered actions so the card still
       // syncs to what the teacher said (otherwise: "画面切到 X，老师还让读 Y" desync).
       this.flushPendingActions();
       this.maybeReturnToAwaiting();
-    }, LessonController.SPEECH_FINISH_FALLBACK_MS);
+    });
   }
 
   private syncAsrSessionContextFromActions(actions: ToolAction[]): void {
