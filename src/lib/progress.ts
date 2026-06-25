@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import type { Course } from '@/types/course';
 import type { ProgressSnapshot, CourseProgress, WordMastery } from '@/types/progress';
+import { getWordPerformanceByCourse, type WordPerfByCourseRow } from './db/queries';
 
 export function masteryStarsFromRatio(correct: number, attempts: number): 0 | 1 | 2 | 3 {
   if (attempts === 0) return 0;
@@ -11,38 +12,17 @@ export function masteryStarsFromRatio(correct: number, attempts: number): 0 | 1 
   return 0;
 }
 
-interface PerfRow {
-  word: string;
-  attempts: number;
-  correct: number;
-  lastPracticed: string;
-  courseId: string;
-}
-
 export function buildProgressSnapshot(db: Database, courses: Course[]): ProgressSnapshot {
-  const rows = db
-    .prepare(
-      `
-    SELECT wp.word            AS word,
-           SUM(wp.attempts)   AS attempts,
-           SUM(wp.correct)    AS correct,
-           MAX(ll.start_time) AS lastPracticed,
-           ll.course_id       AS courseId
-    FROM word_performance wp
-    JOIN lesson_logs ll ON ll.id = wp.lesson_id
-    GROUP BY wp.word, ll.course_id
-  `,
-    )
-    .all() as PerfRow[];
+  const rows = getWordPerformanceByCourse(db);
 
-  const perfByCourse = new Map<string, Map<string, PerfRow>>();
+  const perfByCourse = new Map<string, Map<string, WordPerfByCourseRow>>();
   for (const r of rows) {
     if (!perfByCourse.has(r.courseId)) perfByCourse.set(r.courseId, new Map());
     perfByCourse.get(r.courseId)!.set(r.word, r);
   }
 
   const courseSnapshots: CourseProgress[] = courses.map((course) => {
-    const perfMap = perfByCourse.get(course.id) ?? new Map<string, PerfRow>();
+    const perfMap = perfByCourse.get(course.id) ?? new Map<string, WordPerfByCourseRow>();
     const words: WordMastery[] = course.cards
       .filter((c) => c.kind === 'word')
       .map((c) => {

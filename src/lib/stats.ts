@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import type { Course } from '@/types/course';
 import type { StatsSnapshot, SessionSummary } from '@/types/progress';
+import { getLessonTimings, getRecentLessons, getLessonWordPerfCount } from './db/queries';
 
 function dateKey(iso: string): string {
   const d = new Date(iso);
@@ -13,9 +14,7 @@ function durationMs(start: string, end: string | null): number {
 }
 
 export function buildStatsSnapshot(db: Database): StatsSnapshot {
-  const rows = db
-    .prepare(`SELECT id, start_time AS startTime, end_time AS endTime FROM lesson_logs`)
-    .all() as Array<{ id: string; startTime: string; endTime: string | null }>;
+  const rows = getLessonTimings(db);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -48,33 +47,12 @@ export function buildStatsSnapshot(db: Database): StatsSnapshot {
 }
 
 export function buildSessionList(db: Database, courses: Course[], limit = 10): SessionSummary[] {
-  const rows = db
-    .prepare(
-      `
-    SELECT id, course_id AS courseId, start_time AS startTime, end_time AS endTime, interaction_count AS interactionCount
-    FROM lesson_logs
-    ORDER BY start_time DESC
-    LIMIT ?
-  `,
-    )
-    .all(limit) as Array<{
-      id: string;
-      courseId: string;
-      startTime: string;
-      endTime: string | null;
-      interactionCount: number;
-    }>;
+  const rows = getRecentLessons(db, limit);
 
   const titleByCourse = new Map(courses.map((c) => [c.id, c.title]));
 
-  const perfStmt = db.prepare(`
-    SELECT COUNT(*) AS attempted,
-           SUM(CASE WHEN attempts > 0 AND correct * 1.0 / attempts >= 0.6 THEN 1 ELSE 0 END) AS mastered
-    FROM word_performance WHERE lesson_id = ?
-  `);
-
   return rows.map((r) => {
-    const perf = perfStmt.get(r.id) as { attempted: number; mastered: number };
+    const perf = getLessonWordPerfCount(db, r.id);
     return {
       lessonId: r.id,
       courseId: r.courseId,
