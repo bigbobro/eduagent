@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useSpacebar } from '@/hooks/useSpacebar';
 import type { Course, Quiz } from '@/types/course';
 import type { LessonController } from '@/lib/voice/lesson-controller';
@@ -27,19 +27,30 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
   const canHold = (state === 'awaiting' || state === 'listening') && hasHeardPrompt && !promptPlaying;
   const catMood = promptPlaying || state === 'quiz-speaking' ? 'speaking' : heardSentence ? 'cheer' : 'happy';
 
+  // Keep the asr-final subscription tied to `controller` only. The parent passes a fresh
+  // onAnswer every render (it closes over quiz index / retries), so depending on it here would
+  // detach + reattach the listener on every render. Read the latest values from refs instead.
+  const onAnswerRef = useRef(onAnswer);
+  const targetWordsRef = useRef(targetWords);
+  useEffect(() => {
+    onAnswerRef.current = onAnswer;
+    targetWordsRef.current = targetWords;
+  });
+
   useEffect(() => {
     const onFinal = (event: { text: string }) => {
       const said = event.text.toLowerCase();
-      const matchedCount = targetWords.filter((word) => said.includes(word)).length;
-      const correct = matchedCount >= Math.min(2, targetWords.length);
+      const words = targetWordsRef.current;
+      const matchedCount = words.filter((word) => said.includes(word)).length;
+      const correct = matchedCount >= Math.min(2, words.length);
       if (correct) setHeardSentence(true);
-      onAnswer({ correct, said: event.text });
+      onAnswerRef.current({ correct, said: event.text });
     };
     controller.on('asr-final', onFinal);
     return () => {
       controller.off('asr-final', onFinal);
     };
-  }, [controller, onAnswer, targetWords]);
+  }, [controller]);
 
   useEffect(() => {
     setListening(false);
@@ -101,6 +112,7 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
         <PaperButton
           color={listening ? 'mint' : 'butter'}
           disabled={!canHold}
+          aria-pressed={listening}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerEnd}
           onPointerCancel={onPointerEnd}

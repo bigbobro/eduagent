@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Course, Quiz, WordCard } from '@/types/course';
 import type { LessonController } from '@/lib/voice/lesson-controller';
 import { Cat, PictureCard } from '@/components/magic';
@@ -16,6 +16,9 @@ interface QuizPickWordFrameProps {
 
 export function QuizPickWordFrame({ quiz, course, controller, onAnswer }: QuizPickWordFrameProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Synchronous guard: a fast double-click fires two onClicks before selectedId re-renders,
+  // so gate on a ref to ensure onAnswer fires at most once per quiz.
+  const answeredRef = useRef(false);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const options = useMemo(() => buildOptions(wordCards, quiz), [wordCards, quiz]);
   const promptText = useMemo(() => buildPickWordPromptText(quiz, course), [course, quiz]);
@@ -24,6 +27,7 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer }: QuizPi
 
   useEffect(() => {
     setSelectedId(null);
+    answeredRef.current = false;
   }, [quiz.id]);
 
   return (
@@ -41,7 +45,8 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer }: QuizPi
               state={correct ? 'correct' : wrong ? 'wrong' : selected ? 'selected' : 'idle'}
               disabled={locked}
               onClick={() => {
-                if (locked) return;
+                if (locked || answeredRef.current) return;
+                answeredRef.current = true;
                 setSelectedId(card.id);
                 onAnswer({ correct: card.id === quiz.correctCardId, picked: card.id });
               }}

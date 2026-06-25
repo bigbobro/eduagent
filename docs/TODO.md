@@ -48,19 +48,19 @@
 ### P2(稳健性 / 数据正确性 / 工程化)
 
 4. ✅ **关闭页面课堂不结算**(2026-06-25) — [session.ts:47](../src/lib/agent/session.ts#L47) · low — `finishLessonLog` 只在 `action:'end'` 触发,关 tab/刷新/崩溃 → `end_time` 永远 NULL、时长统计为 0。**已修**:新增 `touchLessonLog()`,在 `commitTurn`(消息轮)+ `recordQuizAnswer`(quiz 轮)每轮增量写 `end_time`+`interaction_count`,纯服务端兜住崩溃/断网。**刻意砍掉 sendBeacon**——增量 UPDATE 后 end_time 已正确,sendBeacon 只多挽回"最后一轮到关页"的几十秒空档却引入浏览器卸载脆弱性,不值。+3 单测(queries.test.ts),330 测过,smoke 12/12。
-5. **测试盲区补强** · medium — `asr-proxy.ts:177` 的 `bridge()` 握手/PCM 缓冲时序零单测(照 tts-proxy 的可注入 fake 模式);LLM 流错误/abort 路径;tts-client 重连退避。
+5. ✅ **测试盲区补强**(2026-06-25) — asr-proxy `bridge()` 时序测试本轮 overnight 已做(`asr-proxy.test.ts`);本次补齐剩余:`tts-client.test.ts`(重连退避序列 500/1000/2000、重试上限、成功后 reset、session-lost)+ `llm.test.ts`(caller signal abort 预先/飞行中、非 ok 响应抛 sanitized 错误且不泄露 body)。+8 单测。timeout 路径因 `AbortSignal.timeout` 与 fake timer 交互脆弱,未测(诚实标注)。
 6. **CI workflow** — 无 `.github/` · low — 加一个 `VOICE_MOCK=true` workflow 把 294 测试+typecheck+lint+build 变成真门禁;顺带 `server.ts` 被默认 typecheck 排除([tsconfig.json:25](../tsconfig.json#L25)),加跑两个 tsconfig 的 `typecheck` script。
 7. **logger 迁移收尾 + 降噪** — [logger.ts](../src/lib/logger.ts) · medium — 结构化 logger 13 模块只 1 个用;[memory.ts:202](../src/lib/agent/memory.ts#L202) 每轮无条件 warn 级打诊断快照(违反"验收后删打点")。二选一并 gate 热路径日志。
 8. **chat route 加固 + DB 生命周期** · low — [route.ts](../src/app/api/chat/route.ts) `req.json()` 无 zod 校验;无 graceful shutdown(WAL 不 checkpoint);in-memory session 无淘汰;DB word-performance 与内存 R2 真相分叉([session.ts:176](../src/lib/agent/session.ts#L176))。
 9. **Next.js 15 升级** — [package.json:22](../package.json#L22) · medium — 14.2.35 是 14.x 冻结末端,5 个 high CVE(含 WS-upgrade SSRF,命中自定义 server)只在 15.x 修。当独立任务做(custom server + framer-motion transpile),非对外暴露前可缓。
-10. **文档漂移** · low — 课程数 README 30 / architecture.md 10 / 实际 40;architecture.md 说 logger.ts 已删但它活着;MIMO 变量名(随 P1#1 一起修)。数字写成"见 index.ts"防再漂。
-11. **前端交互打磨** · low — Quiz 双击双答([QuizPickWordFrame.tsx:43](../src/components/lesson/QuizPickWordFrame.tsx#L43));[ReinforceFrame.tsx:42](../src/components/lesson/ReinforceFrame.tsx#L42) 未 memo 的 onAnswer 每渲染重挂 listener;locked 按钮仍可聚焦 + push-to-talk 缺 aria-pressed。
+10. ✅ **文档漂移**(2026-06-25,部分) — 课程数已修:README(中英两处)+ architecture.md(:354/:546 当前态)改成"以 `index.ts`(`allCourses`)为准"的防漂写法,不再写死数字;历史 changelog 条目按"只读快照"未动。**logger.ts "已删但活着" 留给 #7**(logger 迁移收尾时一并把它纳入模块表),本任务不越界。
+11. ✅ **前端交互打磨**(2026-06-25) — ① Quiz 双击双答:`QuizPickWordFrame` 加 `answeredRef` 同步守卫,每题 `onAnswer` 至多一次;② `ReinforceFrame` 用 ref 持有最新 `onAnswer`/`targetWords`,asr-final 监听器 effect 只依赖 `[controller]`,不再每渲染重挂;③ push-to-talk 按钮加 `aria-pressed`。locked 卡片已是原生 `<button disabled>`(本就不可聚焦),无需改。
 
 ### ⭐ 儿童产品专项(critic 补,10 维度系统性漏掉——因为"用户是孩子")
 
 > 纯工程视角看不到。单用户本地阶段多为 P2,但作为**风险类别**价值最高。
 
-- **LLM 输出无内容安全过滤** · P2 — [orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,零审核。加"只说目标词汇+鼓励语"约束检查或关键词 guard。
+- ⭐ **Agent 护栏机制(LLM 输出 + 行为)** · **优先级提升(2026-06-25 用户定为重点)· design-first 复杂任务** — 比"内容安全过滤"更大:安全只是其中一格。完整护栏至少三层 ——(1)**内容安全**:[orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,目前零审核;(2)**交互逻辑/控制权**:孩子说"跳过这个词""我想学别的"时,Agent 该不该听他的(准许 vs 不准许的策略),现状只有 dev 用 `debugSkipCurrentWord` + R2 两次命中切卡,没有面向孩子、被策略管控的"请求"通道;(3)**行为准则**:不只约束 LLM 说什么,还约束 Agent 接下来做什么(切卡/推进/改节奏)。**核心交付是先把"机制长什么样"设计清楚(prd + design),再动代码**——决策点:事前(prompt rules)管什么 vs 事后(`src/lib/agent/guards/` pipeline)拦什么;孩子意图请求走哪条路、按什么策略准许;准则怎么写得下、可回归。启动时走 Trellis brainstorm。
 - **孩子语音转写永久明文留存** · P2 — [session.ts:189](../src/lib/agent/session.ts#L189) 每轮写 ASR 原文进 SQLite,全仓库无删除/TTL/清理。加保留策略 + "清除历史"入口。
 - **家长门禁是纯客户端摆设** · P2 — `pin.ts` 硬编码 salt + localStorage;`/api/stats`、`/api/sessions` 服务端零鉴权,谁打都能拿孩子全部进度。
 - **其它** · P3 — 无 CSP/Permissions-Policy;麦克风权限被拒无面向孩子 UI([recorder.ts:58](../src/lib/audio/recorder.ts#L58) 只 console.warn);SQLite 无备份/损坏恢复;错误只进 console 无遥测(=总得手动贴日志的根因);无 `.nvmrc`/engines(better-sqlite3 跨 Node 版本会崩);`/api/chat` 无 rate-limit。
