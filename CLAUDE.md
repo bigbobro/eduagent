@@ -50,6 +50,10 @@
 - **TTS 长连复用 / ASR 按轮建连。** 详见 architecture.md。
 - **VOICE_MOCK=true** 跳过豆包/MiMo,本地无网络可跑全链路(为了 CI 与离线开发)。
 
+## 课程内容生成规则
+
+凡是添加、生成、扩展或重生成课程、课程材料、单词卡、句子卡或课程图片,先读 `docs/agent-guidelines/course-authoring.md`,并遵守其中的课程数据、图片生成、批处理和验证规则。
+
 ## 凭据(secrets)规则
 
 **任何文档(README、spec、plan、CLAUDE.md、architecture.md、TODO、benchmarks、git commit message、PR description)中,严禁出现真实凭据值。**

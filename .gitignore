@@ -45,6 +45,18 @@ tmp/imagegen/
 .trellis/
 docs/superpowers/
 
+# local Trellis platform adapters
+.agents/skills/trellis-*/
+.claude/agents/trellis-*.md
+.claude/commands/trellis/
+.claude/hooks/
+.claude/settings.json
+.claude/skills/trellis-*/
+.codex/agents/trellis-*.toml
+.codex/config.toml
+.codex/hooks.json
+.codex/hooks/
+
 # vercel
 .vercel
 

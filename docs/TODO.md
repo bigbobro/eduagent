@@ -60,7 +60,7 @@
 
 > 纯工程视角看不到。单用户本地阶段多为 P2,但作为**风险类别**价值最高。
 
-- ⭐ **Agent 护栏机制(LLM 输出 + 行为)** · **优先级提升(2026-06-25 用户定为重点)· design-first 复杂任务** — 比"内容安全过滤"更大:安全只是其中一格。完整护栏至少三层 ——(1)**内容安全**:[orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,目前零审核;(2)**交互逻辑/控制权**:孩子说"跳过这个词""我想学别的"时,Agent 该不该听他的(准许 vs 不准许的策略),现状只有 dev 用 `debugSkipCurrentWord` + R2 两次命中切卡,没有面向孩子、被策略管控的"请求"通道;(3)**行为准则**:不只约束 LLM 说什么,还约束 Agent 接下来做什么(切卡/推进/改节奏)。**核心交付是先把"机制长什么样"设计清楚(prd + design),再动代码**——决策点:事前(prompt rules)管什么 vs 事后(`src/lib/agent/guards/` pipeline)拦什么;孩子意图请求走哪条路、按什么策略准许;准则怎么写得下、可回归。启动时走 Trellis brainstorm。
+- ⭐ **Agent 护栏机制(LLM 输出 + 行为)** · **优先级提升(2026-06-25 用户定为重点)· design-first 复杂任务** — 比"内容安全过滤"更大:安全只是其中一格。完整护栏至少三层 ——(1)**内容安全**:[orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,目前零审核;(2)**交互逻辑/控制权**:孩子说"跳过这个词""我想学别的"时,Agent 该不该听他的(准许 vs 不准许的策略),现状只有 dev 用 `debugSkipCurrentWord` + R2 两次命中切卡,没有面向孩子、被策略管控的"请求"通道;(3)**行为准则**:不只约束 LLM 说什么,还约束 Agent 接下来做什么(切卡/推进/改节奏)。**核心交付是先把"机制长什么样"设计清楚(prd + design),再动代码**——决策点:事前(prompt rules)管什么 vs 事后(`src/lib/agent/guards/` pipeline)拦什么;孩子意图请求走哪条路、按什么策略准许;准则怎么写得下、可回归。启动时先写 PRD + design。
 - **孩子语音转写永久明文留存** · P2 — [session.ts:189](../src/lib/agent/session.ts#L189) 每轮写 ASR 原文进 SQLite,全仓库无删除/TTL/清理。加保留策略 + "清除历史"入口。
 - **家长门禁是纯客户端摆设** · P2 — `pin.ts` 硬编码 salt + localStorage;`/api/stats`、`/api/sessions` 服务端零鉴权,谁打都能拿孩子全部进度。
 - **其它** · P3 — 无 CSP/Permissions-Policy;麦克风权限被拒无面向孩子 UI([recorder.ts:58](../src/lib/audio/recorder.ts#L58) 只 console.warn);SQLite 无备份/损坏恢复;错误只进 console 无遥测(=总得手动贴日志的根因);无 `.nvmrc`/engines(better-sqlite3 跨 Node 版本会崩);`/api/chat` 无 rate-limit。
