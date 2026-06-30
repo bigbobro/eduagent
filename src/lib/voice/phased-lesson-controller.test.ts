@@ -86,7 +86,7 @@ describe('PhasedLessonController phase transitions', () => {
     expect(phaseChanges).toContain('reinforcement');
   });
 
-  it('transitions to reinforcement immediately when debug skip clears the last word while awaiting', async () => {
+  it('transitions to reinforcement immediately when the last word clears while already awaiting', async () => {
     await ctrl.startLesson();
     (ctrl as any).currentPhase = 'interactive';
     const phaseChanges: PhaseName[] = [];
@@ -145,37 +145,6 @@ describe('PhasedLessonController phase transitions', () => {
 
     resolveTransition();
     await vi.waitFor(() => expect(phaseChanges).toContain('reinforcement'));
-  });
-
-  it('queues dev force transition until the current transition finishes', async () => {
-    await ctrl.startLesson();
-    let resolveInteractive!: () => void;
-    v2.sendCustomAction
-      .mockImplementationOnce(() => new Promise<void>((resolve) => {
-        resolveInteractive = resolve;
-      }))
-      .mockResolvedValue(undefined);
-    const phaseChanges: PhaseName[] = [];
-    ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
-
-    v2.emit('state', 'awaiting');
-    await Promise.resolve();
-
-    expect(v2.sendCustomAction).toHaveBeenCalledTimes(1);
-    expect(v2.sendCustomAction).toHaveBeenCalledWith({ action: 'phase-transition', to: 'interactive' });
-    expect(phaseChanges).toContain('interactive');
-
-    const forced = ctrl.forceTransition('reinforcement');
-    await Promise.resolve();
-
-    expect(v2.sendCustomAction).toHaveBeenCalledTimes(1);
-
-    resolveInteractive();
-    await forced;
-
-    expect(v2.sendCustomAction).toHaveBeenCalledTimes(2);
-    expect(v2.sendCustomAction).toHaveBeenLastCalledWith({ action: 'phase-transition', to: 'reinforcement' });
-    expect(phaseChanges).toContain('reinforcement');
   });
 });
 

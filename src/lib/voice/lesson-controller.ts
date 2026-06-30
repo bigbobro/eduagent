@@ -180,26 +180,6 @@ export class LessonController {
     await this.consumeSSE(res.body, () => {});
   }
 
-  async debugSkipCurrentWord(): Promise<void> {
-    if (!this.sessionId) return;
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'debug-skip-word', sessionId: this.sessionId }),
-    });
-    if (!res.ok) {
-      this.emit('error', { message: `Debug skip failed: ${res.status}` });
-      return;
-    }
-    const payload = await res.json();
-    this.applyProgressSnapshot(payload);
-    if (payload.nextCardId) {
-      const actions: ToolAction[] = [{ tool: 'show_card', params: { card_id: payload.nextCardId } }];
-      this.syncAsrSessionContextFromActions(actions);
-      this.emit('actions', actions);
-    }
-  }
-
   getSessionId(): string | null {
     return this.sessionId;
   }

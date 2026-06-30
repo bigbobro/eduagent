@@ -18,45 +18,6 @@ interface ProgressSnapshot {
   clearedCardIds: string[];
 }
 
-const DEV_PHASE_OPTIONS: PhaseName[] = ['intro', 'interactive', 'reinforcement', 'done'];
-
-function DevPhasePanel({
-  currentPhase,
-  onJump,
-  onSkipWord,
-}: {
-  currentPhase: PhaseName;
-  onJump: (to: PhaseName) => void;
-  onSkipWord: () => void;
-}) {
-  return (
-    <div className="fixed bottom-4 right-4 z-50 bg-black/80 text-white rounded-lg px-3 py-2 text-xs font-mono shadow-lg pointer-events-auto">
-      <div className="mb-1 opacity-70">dev · phase = {currentPhase}</div>
-      <div className="flex gap-1">
-        {DEV_PHASE_OPTIONS.map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => onJump(p)}
-            disabled={p === currentPhase}
-            className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed"
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        onClick={onSkipWord}
-        disabled={currentPhase !== 'interactive'}
-        className="mt-1 w-full px-2 py-1 rounded bg-white/10 hover:bg-white/20 disabled:opacity-30 disabled:cursor-not-allowed"
-      >
-        skip word
-      </button>
-    </div>
-  );
-}
-
 export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const router = useRouter();
   const v2Ref = useRef<LessonController | null>(null);
@@ -155,14 +116,6 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         >
           {errorMsg}
         </div>
-      )}
-
-      {process.env.NODE_ENV === 'development' && started && (
-        <DevPhasePanel
-          currentPhase={phase}
-          onJump={(to) => phasedRef.current?.forceTransition(to)}
-          onSkipWord={() => void v2Ref.current?.debugSkipCurrentWord()}
-        />
       )}
 
       <div className="absolute inset-0 top-14">

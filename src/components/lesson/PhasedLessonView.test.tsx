@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
 import { PhasedLessonView } from './PhasedLessonView';
 
@@ -46,7 +46,6 @@ vi.mock('@/lib/voice/lesson-controller', () => {
     }
 
     async sendCustomAction() {}
-    debugSkipCurrentWord = vi.fn(async () => {});
     async speakStatic() {}
     async endLesson() {}
     async startListening() {}
@@ -116,10 +115,6 @@ describe('PhasedLessonView', () => {
     routerPush.mockClear();
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('initial render shows IntroFrame and start button', () => {
     render(<PhasedLessonView course={foodCourse} />);
     expect(screen.getByText(/餐桌上摆着各种食物/)).toBeTruthy();
@@ -178,15 +173,5 @@ describe('PhasedLessonView', () => {
     });
 
     expect(await screen.findByText('2 个词')).toBeTruthy();
-  });
-
-  it('wires the development skip-word button to the lesson controller', async () => {
-    vi.stubEnv('NODE_ENV', 'development');
-    render(<PhasedLessonView course={foodCourse} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'skip word' }));
-
-    expect(lessonInstances[0].debugSkipCurrentWord).toHaveBeenCalledOnce();
   });
 });

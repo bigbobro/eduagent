@@ -154,33 +154,6 @@ describe('LessonController', () => {
     });
   });
 
-  it('debug-skips the current word without starting TTS', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-      ok: true,
-      skippedCardId: 'apple',
-      nextCardId: 'banana',
-      clearedCardIds: ['apple'],
-      totalAttempts: 0,
-      currentPhase: 'interactive',
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
-    const controller = new LessonController();
-    const progress = vi.fn();
-    const actions = vi.fn();
-    (controller as any).sessionId = 'session-1';
-    controller.on('progress', progress);
-    controller.on('actions', actions);
-
-    await controller.debugSkipCurrentWord();
-
-    expect(fetch).toHaveBeenCalledWith('/api/chat', expect.objectContaining({
-      method: 'POST',
-      body: expect.stringContaining('"action":"debug-skip-word"'),
-    }));
-    expect(progress).toHaveBeenCalledWith(expect.objectContaining({ clearedCardIds: ['apple'] }));
-    expect(actions).toHaveBeenCalledWith([{ tool: 'show_card', params: { card_id: 'banana' } }]);
-    expect(ttsInstances[0]?.startSession).not.toHaveBeenCalled();
-  });
-
   it('returns false and resets to idle when lesson start fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));
     const controller = new LessonController();

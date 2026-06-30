@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSession, getSession, endSession, recordQuizAnswer, setSessionPhase, debugSkipCurrentWord } from '@/lib/agent/session';
+import { createSession, getSession, endSession, recordQuizAnswer, setSessionPhase } from '@/lib/agent/session';
 import { streamUserInputToSSE } from '@/lib/agent/orchestrator';
 import { getCourseById } from '@/data/courses';
 import { ensureInitialized } from '@/lib/init';
@@ -78,15 +78,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
     return NextResponse.json({ ok: true });
-  }
-
-  if (body.action === 'debug-skip-word') {
-    const result = debugSkipCurrentWord(body.sessionId);
-    if (!result) {
-      console.warn('[chat] 404 session not found (debug-skip-word):', body.sessionId);
-      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
-    }
-    return NextResponse.json({ ok: true, ...result });
   }
 
   if (body.action === 'end') {

@@ -93,15 +93,6 @@ export class PhasedLessonController {
     this.setIntroActiveCardId(null);
   }
 
-  // Dev-only escape hatch: skip directly to a target phase without going through
-  // intro card play / interactive card-clear gating. Used by the dev panel button.
-  async forceTransition(to: PhaseName): Promise<void> {
-    if (to === this.currentPhase) return;
-    this.clearIntroStartupUnlockTimer();
-    this.pendingTransition = null;
-    await this.performTransition(to);
-  }
-
   async completeReinforcement(): Promise<void> {
     this.currentPhase = 'done';
     this.setIntroBusy(false);

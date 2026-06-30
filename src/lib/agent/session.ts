@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Course, PhaseName, WordCard } from '@/types/course';
+import { Course, PhaseName } from '@/types/course';
 import { LessonMemory, PromptInputBreakdown, TokenUsage } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
 import { sessionStore, type Session } from './session-store';
@@ -77,76 +77,6 @@ export function recordQuizAnswer(
   });
   touchLessonLog(session.id, session.memory.totalInteractions);
   return true;
-}
-
-export interface DebugSkipWordResult {
-  skippedCardId: string | null;
-  nextCardId: string | null;
-  clearedCardIds: string[];
-  totalAttempts: number;
-  currentPhase: PhaseName;
-}
-
-export function debugSkipCurrentWord(sessionId: string): DebugSkipWordResult | null {
-  const session = sessionStore.get(sessionId);
-  if (!session) return null;
-
-  const wordCards = session.course.cards.filter((card): card is WordCard => card.kind === 'word');
-  const wordCardIds = new Set(wordCards.map((card) => card.id));
-  const progress = { ...session.memory.cardProgress };
-  const currentWordId = resolveWordCardId(session.course, session.memory.currentCardId);
-  const firstUncleared = (excludeId = '') => session.course.teachingHints.newCardIds.find(
-    (id) => wordCardIds.has(id) && id !== excludeId && progress[id] !== 'cleared',
-  ) || '';
-  const skippedCardId = currentWordId && progress[currentWordId] !== 'cleared'
-    ? currentWordId
-    : firstUncleared();
-
-  if (!skippedCardId) {
-    return {
-      skippedCardId: null,
-      nextCardId: null,
-      clearedCardIds: [...session.memory.clearedCardIds],
-      totalAttempts: getTotalAttempts(session.memory),
-      currentPhase: session.currentPhase,
-    };
-  }
-
-  const skippedCard = wordCards.find((card) => card.id === skippedCardId);
-  progress[skippedCardId] = 'cleared';
-  const correctCount = { ...session.memory.cardCorrectCount, [skippedCardId]: 2 };
-  const attemptStreak = { ...session.memory.cardAttemptStreak, [skippedCardId]: 0 };
-  const clearedCardIds = session.memory.clearedCardIds.includes(skippedCardId)
-    ? session.memory.clearedCardIds
-    : [...session.memory.clearedCardIds, skippedCardId];
-  const wordsLearned = skippedCard?.english && !session.memory.wordsLearned.includes(skippedCard.english)
-    ? [...session.memory.wordsLearned, skippedCard.english]
-    : session.memory.wordsLearned;
-  const nextCardId = firstUncleared(skippedCardId);
-  const nextCard = wordCards.find((card) => card.id === nextCardId);
-  if (nextCardId && progress[nextCardId] === 'untouched') {
-    progress[nextCardId] = 'attempted';
-  }
-
-  session.memory = {
-    ...session.memory,
-    cardProgress: progress,
-    cardCorrectCount: correctCount,
-    cardAttemptStreak: attemptStreak,
-    clearedCardIds,
-    wordsLearned,
-    currentCardId: nextCardId || skippedCardId,
-    currentWord: nextCard?.english || skippedCard?.english || session.memory.currentWord,
-  };
-  sessionStore.save(session);
-
-  return {
-    skippedCardId,
-    nextCardId: nextCardId || null,
-    clearedCardIds: [...clearedCardIds],
-    totalAttempts: getTotalAttempts(session.memory),
-    currentPhase: session.currentPhase,
-  };
 }
 
 export type StreamUserEvent =
@@ -289,24 +219,4 @@ function commitTurn(
   });
   // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time.
   touchLessonLog(session.id, session.memory.totalInteractions);
-}
-
-function getTotalAttempts(memory: LessonMemory): number {
-  let totalAttempts = 0;
-  memory.wordPerformance.forEach((performance) => {
-    totalAttempts += performance.attempts;
-  });
-  return totalAttempts;
-}
-
-function resolveWordCardId(course: Course, cardId: string): string {
-  if (!cardId) return '';
-  const wordCards = course.cards.filter((card): card is WordCard => card.kind === 'word');
-  const wordCardIds = new Set(wordCards.map((card) => card.id));
-  if (wordCardIds.has(cardId)) return cardId;
-  const sentenceWordId = cardId.startsWith('sentence_') ? cardId.slice('sentence_'.length) : '';
-  if (wordCardIds.has(sentenceWordId)) return sentenceWordId;
-  const card = course.cards.find((item) => item.id === cardId);
-  if (!card?.imageUrl) return '';
-  return wordCards.find((wordCard) => wordCard.imageUrl === card.imageUrl)?.id || '';
 }
