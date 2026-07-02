@@ -92,3 +92,15 @@
 - 三次 smoke:修复 sentence 卡劫持 bug 前 2/11;修复后 10/11(1 轮 15s 超时误杀);上调超时后 **11/11 + UI 2/2**
 
 **体感注意:** 孩子等待老师响应的时间比 MiMo 时代更长(中位 ~7s vs ~6s,尾部可到 14s+)。如实际课堂体感不可接受,候选动作:换更快的模型(改 `.env.local` 的 `LLM_MODEL` 即可)/ prompt 约束 speech 更短 / 恢复 thinking 占位音。
+
+## 同日改用 DeepSeek-V4-Flash(2026-07-02)
+
+直连探针(短 prompt,3 轮):first token 904 / 2676 / 3356 ms(中位 2676ms),整轮 2619 / 3234 / 4026 ms;json_object / SSE / usage 兼容点全过。
+
+真实课堂 smoke(11 步,`LLM_MODEL=deepseek-ai/DeepSeek-V4-Flash`):每步 3.6s ~ 13.7s,**中位 ~5.4s**(V4-Pro 同场景中位 ~7.3s),11/11 + UI 2/2 全过。真实长 prompt 下尾部轮次仍可到 ~14s,LLM 双层超时保持 20s/25s 不动。
+
+| 模型 | 短 prompt 首 token 中位 | 真实课堂整步中位 | 尾部 |
+|------|------------------------|-----------------|------|
+| MiMo mimo-v2.5-pro(2026-05 基线) | ~4.0s | ~6s(整轮) | — |
+| DeepSeek-V4-Pro | 3.5s | ~7.3s | >15s(会撞旧 15s 超时) |
+| DeepSeek-V4-Flash(当前) | 2.7s | ~5.4s | ~13.7s |

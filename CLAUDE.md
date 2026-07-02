@@ -4,7 +4,7 @@
 
 ## 项目是什么
 
-儿童英语教学 Agent,多模态:豆包流式 ASR / TTS + OpenAI 兼容 LLM 大脑(当前 SiliconFlow DeepSeek-V4-Pro,曾为小米 MiMo)+ 浏览器画布交互。
+儿童英语教学 Agent,多模态:豆包流式 ASR / TTS + OpenAI 兼容 LLM 大脑(当前 SiliconFlow DeepSeek-V4-Flash,曾为小米 MiMo)+ 浏览器画布交互。
 
 - **主入口**:`README.md`(项目介绍 + 怎么跑)
 - **当前架构事实文档**:`docs/architecture.md`(living doc,master 上系统的现状)

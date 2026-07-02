@@ -55,7 +55,7 @@ describe('config: LLM credential group resolution', () => {
     resetConfig();
     const c = getConfig();
     expect(c.llmBaseUrl).toBe('https://api.siliconflow.cn/v1');
-    expect(c.llmModel).toBe('deepseek-ai/DeepSeek-V4-Pro');
+    expect(c.llmModel).toBe('deepseek-ai/DeepSeek-V4-Flash');
   });
 
   it('falls back to the whole MIMO_* group when LLM_API_KEY is empty (no cross-group mixing)', () => {

@@ -3,9 +3,9 @@ import { createLogger } from './logger';
 
 const log = createLogger('llm');
 
-// Bounded overall deadline for a single LLM turn. SiliconFlow DeepSeek-V4-Pro normal path is
-// ~5-15s(first token 中位 ~3.5s,慢在生成段;2026-07-02 smoke 实测),20s leaves margin while
-// preventing a stalled upstream from freezing the lesson.(MiMo 时代 ~6s/15s。)
+// Bounded overall deadline for a single LLM turn. SiliconFlow DeepSeek-V4(Flash/Pro)normal
+// path is ~4-14s(Flash 中位 ~5.4s、Pro ~7.3s,尾部都可到 14s;2026-07-02 smoke 实测),20s
+// leaves margin while preventing a stalled upstream from freezing the lesson.(MiMo 时代 ~6s/15s。)
 // The client has a 25s watchdog as a backstop (see lesson-controller.ts CHAT_WATCHDOG_MS).
 const LLM_TIMEOUT_MS = 20000;
 
