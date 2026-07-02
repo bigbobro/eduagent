@@ -10,8 +10,8 @@ function makeReq(body: any): any {
 describe('POST /api/chat action=quiz-answer', () => {
   beforeEach(() => {
     process.env.VOICE_MOCK = 'true';
-    process.env.MIMO_BASE_URL = process.env.MIMO_BASE_URL || 'https://mock.local/v1';
-    process.env.MIMO_API_KEY = process.env.MIMO_API_KEY || 'mock-key';
+    process.env.LLM_BASE_URL = process.env.LLM_BASE_URL || 'https://mock.local/v1';
+    process.env.LLM_API_KEY = process.env.LLM_API_KEY || 'mock-key';
   });
 
   it('records quiz answer and returns ok', async () => {

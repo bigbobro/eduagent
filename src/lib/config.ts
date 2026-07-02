@@ -6,10 +6,10 @@
 import { z } from 'zod'
 
 const configSchema = z.object({
-  // MiMo LLM
-  mimoApiKey: z.string().min(1, 'MIMO_API_KEY is required'),
-  mimoApiBase: z.string().url().default('https://token-plan-cn.xiaomimimo.com/v1'),
-  mimoModel: z.string().default('mimo-v2.5-pro'),
+  // LLM(OpenAI 兼容 chat/completions 供应商)
+  llmApiKey: z.string().min(1, 'LLM_API_KEY is required (or legacy MIMO_API_KEY)'),
+  llmBaseUrl: z.string().url(),
+  llmModel: z.string().min(1),
 
   // Doubao Voice (ASR + TTS)
   doubaoAppId: z.string().min(1, 'DOUBAO_APP_ID is required'),
@@ -40,12 +40,19 @@ let cachedConfig: AppConfig | null = null
 export function getConfig(): AppConfig {
   if (cachedConfig) return cachedConfig
 
+  // LLM 凭据按"整组"取值:LLM_API_KEY 非空 → 用 LLM_* 三元组;否则整组回退旧的 MIMO_*。
+  // 不逐变量混拼,避免"新 base + 旧 key"这类错配。清空 LLM_API_KEY 即整体回退 MiMo。
+  const useLegacyLlm = !process.env.LLM_API_KEY
+
   const raw = {
-    mimoApiKey: process.env.MIMO_API_KEY,
-    // Canonical env var is MIMO_BASE_URL (see .env.example / init.ts); MIMO_API_BASE kept as a
-    // backward-compat alias. Reading the wrong name silently dropped the override → dead default.
-    mimoApiBase: process.env.MIMO_BASE_URL ?? process.env.MIMO_API_BASE,
-    mimoModel: process.env.MIMO_MODEL,
+    llmApiKey: useLegacyLlm ? process.env.MIMO_API_KEY : process.env.LLM_API_KEY,
+    llmBaseUrl: useLegacyLlm
+      ? // MIMO_BASE_URL 是旧 canonical 名;MIMO_API_BASE 是更早的 alias
+        (process.env.MIMO_BASE_URL ?? process.env.MIMO_API_BASE ?? 'https://token-plan-cn.xiaomimimo.com/v1')
+      : (process.env.LLM_BASE_URL ?? 'https://api.siliconflow.cn/v1'),
+    llmModel: useLegacyLlm
+      ? (process.env.MIMO_MODEL ?? 'mimo-v2.5-pro')
+      : (process.env.LLM_MODEL ?? 'deepseek-ai/DeepSeek-V4-Pro'),
 
     doubaoAppId: process.env.DOUBAO_APP_ID,
     doubaoAccessKey: process.env.DOUBAO_ACCESS_KEY,

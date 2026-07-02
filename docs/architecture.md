@@ -4,7 +4,7 @@
 > 本文不复述历史实施计划,只描述"现在长什么样"。
 > 跟读"答对"的分层产品规则:ASR 字面命中只做基础推进信号,真正的发音质量评估需要原始 audio + reference text,当前还未接入专门 pronunciation scoring 服务。
 
-最近重大同步:**移除 dev 调试面板(切词 / 切阶段)(2026-06-30)** — 删除仅 `NODE_ENV=development` 显示的 `DevPhasePanel`(快速切词 + 强制切阶段)及其全部后端机制:`PhasedLessonController.forceTransition`、`LessonController.debugSkipCurrentWord`、`/api/chat?action=debug-skip-word`、`session.ts` 的 `debugSkipCurrentWord`/`DebugSkipWordResult` 及随之孤儿化的 `getTotalAttempts`/`resolveWordCardId`/`WordCard` import。真实 intro→interactive→reinforcement 切换路径(`onV2State`/`onV2Progress` → `performTransition` → `/api/chat?action=phase-transition` → `setSessionPhase`)完全不受影响,`phase-transition` route 分支、`setSessionPhase`、`session-phase.test.ts` 全部保留。删/改 4 个测试文件(`debug-skip-word.test.ts` 整删,lesson-controller / PhasedLessonView / phased-lesson-controller 各去一例),残留引用扫描为零,333 单测过,tsc/lint clean,smoke 通过。上次重大同步:**课堂循环 bug 簇 + filler 停用 + skip-word 调试面板(2026-06-21)** — (1) "请老师再说"误推卡:`streamUserInput` 把喂 LLM 的 `userText` 与孩子真实说的 `rawAsrText` 分离,R2 字面计数只看 `rawAsrText`,`start`/`phase-transition`/repeat 这些系统轮传 `''` 不计(根因:repeat 指令文本含当前词被当成孩子命中);(2) reinforcement 跟读热词:`startListening({routeToChat:false})` 清掉冻结的词卡上下文(`magic` 课冻在 `princess`),热词 fallback 全课词表;(3) `knight`/`night` 同音词:给 `magic` 课 `knight` 加 `asrAliases:["night","夜晚"]`,ASR 真实输出被接受为命中(确定性修法,热词偏置只是补充);(4) 停用 thinking 占位音 filler(实测会误导成没听到孩子),`LessonController` 不再 fetch/enqueue `thinking-filler.pcm`;(5) 新增 dev `skip word` 调试面板(`/api/chat?action=debug-skip-word`,仅改 session-local 进度)。新增回归:repeat-no-skip / reinforcement-context / knight-alias / debug-skip-word;312 单测过,smoke 11/11+2/2 UI。上次重大同步:**课堂闭环可靠性修复 §1(2026-06-15)** — 修复 6 个会静默冻死/错位/哑火课堂的 bug + id-7:(1) `startListening` 三条错误早返回(startRecorder throw / asr.open reject / 启动中被取消)现在都释放 `recorderLock`,ASR 连接失败后再按空格不再永久失效;(2) `armSpeechFinishFallback` 兜底定时器现在也 flush `pendingActions`(抽出 `flushPendingActions()` 供 session-finished / error / session-lost / 兜底四处复用),TTS finish 帧丢失时画面不再与老师语音错位;(3) `SpeechExtractor.finalize()` 在 `JSON.parse(buffer)` 成功时优先返回解析出的 `speech`,修复"非-speech 值被 SSE chunk 边界切断导致整轮老师哑火"(流式 delta 当前未被消费,仅 finalize 结果入链);(6) `consumeSSE` 包 try/finally,流出错时释放 reader lock 且不误跑 afterDone;(4) LLM 卡死防护:`mimo/llm.ts` fetch 加 15s 总超时(`AbortSignal.timeout` + 客户端 signal 经 `AbortSignal.any` 合并,一个 signal 同时覆盖连接卡死与流中卡死),`LessonController` 加 20s `chatWatchdog` 后备(首个 SSE 事件清除 + state guard 防长正常语音误触发),SSE `error` 事件现在从 thinking/speaking 自救回 awaiting;(5) controller `error` 事件首次有 UI 订阅 —— `PhasedLessonView` 订阅 `v2.on('error')` 渲染绘本风、4s 自动消失的提示横幅,覆盖全部四个阶段;(id-7) `finalize` 的 `malformed` 标志现在被消费:解析失败且无可恢复 speech 时 `streamUserInput` yield `error` 让客户端友好重试,不再静默成空轮。新增 10 个单测(lesson-controller 7 / speech-extractor 2 / session-malformed 2),smoke:lesson 13/13 过。上次重大同步:**SessionStore + SQLite migrations(2026-05-30)** — 活动课堂 session 现在通过 `SessionStore` 边界读写,当前实现仍是进程内 `InMemorySessionStore`,但 `session.ts` 不再直接拥有 module-level Map;SQLite 初始化改为 `schema_migrations` + versioned migration runner,现有三张表作为 v1 `initial_lesson_schema` 幂等创建。上次重大同步:**Reliability P0/P1 修复(2026-05-30)** — 只读聚合 API(`/api/progress` / `/api/stats` / `/api/sessions`)现在会初始化 SQLite schema,不再依赖 `/api/chat` 先创建表;TTS proxy 会在 Doubao `ConnectionStarted` 前按顺序缓存 `session-start` / `text-chunk` / `session-finish` / `session-cancel`,避免本地 WS 已 open 但 upstream 未 ready 时丢开场白;`LessonController.startLesson()` / `PhasedLessonController.startLesson()` 返回启动是否成功,`PhasedLessonView` 失败时回到可重试的未开始界面。上次重大同步:**Guard pipeline 重构(2026-05-24)** — 把 `streamUserInput` 里的 4 段内联 guard 逻辑拆成 `src/lib/agent/guards/` 下的独立模块(GuardContext / GuardFn / runPipeline + closingGuard / prematureClosingGuard / normalizeActions / speechCardAlign);`streamUserInput` 从 169 行压缩到 60 行;每个 guard 有独立单测;行为不变。上次重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+最近重大同步:**LLM 供应商切换 MiMo → OpenAI 兼容端点 + 命名泛化(2026-07-02)** — LLM 调用方换成 SiliconFlow(`deepseek-ai/DeepSeek-V4-Pro`),协议不变(本就是 OpenAI 格式 chat/completions + SSE + `response_format: json_object`)。`src/lib/mimo/llm.ts` 移到 `src/lib/llm.ts`,config 字段 `mimoApiKey/mimoApiBase/mimoModel` → `llmApiKey/llmBaseUrl/llmModel`,env 改名 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`。回退兼容是**整组 fallback**:`LLM_API_KEY` 非空用 `LLM_*` 三元组,否则整组回退 `MIMO_*`(含更早的 `MIMO_API_BASE` alias),不逐变量混拼,避免"新 base + 旧 key"错配;清空 `LLM_API_KEY` 即一键回退 MiMo。`init.ts` 启动校验同步改为"两组 key 有一即可"。随切换真实 smoke 暴露并修复两项:(1) **trailing sentence 卡劫持 currentCardId**——commit 取最后一张 show_card 不分卡类型,DeepSeek 惯于附带 `sentence_<word>` 例句卡(MiMo 从不),currentCardId 变 sentence 卡后 `applyAttemptAssessment` 因 kind!=='word' 永久跳过 R2 计数,孩子答对不推进;修法 `getLastWordShowCardId`(word 卡才能当教学目标,sentence 卡仅展示),`normalize-actions` 复用同一 helper,附回归单测,smoke 校验放行 `sentence_<word>` 收尾展示。(2) **LLM 双层超时 15s/20s → 20s/25s**——DeepSeek 正常轮 5-15s(首 token 中位 ~3.5s,慢在生成段),15s 上限会误杀 ~1/10 正常轮。性能基线表(first-token ~4s 等)是 MiMo 时代实测,待重测。上次重大同步:**移除 dev 调试面板(切词 / 切阶段)(2026-06-30)** — 删除仅 `NODE_ENV=development` 显示的 `DevPhasePanel`(快速切词 + 强制切阶段)及其全部后端机制:`PhasedLessonController.forceTransition`、`LessonController.debugSkipCurrentWord`、`/api/chat?action=debug-skip-word`、`session.ts` 的 `debugSkipCurrentWord`/`DebugSkipWordResult` 及随之孤儿化的 `getTotalAttempts`/`resolveWordCardId`/`WordCard` import。真实 intro→interactive→reinforcement 切换路径(`onV2State`/`onV2Progress` → `performTransition` → `/api/chat?action=phase-transition` → `setSessionPhase`)完全不受影响,`phase-transition` route 分支、`setSessionPhase`、`session-phase.test.ts` 全部保留。删/改 4 个测试文件(`debug-skip-word.test.ts` 整删,lesson-controller / PhasedLessonView / phased-lesson-controller 各去一例),残留引用扫描为零,333 单测过,tsc/lint clean,smoke 通过。上次重大同步:**课堂循环 bug 簇 + filler 停用 + skip-word 调试面板(2026-06-21)** — (1) "请老师再说"误推卡:`streamUserInput` 把喂 LLM 的 `userText` 与孩子真实说的 `rawAsrText` 分离,R2 字面计数只看 `rawAsrText`,`start`/`phase-transition`/repeat 这些系统轮传 `''` 不计(根因:repeat 指令文本含当前词被当成孩子命中);(2) reinforcement 跟读热词:`startListening({routeToChat:false})` 清掉冻结的词卡上下文(`magic` 课冻在 `princess`),热词 fallback 全课词表;(3) `knight`/`night` 同音词:给 `magic` 课 `knight` 加 `asrAliases:["night","夜晚"]`,ASR 真实输出被接受为命中(确定性修法,热词偏置只是补充);(4) 停用 thinking 占位音 filler(实测会误导成没听到孩子),`LessonController` 不再 fetch/enqueue `thinking-filler.pcm`;(5) 新增 dev `skip word` 调试面板(`/api/chat?action=debug-skip-word`,仅改 session-local 进度)。新增回归:repeat-no-skip / reinforcement-context / knight-alias / debug-skip-word;312 单测过,smoke 11/11+2/2 UI。上次重大同步:**课堂闭环可靠性修复 §1(2026-06-15)** — 修复 6 个会静默冻死/错位/哑火课堂的 bug + id-7:(1) `startListening` 三条错误早返回(startRecorder throw / asr.open reject / 启动中被取消)现在都释放 `recorderLock`,ASR 连接失败后再按空格不再永久失效;(2) `armSpeechFinishFallback` 兜底定时器现在也 flush `pendingActions`(抽出 `flushPendingActions()` 供 session-finished / error / session-lost / 兜底四处复用),TTS finish 帧丢失时画面不再与老师语音错位;(3) `SpeechExtractor.finalize()` 在 `JSON.parse(buffer)` 成功时优先返回解析出的 `speech`,修复"非-speech 值被 SSE chunk 边界切断导致整轮老师哑火"(流式 delta 当前未被消费,仅 finalize 结果入链);(6) `consumeSSE` 包 try/finally,流出错时释放 reader lock 且不误跑 afterDone;(4) LLM 卡死防护:`mimo/llm.ts` fetch 加 15s 总超时(`AbortSignal.timeout` + 客户端 signal 经 `AbortSignal.any` 合并,一个 signal 同时覆盖连接卡死与流中卡死),`LessonController` 加 20s `chatWatchdog` 后备(首个 SSE 事件清除 + state guard 防长正常语音误触发),SSE `error` 事件现在从 thinking/speaking 自救回 awaiting;(5) controller `error` 事件首次有 UI 订阅 —— `PhasedLessonView` 订阅 `v2.on('error')` 渲染绘本风、4s 自动消失的提示横幅,覆盖全部四个阶段;(id-7) `finalize` 的 `malformed` 标志现在被消费:解析失败且无可恢复 speech 时 `streamUserInput` yield `error` 让客户端友好重试,不再静默成空轮。新增 10 个单测(lesson-controller 7 / speech-extractor 2 / session-malformed 2),smoke:lesson 13/13 过。上次重大同步:**SessionStore + SQLite migrations(2026-05-30)** — 活动课堂 session 现在通过 `SessionStore` 边界读写,当前实现仍是进程内 `InMemorySessionStore`,但 `session.ts` 不再直接拥有 module-level Map;SQLite 初始化改为 `schema_migrations` + versioned migration runner,现有三张表作为 v1 `initial_lesson_schema` 幂等创建。上次重大同步:**Reliability P0/P1 修复(2026-05-30)** — 只读聚合 API(`/api/progress` / `/api/stats` / `/api/sessions`)现在会初始化 SQLite schema,不再依赖 `/api/chat` 先创建表;TTS proxy 会在 Doubao `ConnectionStarted` 前按顺序缓存 `session-start` / `text-chunk` / `session-finish` / `session-cancel`,避免本地 WS 已 open 但 upstream 未 ready 时丢开场白;`LessonController.startLesson()` / `PhasedLessonController.startLesson()` 返回启动是否成功,`PhasedLessonView` 失败时回到可重试的未开始界面。上次重大同步:**Guard pipeline 重构(2026-05-24)** — 把 `streamUserInput` 里的 4 段内联 guard 逻辑拆成 `src/lib/agent/guards/` 下的独立模块(GuardContext / GuardFn / runPipeline + closingGuard / prematureClosingGuard / normalizeActions / speechCardAlign);`streamUserInput` 从 169 行压缩到 60 行;每个 guard 有独立单测;行为不变。上次重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
 
 **当前运行范围**:本项目现阶段只作为本地电脑浏览器工具使用,默认访问方式是桌面浏览器打开 `localhost`。暂不支持 iPadOS app、移动端 Web、或面向公网发布后的移动兼容。
 
@@ -19,8 +19,9 @@
 │  pcm-recorder       │── WS ──▶│  /api/voice/asr      │── WS ──▶│  bigmodel_async │
 │  + Recorder/        │         │  (按轮建连 + buffer)  │         └─────────────────┘
 │    HoldToTalk       │         │                      │                          
-│                     │         │ Chat / SSE           │── HTTP ▶│ MiMo LLM        │
-│ LessonController    │◀── SSE ─│  /api/chat           │  stream │  mimo-v2.5-pro  │
+│                     │         │ Chat / SSE           │── HTTP ▶│ LLM(OpenAI兼容) │
+│ LessonController    │◀── SSE ─│  /api/chat           │  stream │  SiliconFlow    │
+│                     │         │                      │         │  DeepSeek-V4-Pro│
 │  (浏览器调度状态机)  │         │  (SpeechExtractor)   │         └─────────────────┘
 │                     │         │                      │                          
 │ PcmPlayer           │         │ TTS proxy            │         │ 豆包流式 TTS     │
@@ -40,7 +41,7 @@
 | 文件 | 职责(一句话) |
 |------|--------------|
 | `server.ts` | 自定义 Next.js server,WebSocket upgrade 路由分发 |
-| `src/lib/init.ts` | 启动期 env 校验(DOUBAO_*、MIMO_*),`VOICE_MOCK=true` 时放行;只读聚合 API 可单独调用 `ensureDatabaseInitialized()` 建表 |
+| `src/lib/init.ts` | 启动期 env 校验(DOUBAO_*;LLM_API_KEY 或旧名 MIMO_API_KEY 有一即可),`VOICE_MOCK=true` 时放行;只读聚合 API 可单独调用 `ensureDatabaseInitialized()` 建表 |
 | `src/lib/voice/doubao-codec.ts` | 豆包二进制协议编解码,ASR/TTS 共用 |
 | `src/lib/voice/asr-proxy.ts` | server 端 ASR 代理,**握手期 PCM buffer + finish 缓存 + 按 currentCardId/nextCardId 注入 hot_words(无 cardId 时 fallback 全课词)** |
 | `src/lib/voice/tts-proxy.ts` | server 端 TTS 代理,**长连复用**(StartConnection 一次,session 多次),ConnectionStarted 前缓存 session 控制帧 |
@@ -48,7 +49,7 @@
 | `src/lib/voice/asr-client.ts` | 浏览器 ASR WS 包装,`finish()` 通知 proxy 录音结束 |
 | `src/lib/voice/tts-client.ts` | 浏览器 TTS WS 包装,转发 startSession/text-chunk/finishSession/cancel |
 | `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,8 状态机,统一编排 ASR + SSE + TTS + 静态 quiz TTS** |
-| `src/lib/voice/turn-timeout-guard.ts` | 命名一次性恢复计时器(asrFinal 5s / chatWatchdog 20s / speechFinish 1.5s)的 arm/clear/clearAll 记账;recovery 回调仍在 controller(staticSpeech 10s promise 超时不归它管) |
+| `src/lib/voice/turn-timeout-guard.ts` | 命名一次性恢复计时器(asrFinal 5s / chatWatchdog 25s / speechFinish 1.5s)的 arm/clear/clearAll 记账;recovery 回调仍在 controller(staticSpeech 10s promise 超时不归它管) |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
 | `src/lib/agent/session-store.ts` | 活动课堂 session 的存取边界;当前默认实现是进程内 `InMemorySessionStore`,后续 SQLite resume 应替换这里而不是在 `session.ts` 里加第二套 Map |
 | `src/lib/agent/session.ts` | LLM 一轮对话骨架:通过 `SessionStore` 查找 session + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn |
@@ -56,7 +57,7 @@
 | `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta;导出 `sanitizeSpeech` 剥离 `xxx_yyy` 这种 card_id token,防止 TTS 把 `_` 读成"下划线 / underscore"** |
 | `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史、当前词精确尝试判定 |
 | `src/lib/agent/prompt.ts` | 课堂 system prompt 拼装,包含已学词总结与连续失败切策略约束 |
-| `src/lib/mimo/llm.ts` | MiMo 调用,`streamLLM` 异步生成 token delta + final usage |
+| `src/lib/llm.ts` | OpenAI 兼容 chat/completions 调用(当前 SiliconFlow DeepSeek),`streamLLM` 异步生成 token delta + final usage;`LLM_*` / 旧 `MIMO_*` 整组 fallback 见 `config.ts` |
 | `src/lib/audio/recorder.ts` | **mic + AudioContext + worklet 模块单例**,`prewarmRecorder` 在 startLesson 提前就绪 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
@@ -132,12 +133,12 @@ PhasedLessonView mount → new LessonController → new PhasedLessonController
 ASR final 到达 client
   └─ controller.handleAsrFinal(text)
        ├─ clearTimeout(asrFinalTimer), asr.close, asr=null
-       ├─ armChatWatchdog(20s):无任何 SSE 事件到达则 abort + 自救回 awaiting(首事件清除)
+       ├─ armChatWatchdog(25s):无任何 SSE 事件到达则 abort + 自救回 awaiting(首事件清除)
        ├─ POST /api/chat { action:'message', sessionId, text, asrResult }
-       │   (server fetch 15s 总超时;超时 → SSE error → client 从 thinking 自救)
+       │   (server fetch 20s 总超时;超时 → SSE error → client 从 thinking 自救)
        │   server: add raw ASR user message
-       │           → buildPromptInput 生成 MiMo system prompt + inputBreakdown(静态规则 / phase / 课程定义 / 状态 / history)
-       │           → streamLLM (MiMo, prompt 含 currentCardId/cardProgress/drillParts)
+       │           → buildPromptInput 生成 system prompt + inputBreakdown(静态规则 / phase / 课程定义 / 状态 / history)
+       │           → streamLLM (prompt 含 currentCardId/cardProgress/drillParts)
        │           → SpeechExtractor 状态机 → server guards → normalize show_card(过滤/替换已通过或非当前目标卡) → speech/show_card 对齐 → SSE
        │           → commit attempt_assessment + 归一化后的 show_card 到 cardProgress/clearedCardIds
        │           → token_usage 记录 LLM + ASR + TTS 字符数;interaction_logs.model_calls.llm 记录 inputBreakdown 供课后报告量化
@@ -225,7 +226,7 @@ controller.endLesson:
 - `awaiting → listening`:用户按下空格(必经 awaiting,**不支持**从 speaking 打断)
 - `listening → awaiting`:松开 + 录音 < 800ms(短按拦截)
 - `listening → thinking`:松开 + 录音 ≥ 800ms,只等待 ASR final / LLM / TTS;不播放本地 thinking 占位音
-- `thinking → awaiting`:5 秒 ASR-final 兜底超时,或 final text 为空,或 20s `chatWatchdog` 超时(LLM/路由卡死),或服务端 SSE `error`(含 15s LLM 超时)
+- `thinking → awaiting`:5 秒 ASR-final 兜底超时,或 final text 为空,或 25s `chatWatchdog` 超时(LLM/路由卡死),或服务端 SSE `error`(含 20s LLM 超时)
 - `thinking → speaking`:收到第一个 speech-delta(`onFirstSpeech`)
 - `speaking → awaiting`:TTS session-finished(或 1.5s speech-finish 兜底,两者都 flushPendingActions)
 - `awaiting → quiz-speaking → awaiting`:reinforcement 静态 quiz TTS 播放,不经过 `/api/chat` 与 LLM
@@ -338,7 +339,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 | worklet flush 残余 | 不丢尾字 | 之前未满 200ms 的 buffer 在 disconnect 时被丢 |
 | 短按 < 800ms 前端拦截 | 不进 thinking 不空等;若 keyup 早于 ASR/recorder startup settle,先记录 stoppedAt,等 startup settle 后再 close,避免撕掉 connecting WS 产生假 upstream error | 豆包对 < 1.5s 录音置信度不够,大概率 timeout;真实短按是本地 UX 事件,不应被记录成 provider 故障 |
 | 5s 不 9s 的 ASR final 兜底 | 用户更快感知失败 | 9s 太长,影响"再说一次"的连续性 |
-| LLM 卡死双层超时(server 15s / client 20s) | 正常链路 ~6s 出首声(首 token ~4s + 生成 ~2.2s),15s 留安全余量;client 20s 后备 | 上游接受连接后中途卡死(无 [DONE])会让课堂永远停在 thinking;server 超时把卡死转成 SSE error,client watchdog 兜住整路由无响应的情况 |
+| LLM 卡死双层超时(server 20s / client 25s) | SiliconFlow DeepSeek-V4-Pro 正常轮 ~5-15s(首 token 中位 ~3.5s,慢在生成段),20s 留安全余量;client 25s 后备(MiMo 时代为 15s/20s,按正常链路 ~6s 调) | 上游接受连接后中途卡死(无 [DONE])会让课堂永远停在 thinking;server 超时把卡死转成 SSE error,client watchdog 兜住整路由无响应的情况 |
 | thinking 占位音 filler | 已停用;`LessonController` 不再在 thinking 阶段本地 enqueue 预制音频 | 实测会在 ASR/LLM/TTS 正常运行时插入“让老师看看哦”,被误解成没听到孩子发音;真实首音频延迟仍需换更快 LLM / prompt 首句策略 / Hybrid 预渲染解决 |
 | 不打断(speaking 时空格忽略) | 简化优先 | 实测打断后 inflight PCM 难完全清干净;后续再加 |
 | ~~字幕领先音频~~ → **R1 已修复** | actions(`show_card`)缓冲到 `tts.session-finished` 再 emit | 实测 bd78d967 报告确认 UX 杀手;`pendingActions` in `LessonController` 解决;TTS error 路径也释放 |
@@ -369,13 +370,15 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 **主要瓶颈**:MiMo first-token 4 秒。前端再快也只能省几百 ms。可选优化:换更快模型 / prompt 强制最先吐 speech / 思考期播一句"嗯..."占位。
 
+**注**:上表为 MiMo 时代实测基线;2026-07-02 起 LLM 已切换为 SiliconFlow DeepSeek-V4-Pro,延迟待重测。
+
 ---
 
 ## 8. 已知不足(指向 TODO.md 详情)
 
 - **课程 Session resume**:活动 session 已有 `SessionStore` 边界,但默认实现仍是进程内 `InMemorySessionStore`;server 重启 / 刷新 / 断网后客户端旧 sessionId 仍会失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。完整 resume 仍需 SQLite-backed store + client resume 流程。
 - ~~**actions 与 TTS 时序**~~ — **已修复(R1)**:`pendingActions` 缓冲机制,`show_card` emit 推迟到 `tts.session-finished`
-- **MiMo first-token 4 秒**:首音频延迟主要瓶颈,前端无法优化
+- **LLM first-token 延迟**:首音频延迟主要瓶颈,前端无法优化(MiMo 时代实测 4 秒;已切 SiliconFlow DeepSeek-V4-Pro,待重测)
 - **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。当前由教学循环 v1.1 的 LLM `attempt_assessment` 基于 raw ASR + currentCardId + drillParts 做课堂内容错判定,真实儿童语音效果等下一节课实测
 - **Token 消耗偏高**:LLM message history 已裁到最近 12 条(约 6 轮),仍未做摘要压缩
 - **音色微调**:Tina老师2.0 当前满足,后续可做更细试听

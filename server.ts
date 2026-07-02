@@ -20,7 +20,7 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 async function main() {
-  log.info('Starting EduAgent server', { port: config.port, dev, voiceMock: config.voiceMock, mimoApiBase: config.mimoApiBase });
+  log.info('Starting EduAgent server', { port: config.port, dev, voiceMock: config.voiceMock, llmBaseUrl: config.llmBaseUrl });
 
   await app.prepare();
 

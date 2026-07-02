@@ -9,10 +9,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
 import { createSession, endSession, streamUserInput } from './session';
-import type { StreamEvent } from '@/lib/mimo/llm';
+import type { StreamEvent } from '@/lib/llm';
 
-vi.mock('@/lib/mimo/llm', () => ({ streamLLM: vi.fn() }));
-import { streamLLM } from '@/lib/mimo/llm';
+vi.mock('@/lib/llm', () => ({ streamLLM: vi.fn() }));
+import { streamLLM } from '@/lib/llm';
 const mockStreamLLM = vi.mocked(streamLLM);
 
 async function* llm(speech: string, actions: any[] = [], stateUpdate: any = {}): AsyncGenerator<StreamEvent> {

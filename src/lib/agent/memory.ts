@@ -138,7 +138,10 @@ export function commitAssistantStreamResult(
   const messages = [...memory.messages, message].slice(-MAX_HISTORY);
   const response: AgentResponse = { speech, actions, state_update: stateUpdate };
   const assessedMemory = applyAttemptAssessment(memory, course, response, rawAsrText);
-  const nextCardId = getLastShowCardId(actions) || assessedMemory.currentCardId;
+  // R2 教学目标只能是 word 卡:sentence 兄弟卡允许展示(normalizeAssistantActions 放行
+  // sentence_<active>),但若让它改写 currentCardId,下一轮 applyAttemptAssessment 会因
+  // kind !== 'word' 跳过 R2 计数,孩子答对也不推进(DeepSeek 实测踩中,MiMo 从不发 sentence 卡)。
+  const nextCardId = getLastWordShowCardId(actions, course) || assessedMemory.currentCardId;
   const actionProgress = applyShowCardProgress(assessedMemory.cardProgress, actions);
   return {
     ...assessedMemory,
@@ -236,10 +239,12 @@ export function normalizeAssistantActions(
   return actions;
 }
 
-function getLastShowCardId(actions: ToolAction[]): string {
+/** The last show_card that targets a WORD card (sentence siblings are display-only). */
+export function getLastWordShowCardId(actions: ToolAction[], course: Course): string {
+  const wordCardIds = new Set(course.cards.filter((c) => c.kind === 'word').map((c) => c.id));
   for (let i = actions.length - 1; i >= 0; i--) {
     const action = actions[i];
-    if (action.tool === 'show_card' && action.params.card_id) return action.params.card_id;
+    if (action.tool === 'show_card' && wordCardIds.has(action.params.card_id)) return action.params.card_id;
   }
   return '';
 }

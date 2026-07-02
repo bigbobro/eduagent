@@ -312,8 +312,9 @@ function validateStep(step: Step, turn: TurnResult): { pass: boolean; reasons: s
   }
   if (step.expectShowCard !== null && step.expectShowCard !== undefined) {
     const last = turn.showCards[turn.showCards.length - 1];
-    if (last && last !== step.expectShowCard) {
-      reasons.push(`last show_card=${last}, expected ${step.expectShowCard}`);
+    // R-C 允许当前词的 sentence 兄弟卡收尾展示(sentence_<word>),不算错卡。
+    if (last && last !== step.expectShowCard && last !== `sentence_${step.expectShowCard}`) {
+      reasons.push(`last show_card=${last}, expected ${step.expectShowCard} (or its sentence_* sibling)`);
     }
   }
   const mismatch = validateSpeechMatchesShownCard(turn);

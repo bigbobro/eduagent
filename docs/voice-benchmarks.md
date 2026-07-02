@@ -67,3 +67,28 @@
 - 跑测时关闭其他大流量应用(避免网络抖动)。
 - 第一次 round-trip 因为 TTS WS 还没有 cache,可能比第 2 轮起慢 ~200ms。本批 r1 已包含 TTS 长连握手(~3.7s 的 ConnectionStarted),开场白阶段已经握手完,r1 之后没再 ConnectionStarted。
 - 失败原因(timeout 4 次)分析:豆包 ASR 在收到 PCM < ~10 个包(< 2 秒)时,识别置信度不够,utterance 全部 `definite=false`,即使我们发了负序号终止包,豆包仍不返回 isFinal=true 的帧 → 客户端 9 秒 timeout 兜底。**用户体感:这种情况下小朋友按下立即松开 / 按下还没说话就松开,系统会"卡 9 秒后让你再说一次"**。本身不是 bug,是产品体验,后续可考虑 stopListening 时检测录音时长 < 500ms 直接 fallback、不进 thinking。
+
+---
+
+# LLM 供应商切换后基线(SiliconFlow DeepSeek-V4-Pro,2026-07-02)
+
+**背景:** LLM 从 MiMo(mimo-v2.5-pro)切换为 SiliconFlow `deepseek-ai/DeepSeek-V4-Pro`(OpenAI 兼容 chat/completions)。本批不是完整语音链路实测,是两组服务端测量,浏览器端 push-to-talk 全链路待下次真人课补测。
+
+## 直连探针(scratchpad llm-probe,短 prompt,3 轮)
+
+| 轮 | first token | 整轮 | JSON 解析 | usage |
+|----|------------|------|-----------|-------|
+| 1 | 4376ms | 5610ms | OK | 92/76 |
+| 2 | 3489ms | 4710ms | OK | 92/107 |
+| 3 | 2786ms | 4195ms | OK | 92/113 |
+
+兼容性:SSE 流式(含 `[DONE]`)/ `response_format: json_object` / `stream_options: include_usage` 全部支持。
+
+## 真实课堂 smoke(`SMOKE_BASE=:3001 pnpm smoke:lesson`,真实 system prompt,11 步)
+
+- 每步总耗时(含路由 + guard + SSE 消费):4.5s ~ 14.2s,中位 ~7.3s
+- 对比 MiMo 时代整轮 ~6s:**DeepSeek-V4-Pro 生成段更慢、输出更长,尾部(~1/10 轮)可超 15s**
+- 因此 LLM 服务端总超时 15s → **20s**,client chatWatchdog 20s → **25s**(超时误杀正常轮变成 SSE error,孩子白等一轮)
+- 三次 smoke:修复 sentence 卡劫持 bug 前 2/11;修复后 10/11(1 轮 15s 超时误杀);上调超时后 **11/11 + UI 2/2**
+
+**体感注意:** 孩子等待老师响应的时间比 MiMo 时代更长(中位 ~7s vs ~6s,尾部可到 14s+)。如实际课堂体感不可接受,候选动作:换更快的模型(改 `.env.local` 的 `LLM_MODEL` 即可)/ prompt 约束 speech 更短 / 恢复 thinking 占位音。

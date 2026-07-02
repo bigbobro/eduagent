@@ -464,7 +464,7 @@ describe('§1 loop-reliability fixes', () => {
       controller.on('error', (err) => errors.push(err.message));
 
       (controller as any).armChatWatchdog();
-      vi.advanceTimersByTime(20000);
+      vi.advanceTimersByTime(25000);
 
       expect(errors).toContain('我有点没反应过来…我们再聊一句?');
       expect(controller.getState()).toBe('awaiting');
@@ -490,7 +490,7 @@ describe('§1 loop-reliability fixes', () => {
 
   // bug 4 (server timeout surfaces as an SSE error): client must recover from thinking.
   it('recovers to awaiting when the server sends an SSE error while thinking', async () => {
-    const frames = 'event: error\ndata: {"message":"MiMo LLM API error: 504"}\n\n';
+    const frames = 'event: error\ndata: {"message":"LLM API error: 504"}\n\n';
     vi.stubGlobal('fetch', vi.fn(async () => makeSseResponse(frames)));
     const controller = new LessonController();
     (controller as any).bindTtsHandlers();

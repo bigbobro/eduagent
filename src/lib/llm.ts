@@ -1,12 +1,13 @@
-import { getConfig } from '../config';
-import { createLogger } from '../logger';
+import { getConfig } from './config';
+import { createLogger } from './logger';
 
-const log = createLogger('mimo-llm');
+const log = createLogger('llm');
 
-// Bounded overall deadline for a single LLM turn. Normal path is ~6s (first token ~4s + generation
-// ~2.2s); 15s leaves safe margin while preventing a stalled upstream from freezing the lesson.
-// The client has a 20s watchdog as a backstop (see lesson-controller.ts CHAT_WATCHDOG_MS).
-const LLM_TIMEOUT_MS = 15000;
+// Bounded overall deadline for a single LLM turn. SiliconFlow DeepSeek-V4-Pro normal path is
+// ~5-15s(first token 中位 ~3.5s,慢在生成段;2026-07-02 smoke 实测),20s leaves margin while
+// preventing a stalled upstream from freezing the lesson.(MiMo 时代 ~6s/15s。)
+// The client has a 25s watchdog as a backstop (see lesson-controller.ts CHAT_WATCHDOG_MS).
+const LLM_TIMEOUT_MS = 20000;
 
 export interface LLMUsage {
   inputTokens: number;
@@ -39,7 +40,7 @@ export async function* streamLLM(
   const start = Date.now();
   const apiMessages = [{ role: 'system', content: systemPrompt }, ...messages];
 
-  log.debug('Calling MiMo LLM', { model: config.mimoModel, messageCount: apiMessages.length });
+  log.debug('Calling LLM', { model: config.llmModel, messageCount: apiMessages.length });
 
   // Aborting this signal also rejects the in-progress reader.read(), so one deadline covers both a
   // connect stall and a mid-stream stall. Combined with the caller's cancel signal so a client
@@ -47,14 +48,14 @@ export async function* streamLLM(
   const timeoutSignal = AbortSignal.timeout(LLM_TIMEOUT_MS);
   const fetchSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
-  const res = await fetch(`${config.mimoApiBase}/chat/completions`, {
+  const res = await fetch(`${config.llmBaseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.mimoApiKey}`,
+      Authorization: `Bearer ${config.llmApiKey}`,
     },
     body: JSON.stringify({
-      model: config.mimoModel,
+      model: config.llmModel,
       messages: apiMessages,
       response_format: { type: 'json_object' },
       temperature: 0.7,
@@ -67,8 +68,8 @@ export async function* streamLLM(
   if (!res.ok || !res.body) {
     const errorBody = await res.text().catch(() => '');
     // Sanitize error to prevent info disclosure (don't leak full API response body to client)
-    const sanitized = `MiMo LLM API error: ${res.status} ${res.statusText}`;
-    log.error('MiMo LLM request failed', { status: res.status, statusText: res.statusText });
+    const sanitized = `LLM API error: ${res.status} ${res.statusText}`;
+    log.error('LLM request failed', { status: res.status, statusText: res.statusText });
     throw new Error(sanitized);
   }
 

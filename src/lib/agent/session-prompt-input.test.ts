@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
-import type { StreamEvent } from '@/lib/mimo/llm';
+import type { StreamEvent } from '@/lib/llm';
 
 vi.mock('@/lib/db/queries', () => ({
   createLessonLog: vi.fn(),
@@ -10,12 +10,12 @@ vi.mock('@/lib/db/queries', () => ({
   upsertWordPerformance: vi.fn(),
 }));
 
-vi.mock('@/lib/mimo/llm', () => ({
+vi.mock('@/lib/llm', () => ({
   streamLLM: vi.fn(),
 }));
 
 import { insertInteraction } from '@/lib/db/queries';
-import { streamLLM } from '@/lib/mimo/llm';
+import { streamLLM } from '@/lib/llm';
 import { createSession, endSession, streamUserInput } from './session';
 
 const mockInsertInteraction = vi.mocked(insertInteraction);

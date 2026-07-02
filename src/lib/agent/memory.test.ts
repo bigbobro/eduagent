@@ -73,6 +73,40 @@ describe('card progress updates', () => {
     expect(next.clearedCardIds).not.toContain('apple');
   });
 
+  it('a trailing sentence show_card must not hijack currentCardId (R2 keeps counting)', () => {
+    let memory: any = {
+      ...initializeCardProgress(createMemory(), foodCourse),
+      currentCardId: 'apple',
+    };
+
+    // 1st hit turn: LLM 附带展示例句卡且排在最后(DeepSeek 实测行为)。
+    memory = commitAssistantStreamResult(
+      memory,
+      foodCourse,
+      'This is an apple!',
+      [
+        { tool: 'show_card', params: { card_id: 'apple' } },
+        { tool: 'show_card', params: { card_id: 'sentence_apple' } },
+      ],
+      { current_word: 'apple' },
+      'Apple.'
+    );
+    expect(memory.currentCardId).toBe('apple'); // 不能变成 sentence_apple
+    expect(memory.cardCorrectCount.apple).toBe(1);
+
+    // 2nd hit turn: 计数必须继续,清卡推进。
+    memory = commitAssistantStreamResult(
+      memory,
+      foodCourse,
+      'Great job!',
+      [{ tool: 'show_card', params: { card_id: 'apple' } }],
+      { current_word: 'apple' },
+      'Apple.'
+    );
+    expect(memory.cardCorrectCount.apple).toBe(2);
+    expect(memory.cardProgress.apple).toBe('cleared');
+  });
+
   it('R-C: two R2 hits clear the card and lock further counting', () => {
     let memory: any = {
       ...initializeCardProgress(createMemory(), foodCourse),

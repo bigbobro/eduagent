@@ -11,7 +11,7 @@ import {
   initializeCardProgress,
 } from './memory';
 import { buildPromptInput } from './prompt';
-import { streamLLM } from '@/lib/mimo/llm';
+import { streamLLM } from '@/lib/llm';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 import { createLessonLog, finishLessonLog, touchLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
 import { GuardContext, runPipeline } from './guards/index';

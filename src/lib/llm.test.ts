@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Avoid real env / .env.local: streamLLM only needs base + key + model from config.
-vi.mock('../config', () => ({
+vi.mock('./config', () => ({
   getConfig: () => ({
-    mimoApiBase: 'http://test.local/v1',
-    mimoApiKey: 'test-key',
-    mimoModel: 'test-model',
+    llmBaseUrl: 'http://test.local/v1',
+    llmApiKey: 'test-key',
+    llmModel: 'test-model',
   }),
 }));
 
@@ -76,7 +76,7 @@ describe('streamLLM abort + error paths', () => {
     );
 
     const gen = streamLLM('sys', [{ role: 'user', content: 'hi' }]);
-    await expect(gen.next()).rejects.toThrow('MiMo LLM API error: 500 Server Error');
+    await expect(gen.next()).rejects.toThrow('LLM API error: 500 Server Error');
     await expect(
       streamLLM('sys', [{ role: 'user', content: 'hi' }]).next(),
     ).rejects.not.toThrow('secret upstream stack trace');

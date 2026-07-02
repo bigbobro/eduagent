@@ -9,14 +9,14 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { animalsCourse } from '@/data/courses/animals';
 import { foodCourse } from '@/data/courses/food';
 import { createSession, endSession, streamUserInput } from './session';
-import type { StreamEvent } from '@/lib/mimo/llm';
+import type { StreamEvent } from '@/lib/llm';
 
 // Override streamLLM with a controllable mock
-vi.mock('@/lib/mimo/llm', () => ({
+vi.mock('@/lib/llm', () => ({
   streamLLM: vi.fn(),
 }));
 
-import { streamLLM } from '@/lib/mimo/llm';
+import { streamLLM } from '@/lib/llm';
 const mockStreamLLM = vi.mocked(streamLLM);
 
 async function* asyncMakeStreamEvents(speech: string, actions: any[] = [], stateUpdate: any = {}): AsyncGenerator<StreamEvent> {

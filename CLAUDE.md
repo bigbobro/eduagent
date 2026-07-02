@@ -4,7 +4,7 @@
 
 ## 项目是什么
 
-儿童英语教学 Agent,多模态:豆包流式 ASR / TTS + 小米 MiMo LLM 大脑 + 浏览器画布交互。
+儿童英语教学 Agent,多模态:豆包流式 ASR / TTS + OpenAI 兼容 LLM 大脑(当前 SiliconFlow DeepSeek-V4-Pro,曾为小米 MiMo)+ 浏览器画布交互。
 
 - **主入口**:`README.md`(项目介绍 + 怎么跑)
 - **当前架构事实文档**:`docs/architecture.md`(living doc,master 上系统的现状)
@@ -45,10 +45,10 @@
 
 ## 关键约束(继承自 spec)
 
-- **密钥不出服务端。** 任何 `NEXT_PUBLIC_*` 前缀的豆包/MiMo 密钥都是 PR review 一票否决。
+- **密钥不出服务端。** 任何 `NEXT_PUBLIC_*` 前缀的豆包/LLM 密钥都是 PR review 一票否决。
 - **Push-to-talk 单一交互。** 不做撤回、不区分长短按。当前版本不支持打断(老师说话时空格忽略)。
 - **TTS 长连复用 / ASR 按轮建连。** 详见 architecture.md。
-- **VOICE_MOCK=true** 跳过豆包/MiMo,本地无网络可跑全链路(为了 CI 与离线开发)。
+- **VOICE_MOCK=true** 跳过豆包/LLM,本地无网络可跑全链路(为了 CI 与离线开发)。
 
 ## 课程内容生成规则
 
@@ -59,13 +59,13 @@
 **任何文档(README、spec、plan、CLAUDE.md、architecture.md、TODO、benchmarks、git commit message、PR description)中,严禁出现真实凭据值。**
 
 包括但不限于:
-- `MIMO_API_KEY`(`tp-...` 开头)、`DOUBAO_ACCESS_KEY`、`DOUBAO_APP_ID`
+- `LLM_API_KEY`(SiliconFlow `sk-...` 开头)、旧的 `MIMO_API_KEY`(`tp-...` 开头)、`DOUBAO_ACCESS_KEY`、`DOUBAO_APP_ID`
 - 数据库连接串里的密码段
 - OAuth client secret、JWT signing key
 
 文档里需要演示 env 配置时,**只能用占位**:
 ```
-MIMO_API_KEY=<your-mimo-api-key>
+LLM_API_KEY=<your-llm-api-key>
 DOUBAO_ACCESS_KEY=<your-access-key>
 ```
 

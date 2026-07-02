@@ -1,12 +1,12 @@
 # EduAgent - 儿童英语教学 Agent / Children's English Teaching Agent
 
 EduAgent 是一个本地浏览器里的多模态儿童英语教学原型。它把浏览器端
-push-to-talk 交互、Next.js 自定义 server、豆包流式 ASR/TTS、MiMo LLM
+push-to-talk 交互、Next.js 自定义 server、豆包流式 ASR/TTS、OpenAI 兼容 LLM(当前为 SiliconFlow DeepSeek)
 和 SQLite 课堂日志串成一个可迭代的 teacher-agent 实验环境。
 
 EduAgent is a local-browser prototype for a multimodal English teaching agent
 for children. It combines browser push-to-talk interaction, a custom Next.js
-server, Doubao streaming ASR/TTS, a MiMo LLM teacher loop, and SQLite lesson
+server, Doubao streaming ASR/TTS, an OpenAI-compatible LLM teacher loop (currently SiliconFlow DeepSeek), and SQLite lesson
 logs into one iteration-friendly teaching-agent workspace.
 
 > 当前项目定位 / Current scope:
@@ -20,7 +20,7 @@ logs into one iteration-friendly teaching-agent workspace.
 ```text
 浏览器                                  Next.js 自定义 server                     上游
 AudioWorklet PCM ── WS ───────────────> ASR proxy /api/voice/asr ── WS ───────> 豆包流式 ASR
-LessonController <── SSE ───────────── /api/chat ──────────────── HTTP ──────> MiMo LLM
+LessonController <── SSE ───────────── /api/chat ──────────────── HTTP ──────> LLM (OpenAI 兼容)
 PCM Player ─────── WS ────────────────> TTS proxy /api/voice/tts ── WS ───────> 豆包流式 TTS
                                            |
                                            v
@@ -69,8 +69,8 @@ cp .env.example .env.local
 
 需要的变量：
 
-- `MIMO_BASE_URL`
-- `MIMO_API_KEY`
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
 - `DOUBAO_APP_ID`
 - `DOUBAO_ACCESS_KEY`
 - `DOUBAO_ASR_RESOURCE_ID`
@@ -122,7 +122,7 @@ pnpm smoke:lesson
 安全策略见 [`SECURITY.md`](SECURITY.md)。核心原则：
 
 - Provider 密钥只在服务端读取。
-- 不使用 `NEXT_PUBLIC_*` 暴露 MiMo 或 Doubao 密钥。
+- 不使用 `NEXT_PUBLIC_*` 暴露 LLM 或 Doubao 密钥。
 - `.env.local`、本地 SQLite runtime DB 和私有 lesson reports 不应提交。
 - 本项目当前不是生产级多用户托管服务。
 
@@ -137,7 +137,7 @@ pnpm smoke:lesson
 ```text
 Browser                                Custom Next.js server                    Providers
 AudioWorklet PCM -- WS --------------> ASR proxy /api/voice/asr -- WS -------> Doubao streaming ASR
-LessonController <-- SSE ------------- /api/chat ---------------- HTTP ------> MiMo LLM
+LessonController <-- SSE ------------- /api/chat ---------------- HTTP ------> LLM (OpenAI-compatible)
 PCM Player ------ WS ----------------> TTS proxy /api/voice/tts -- WS -------> Doubao streaming TTS
                                           |
                                           v
@@ -177,8 +177,8 @@ cp .env.example .env.local
 
 Required variables:
 
-- `MIMO_BASE_URL`
-- `MIMO_API_KEY`
+- `LLM_BASE_URL`
+- `LLM_API_KEY`
 - `DOUBAO_APP_ID`
 - `DOUBAO_ACCESS_KEY`
 - `DOUBAO_ASR_RESOURCE_ID`
@@ -228,7 +228,7 @@ websites.
 See [`SECURITY.md`](SECURITY.md). In short:
 
 - Provider secrets are read only by server-side code.
-- MiMo and Doubao secrets must not be exposed through `NEXT_PUBLIC_*`.
+- LLM and Doubao secrets must not be exposed through `NEXT_PUBLIC_*`.
 - `.env.local`, runtime SQLite databases, and private lesson reports should not
   be committed.
 - This repository is a local prototype, not a hardened hosted multi-user service.
