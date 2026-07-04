@@ -61,4 +61,14 @@ describe('AsrClient session URL context', () => {
     expect(buildAsrUrl({ courseId: 'colors', targetWords: [] })).not.toContain('targetWords=');
     expect(buildAsrUrl({ courseId: 'colors', targetWords: ['red', 'blue'] })).toContain('targetWords=red%2Cblue');
   });
+
+  it('appends one sentenceText param per quiz sentence (no comma joining)', () => {
+    const url = buildAsrUrl({
+      courseId: 'sports',
+      sentenceTexts: ['I play tennis.', 'I like swimming.'],
+    });
+    expect(url).toContain('sentenceText=I+play+tennis.');
+    expect(url).toContain('sentenceText=I+like+swimming.');
+    expect(buildAsrUrl({ courseId: 'sports', sentenceTexts: [] })).not.toContain('sentenceText=');
+  });
 });

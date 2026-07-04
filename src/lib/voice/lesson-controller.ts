@@ -25,6 +25,8 @@ type Listener<T = any> = (data: T) => void;
 
 interface StartListeningOptions {
   routeToChat?: boolean;
+  /** repeat-after-me 句子轮的 ASR 候选句(当前 quiz 句在前),仅 routeToChat:false 生效。 */
+  asrSentenceTexts?: string[];
 }
 
 export class LessonController {
@@ -51,6 +53,7 @@ export class LessonController {
   private courseId: string | null = null;
   private currentAsrCardId: string | null = null;
   private clearedCardIds: string[] = [];
+  private asrSentenceTexts: string[] = [];
   private ttsHandlersBound = false;
   private staticSpeech: {
     resolve: () => void;
@@ -93,6 +96,7 @@ export class LessonController {
     this.courseId = courseId;
     this.currentAsrCardId = null;
     this.clearedCardIds = [];
+    this.asrSentenceTexts = [];
     this.syncAsrSessionContext();
     this.setState('greeting');
     // 1) 并行启动:TTS 长连 + mic 预热 + player 预热(权限框、AudioContext、Worklet、MediaStream 全提前就绪)
@@ -138,6 +142,7 @@ export class LessonController {
     this.courseId = null;
     this.currentAsrCardId = null;
     this.clearedCardIds = [];
+    this.asrSentenceTexts = [];
     setAsrSessionContext({});
     this.listenStartup = null;
     await this.stopRecording();
@@ -225,9 +230,16 @@ export class LessonController {
     // Reinforcement repeat-after-me (routeToChat:false) has the child read whole sentences, not a
     // single word card. The interactive-phase word-card context is stale here (it freezes on the
     // LAST word card, e.g. "princess"), and injecting that one word as the sole ASR hot word biases
-    // recognition against the sentence. Drop it so hot words fall back to the full course vocabulary.
-    if (options.routeToChat === false && this.currentAsrCardId !== null) {
+    // recognition against the sentence. Drop it so hot words fall back to the full course vocabulary,
+    // and inject the quiz sentence candidates (2026-07-03) so the ASR biases toward the exact target
+    // sentence (fixes "I play tennis." → "I'll play Thomas."-style misrecognition).
+    if (options.routeToChat === false) {
       this.currentAsrCardId = null;
+      this.asrSentenceTexts = (options.asrSentenceTexts ?? []).filter(Boolean);
+      this.syncAsrSessionContext();
+    } else if (this.asrSentenceTexts.length > 0) {
+      // Word rounds must never inherit sentence candidates from a previous quiz turn.
+      this.asrSentenceTexts = [];
       this.syncAsrSessionContext();
     }
     this.setState('listening');
@@ -638,6 +650,7 @@ export class LessonController {
       ...(this.courseId ? { courseId: this.courseId } : {}),
       ...(this.currentAsrCardId ? { cardId: this.currentAsrCardId } : {}),
       ...(this.clearedCardIds.length > 0 ? { clearedCardIds: this.clearedCardIds } : {}),
+      ...(this.asrSentenceTexts.length > 0 ? { sentenceTexts: this.asrSentenceTexts } : {}),
     });
   }
 

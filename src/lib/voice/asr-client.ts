@@ -6,6 +6,8 @@ export interface AsrClientSessionContext {
   targetWords?: string[];
   cardId?: string;
   clearedCardIds?: string[];
+  /** repeat-after-me 句子轮的候选句(当前 quiz 句在前),注入 ASR 热词上下文。 */
+  sentenceTexts?: string[];
 }
 
 interface AsrPartial { type: 'partial'; text: string }
@@ -21,6 +23,7 @@ export function setAsrSessionContext(context: AsrClientSessionContext): void {
     ...context,
     targetWords: context.targetWords?.filter(Boolean),
     clearedCardIds: context.clearedCardIds?.filter(Boolean),
+    sentenceTexts: context.sentenceTexts?.filter(Boolean),
   };
 }
 
@@ -99,6 +102,10 @@ export function buildAsrUrl(context: AsrClientSessionContext): string {
   }
   if (context.clearedCardIds && context.clearedCardIds.length > 0) {
     params.set('clearedCardIds', context.clearedCardIds.join(','));
+  }
+  if (context.sentenceTexts && context.sentenceTexts.length > 0) {
+    // 每句一个 param(句子含空格/标点,不能 join(',') 后再被 proxy 切碎)
+    for (const text of context.sentenceTexts) params.append('sentenceText', text);
   }
   const query = params.toString();
   return query ? `${base}?${query}` : base;

@@ -138,6 +138,29 @@ describe('LessonController', () => {
     expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({ courseId: 'magic' });
   });
 
+  it('injects repeat-after-me sentence candidates and clears them on the next word round', async () => {
+    const controller = new LessonController();
+    (controller as any).sessionId = 'session-1';
+    (controller as any).courseId = 'sports';
+    (controller as any).setState('awaiting');
+
+    await controller.startListening({
+      routeToChat: false,
+      asrSentenceTexts: ['I play tennis.', 'I like swimming.'],
+    });
+
+    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({
+      courseId: 'sports',
+      sentenceTexts: ['I play tennis.', 'I like swimming.'],
+    });
+
+    // A regular word round (routeToChat default) must not inherit the quiz sentences.
+    (controller as any).setState('awaiting');
+    await controller.startListening();
+
+    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({ courseId: 'sports' });
+  });
+
   it('routes regular ASR final utterances to chat', async () => {
     const controller = new LessonController();
     (controller as any).sessionId = 'session-1';

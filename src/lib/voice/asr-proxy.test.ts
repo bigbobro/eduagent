@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { bridge } from './asr-proxy';
+import { bridge, buildAsrRequestPayload, parseAsrSessionInfoFromUrl } from './asr-proxy';
 import { decodeServerFrame, MessageType, Flags } from './doubao-codec';
 
 // Fake WS mirrors the shape tts-proxy.test.ts uses: an EventEmitter that records
@@ -32,6 +32,48 @@ function emitFinish(client: FakeWs): void {
 function upstreamFrames(upstream: FakeWs) {
   return upstream.sent.filter(Buffer.isBuffer).map((frame) => decodeServerFrame(frame));
 }
+
+function hotWordsOf(session: Parameters<typeof buildAsrRequestPayload>[0]): string[] {
+  const context = buildAsrRequestPayload(session).request.corpus?.context;
+  return context ? JSON.parse(context).hotwords.map((h: { word: string }) => h.word) : [];
+}
+
+describe('asr hot-word context (07-03-sentence-asr-context)', () => {
+  it('keeps the word-round card-window hot words unchanged (zero regression, no sentences)', () => {
+    const session = parseAsrSessionInfoFromUrl('/api/voice/asr?courseId=sports&cardId=tennis');
+    const words = hotWordsOf(session);
+
+    // Current card + next uncleared word — the pre-existing W2 window, nothing else.
+    expect(words).toEqual(['tennis', 'swimming']);
+    expect(words.some((word) => word.includes(' '))).toBe(false);
+  });
+
+  it('parses one sentenceText query param per sentence without splitting on punctuation', () => {
+    const session = parseAsrSessionInfoFromUrl(
+      '/api/voice/asr?courseId=sports&sentenceText=I%20play%20tennis.&sentenceText=I%20like%20swimming.',
+    );
+    expect(session.sentenceTexts).toEqual(['I play tennis.', 'I like swimming.']);
+  });
+
+  it('injects the quiz sentence (whole phrase + content words) ahead of the course-word fallback', () => {
+    const session = parseAsrSessionInfoFromUrl(
+      '/api/voice/asr?courseId=sports&sentenceText=I%20play%20tennis.&sentenceText=I%20like%20swimming.',
+    );
+    const words = hotWordsOf(session);
+
+    // Current sentence first: whole phrase (terminal punctuation stripped) then its content words.
+    expect(words.slice(0, 3)).toEqual(['I play tennis', 'play', 'tennis']);
+    // Adjacent quiz-group sentence as secondary candidates.
+    expect(words).toContain('I like swimming');
+    expect(words).toContain('like');
+    // The 2026-06-21 reinforcement fallback (whole course vocabulary) is preserved after them.
+    expect(words).toContain('soccer');
+    expect(words).toContain('badminton');
+    // Dedupe: "tennis"/"swimming" appear once even though they are also course words.
+    expect(words.filter((word) => word === 'tennis')).toHaveLength(1);
+    expect(words.filter((word) => word === 'swimming')).toHaveLength(1);
+  });
+});
 
 describe('asr-proxy bridge', () => {
   it('buffers handshake-period PCM and flushes it after upstream opens', () => {

@@ -59,6 +59,12 @@ Project-specific choices that should not drift without tests:
 - ASR hot words are derived from `courseId`, visible `cardId`, and
   `clearedCardIds` when available. The proxy uses the current card and the next
   uncleared word as a small W2 bias window.
+- For reinforcement repeat-after-me turns the client also sends `sentenceText`
+  query params (one per candidate sentence, current quiz sentence first). The
+  proxy injects both the whole sentence (terminal punctuation stripped) and its
+  content words as hot words ahead of the course-word fallback. Empirically
+  verified (2026-07-03 probe): multi-word hot-word entries containing spaces
+  are accepted by the endpoint without an error frame.
 
 ## Known Project Pitfalls
 

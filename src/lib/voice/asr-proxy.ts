@@ -26,6 +26,8 @@ export interface AsrSessionInfo {
   targetWords?: string[];
   cardId?: string;
   clearedCardIds?: string[];
+  /** repeat-after-me 句子轮的候选句(当前 quiz 句在前,同组相邻句在后)。 */
+  sentenceTexts?: string[];
 }
 
 interface AsrRequestPayload {
@@ -67,6 +69,11 @@ export function parseAsrSessionInfoFromUrl(reqUrl: string | undefined): AsrSessi
     .flatMap(splitWords)
     .map(cleanWord)
     .filter((word): word is string => Boolean(word));
+  // 句子候选每句一个 query param,整值保留(句子含空格/标点,不能走 splitWords 的逗号切分)
+  const sentenceTexts = url.searchParams
+    .getAll('sentenceText')
+    .map(cleanWord)
+    .filter((text): text is string => Boolean(text));
   const courseTargetWords = courseId ? getCourseTargetWords(courseId) : [];
   const targetWords = dedupeWords(queryTargetWords.length > 0 ? queryTargetWords : courseTargetWords);
   return {
@@ -74,6 +81,7 @@ export function parseAsrSessionInfoFromUrl(reqUrl: string | undefined): AsrSessi
     ...(targetWords.length > 0 ? { targetWords } : {}),
     ...(cardId ? { cardId } : {}),
     ...(clearedCardIds.length > 0 ? { clearedCardIds: dedupeWords(clearedCardIds) } : {}),
+    ...(sentenceTexts.length > 0 ? { sentenceTexts: dedupeWords(sentenceTexts) } : {}),
   };
 }
 
@@ -104,9 +112,38 @@ export function buildAsrRequestPayload(session: AsrSessionInfo = {}, uid: string
 }
 
 function buildHotWords(session: AsrSessionInfo): string[] {
+  // 句子轮(repeat-after-me)候选在最前;后面保持原有词卡窗口 / 整课词表回退不变。
+  // 句子轮由 client 清掉 cardId(2026-06-21 行为),windowWords 为空 → 整课词表仍然兜底。
+  const sentenceWords = getSentenceHotWords(session.sentenceTexts || []);
   const windowWords = getCardWindowHotWords(session.courseId, session.cardId, session.clearedCardIds || []);
-  const words = windowWords.length > 0 ? windowWords : [...(session.targetWords || [])];
+  const words = [
+    ...sentenceWords,
+    ...(windowWords.length > 0 ? windowWords : [...(session.targetWords || [])]),
+  ];
   return dedupeWords(words.map(cleanWord).filter((word): word is string => Boolean(word)));
+}
+
+// R4 决策(任务 07-03-sentence-asr-context):豆包 corpus.context hotwords 的本地协议摘要
+// (docs/DOUBAO Protocol/asr.md)没有给出条目格式/长度限制,也没有 per-entry weight;
+// 2026-05-05 回归基线表明 hotword 只是轻量偏置。因此句子轮采取"整句 + 内容词"双注入:
+// - 整句(去句尾标点)作为短语级候选,供应商若支持多词条目可整体偏置;
+// - 内容词(≥3 个字母,与 ReinforceFrame 判分 token 切法一致)保证即使短语条目被忽略,
+//   判分实际 grep 的词(如 "play"/"tennis")也各自获得偏置——修复
+//   "I play tennis." → "I'll play Thomas."(tennis→Thomas)这类句子误识。
+// 当前 quiz 句在前,同组相邻句在后(次级候选)。
+function getSentenceHotWords(sentenceTexts: string[]): string[] {
+  const words: string[] = [];
+  for (const sentence of sentenceTexts) {
+    const phrase = sentence.replace(/[.!?。!?]+\s*$/, '').trim();
+    if (phrase) words.push(phrase);
+    const tokens = sentence
+      .toLowerCase()
+      .replace(/[^a-z\s-]/g, ' ')
+      .split(/\s+/)
+      .filter((word) => word.length > 2);
+    words.push(...tokens);
+  }
+  return dedupeWords(words);
 }
 
 function getCourseTargetWords(courseId: string): string[] {

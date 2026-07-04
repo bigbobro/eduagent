@@ -24,6 +24,15 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
     () => quiz.targetText.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter((word) => word.length > 2),
     [quiz.targetText],
   );
+  // ASR 热词候选句:当前 quiz 句在前,同组其余 repeat-after-me 句作次级候选
+  // (孩子偶尔会读到别的句子;proxy 端按顺序注入 corpus.context)。
+  const asrSentenceTexts = useMemo(() => {
+    const siblings = course.phases.reinforcement.quizzes
+      .filter((item): item is Extract<Quiz, { type: 'repeat-after-me' }> => item.type === 'repeat-after-me')
+      .map((item) => item.targetText)
+      .filter((text) => text !== quiz.targetText);
+    return [quiz.targetText, ...siblings];
+  }, [course, quiz.targetText]);
   const canHold = (state === 'awaiting' || state === 'listening') && hasHeardPrompt && !promptPlaying;
   const catMood = promptPlaying || state === 'quiz-speaking' ? 'speaking' : heardSentence ? 'cheer' : 'happy';
 
@@ -60,7 +69,7 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
   const start = () => {
     if (!canHold) return;
     setListening(true);
-    controller.startListening({ routeToChat: false });
+    controller.startListening({ routeToChat: false, asrSentenceTexts });
   };
   const stop = () => {
     setListening(false);

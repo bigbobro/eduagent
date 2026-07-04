@@ -9,6 +9,16 @@ const quiz = foodCourse.phases.reinforcement.quizzes.find((item) => item.type ==
   { type: 'repeat-after-me' }
 >;
 
+// ASR sentence candidates the frame passes to startListening: current quiz sentence first,
+// the remaining repeat-after-me sentences of the group as secondary candidates.
+const expectedAsrSentenceTexts = [
+  quiz.targetText,
+  ...foodCourse.phases.reinforcement.quizzes
+    .filter((item): item is typeof quiz => item.type === 'repeat-after-me')
+    .map((item) => item.targetText)
+    .filter((text) => text !== quiz.targetText),
+];
+
 function mockController(state: LessonStateName): any {
   const handlers = new Map<string, (event: any) => void>();
   return {
@@ -31,7 +41,10 @@ describe('ReinforceFrame', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '按住 Space' })).toHaveProperty('disabled', false));
 
     fireEvent.pointerDown(screen.getByRole('button', { name: '按住 Space' }));
-    expect(controller.startListening).toHaveBeenCalledWith({ routeToChat: false });
+    expect(controller.startListening).toHaveBeenCalledWith({
+      routeToChat: false,
+      asrSentenceTexts: expectedAsrSentenceTexts,
+    });
   });
 
   it('keeps recording while a captured pointer leaves the button', async () => {
@@ -47,7 +60,10 @@ describe('ReinforceFrame', () => {
     fireEvent.pointerDown(button, { pointerId: 1 });
     fireEvent.pointerLeave(button, { pointerId: 1 });
 
-    expect(controller.startListening).toHaveBeenCalledWith({ routeToChat: false });
+    expect(controller.startListening).toHaveBeenCalledWith({
+      routeToChat: false,
+      asrSentenceTexts: expectedAsrSentenceTexts,
+    });
     expect(controller.stopListening).not.toHaveBeenCalled();
 
     fireEvent.pointerUp(button, { pointerId: 1 });
