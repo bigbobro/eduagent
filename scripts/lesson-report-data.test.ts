@@ -11,7 +11,8 @@ function createMemDb(): Database.Database {
       start_time TEXT NOT NULL,
       end_time TEXT,
       interaction_count INTEGER DEFAULT 0,
-      token_usage TEXT DEFAULT '{}'
+      token_usage TEXT DEFAULT '{}',
+      ended_gracefully INTEGER DEFAULT 0
     );
     CREATE TABLE interaction_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,19 +41,21 @@ interface SeedSession {
   startTime: string;
   endTime?: string | null;
   tokenUsage?: object;
+  endedGracefully?: boolean;
   interactions?: Array<{ user: string; ai: string; actions?: unknown[]; ts?: string; modelCalls?: object }>;
 }
 
 function seedSession(db: Database.Database, s: SeedSession): void {
   db.prepare(
-    'INSERT INTO lesson_logs (id, course_id, start_time, end_time, interaction_count, token_usage) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO lesson_logs (id, course_id, start_time, end_time, interaction_count, token_usage, ended_gracefully) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(
     s.id,
     s.courseId,
     s.startTime,
     s.endTime ?? null,
     s.interactions?.length ?? 0,
-    JSON.stringify(s.tokenUsage ?? {})
+    JSON.stringify(s.tokenUsage ?? {}),
+    s.endedGracefully ? 1 : 0
   );
   s.interactions?.forEach((it, i) => {
     db.prepare(
@@ -503,6 +506,36 @@ describe('buildReport — anomaly flags', () => {
     expect(r.anomalies.tokensCorrupted).toBe(true);
     expect(r.tokens.llm.input).toBe(0);
     expect(r.tokens.asr.requests).toBe(0);
+  });
+});
+
+// R1 (2026-07-04, session 6f6e7bec): touchLessonLog now writes token_usage every turn, so a
+// non-empty token_usage no longer implies action:'end' fired. endedGracefully reads the
+// dedicated flag instead of piggybacking on `ended` (end_time non-NULL).
+describe('buildReport — sessionHealth.endedGracefully (R1)', () => {
+  it('is true when the lesson was finished via the graceful action:end path', async () => {
+    const db = createMemDb();
+    seedSession(db, {
+      id: 'graceful', courseId: 'food', startTime: '2026-07-04T00:00:00.000Z',
+      endTime: '2026-07-04T00:10:00.000Z', endedGracefully: true,
+    });
+    const r = await buildReport(db, 'graceful', noopCourseLoader);
+    expect(r.eval.sessionHealth.ended).toBe(true);
+    expect(r.eval.sessionHealth.endedGracefully).toBe(true);
+  });
+
+  it('is false for a touch-only lesson even though end_time and token_usage are both set', () => {
+    const db = createMemDb();
+    seedSession(db, {
+      id: 'touched', courseId: 'food', startTime: '2026-07-04T00:00:00.000Z',
+      endTime: '2026-07-04T00:10:00.000Z', // touchLessonLog sets this every turn
+      tokenUsage: { llm: { requests: 5, inputTokens: 5000, outputTokens: 500 } },
+      // endedGracefully omitted → 0
+    });
+    return buildReport(db, 'touched', noopCourseLoader).then((r) => {
+      expect(r.eval.sessionHealth.ended).toBe(true); // end_time non-NULL — unchanged semantics
+      expect(r.eval.sessionHealth.endedGracefully).toBe(false); // but never graceful-finished
+    });
   });
 });
 

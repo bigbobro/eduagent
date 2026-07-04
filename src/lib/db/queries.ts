@@ -12,20 +12,24 @@ export function createLessonLog(id: string, courseId: string): void {
 export function finishLessonLog(id: string, interactionCount: number, tokenUsage: TokenUsage): void {
   const db = getDb();
   db.prepare(
-    'UPDATE lesson_logs SET end_time = ?, interaction_count = ?, token_usage = ? WHERE id = ?'
+    'UPDATE lesson_logs SET end_time = ?, interaction_count = ?, token_usage = ?, ended_gracefully = 1 WHERE id = ?'
   ).run(new Date().toISOString(), interactionCount, JSON.stringify(tokenUsage), id);
 }
 
 // Incremental finalization: bump end_time + interaction_count on every committed turn so a
 // lesson whose client never sends action:'end' (tab close / refresh / crash) still has a
-// non-NULL end_time — otherwise stats count its duration as 0. The graceful finishLessonLog
-// stays the final flush (it also writes token_usage). end_time IS NULL is not used as a
-// liveness flag anywhere, so writing it mid-lesson is safe.
-export function touchLessonLog(id: string, interactionCount: number): void {
+// non-NULL end_time — otherwise stats count its duration as 0. R1 (2026-07-04, session
+// 6f6e7bec): also carry token_usage on every touch — previously it was ONLY written by the
+// graceful finishLessonLog, so a lesson that never sent action:'end' permanently reported
+// {} (0 req/0 in/0 out, ASR/TTS "not tracked" false alarms) even though every turn's usage
+// was tracked in memory the whole time. ended_gracefully is left untouched here (stays
+// whatever it was — 0 by default) so it still tells graceful-end apart from touched-only;
+// end_time IS NULL is not used as a liveness flag anywhere, so writing it mid-lesson is safe.
+export function touchLessonLog(id: string, interactionCount: number, tokenUsage: TokenUsage): void {
   const db = getDb();
   db.prepare(
-    'UPDATE lesson_logs SET end_time = ?, interaction_count = ? WHERE id = ?'
-  ).run(new Date().toISOString(), interactionCount, id);
+    'UPDATE lesson_logs SET end_time = ?, interaction_count = ?, token_usage = ? WHERE id = ?'
+  ).run(new Date().toISOString(), interactionCount, JSON.stringify(tokenUsage), id);
 }
 
 export function insertInteraction(lessonId: string, log: InteractionLog): void {

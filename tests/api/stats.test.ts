@@ -25,7 +25,7 @@ describe('/api/stats', () => {
   });
 
   it('totalWordsMastered matches progress aggregator', async () => {
-    memDb.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-10T10:00:00Z','2026-05-10T10:30:00Z',3,'{}')`).run();
+    memDb.prepare(`INSERT INTO lesson_logs (id, course_id, start_time, end_time, interaction_count, token_usage) VALUES ('l1','food','2026-05-10T10:00:00Z','2026-05-10T10:30:00Z',3,'{}')`).run();
     memDb.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','apple',10,10,0)`).run();
     const res = await GET();
     const json = await res.json();

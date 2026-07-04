@@ -53,4 +53,38 @@ describe('normalizeActions wrapper', () => {
     expect(result.actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'bird')).toBe(true);
     expect(result.forceCardId).toBe('bird');
   });
+
+  // R2 (2026-07-04, n=41): reinforcement's phaseOpening turn must not get a forced word
+  // show_card injected — see flow-correctness.test.ts for the full end-to-end scenario.
+  it('skips the forced show_card on a reinforcement phaseOpening turn', () => {
+    const memory = initializeCardProgress(createMemory(), animalsCourse);
+    const ctx: GuardContext = {
+      speech: '接下来我们玩个游戏!',
+      actions: [],
+      stateUpdate: {},
+      memory,
+      course: animalsCourse,
+      asrText: '',
+      currentPhase: 'reinforcement',
+      phaseOpening: true,
+    };
+    const result = normalizeActions(ctx);
+    expect(result.actions).toEqual([]);
+  });
+
+  it('still forces the show_card on a non-reinforcement phaseOpening turn (interactive intro)', () => {
+    const memory = initializeCardProgress(createMemory(), animalsCourse);
+    const ctx: GuardContext = {
+      speech: '大家好!我们开始学习吧!',
+      actions: [],
+      stateUpdate: {},
+      memory,
+      course: animalsCourse,
+      asrText: '',
+      currentPhase: 'interactive',
+      phaseOpening: true,
+    };
+    const result = normalizeActions(ctx);
+    expect(result.actions.some((a) => a.tool === 'show_card' && a.params.card_id === 'cat')).toBe(true);
+  });
 });

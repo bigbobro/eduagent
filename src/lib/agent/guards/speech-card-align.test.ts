@@ -83,7 +83,10 @@ describe('speechCardAlign', () => {
     });
     const result = speechCardAlign(ctx);
     const birdCard = animalsCourse.cards.find((c) => c.id === 'bird')!;
-    expect(result.speech).toBe(buildCardPrompt(birdCard));
+    // in-progress mode always keeps forceCardId === currentCardId (same card) — R3
+    // (2026-07-04) rewrites a same-card praise-toned turn into the reread confirmation,
+    // not the "starting fresh" full introduction template.
+    expect(result.speech).toBe(buildCardPrompt(birdCard, { tone: 'praise', reread: true }));
     expect(result.speech).not.toContain('dog');
     expect(result.speechRewrite).toBe('in-progress-leak');
   });
@@ -132,5 +135,53 @@ describe('buildCardPrompt tone', () => {
     expect(neutral.startsWith('没关系')).toBe(true);
     expect(neutral).not.toContain('做得好');
     expect(neutral).toContain(birdCard.english);
+  });
+});
+
+// R3 (2026-07-04, n=38→39 "你没读到Badminton?"): a same-card reread must confirm the child
+// was heard; a genuine new-card introduction keeps the original full template.
+describe('speechCardAlign — R3 same-card reread confirmation (2026-07-04)', () => {
+  const birdCard = animalsCourse.cards.find((c) => c.id === 'bird')!;
+
+  it('same-card praise rewrite (currentCardId === forceCardId) uses the confirmation variant', () => {
+    const memory = { ...initializeCardProgress(createMemory(), animalsCourse), currentCardId: 'bird' };
+    const ctx = makeCtx({
+      speech: '我们先停一下 bird,换一个词,看 dog!', // in-progress-leak, same card
+      forceCardId: 'bird',
+      rcMode: 'in-progress',
+      memory,
+    });
+    const result = speechCardAlign(ctx);
+    expect(result.speech).toContain('老师听到啦');
+    expect(result.speech).not.toContain('我们看这张卡'); // not the "starting fresh" template
+  });
+
+  it('new-card praise rewrite (movedToDifferentCard) keeps the original full-introduction template unchanged', () => {
+    const memory = { ...initializeCardProgress(createMemory(), animalsCourse), currentCardId: 'dog' };
+    const ctx = makeCtx({
+      speech: '做得很好！', // generic, no card mention — forceCardId differs from currentCardId
+      forceCardId: 'bird',
+      memory,
+    });
+    const result = speechCardAlign(ctx);
+    expect(result.speech).toBe(buildCardPrompt(birdCard, { tone: 'praise' }));
+    expect(result.speech).not.toContain('老师听到啦');
+  });
+
+  it('neutral branch is unaffected by same-card vs new-card (no confirmation variant)', () => {
+    const memory = { ...initializeCardProgress(createMemory(), animalsCourse), currentCardId: 'bird' };
+    const ctx = makeCtx({
+      speech: '看 dog!', // in-progress-leak, same card, but the attempt was wrong
+      forceCardId: 'bird',
+      rcMode: 'in-progress',
+      memory,
+      stateUpdate: {
+        current_word: 'bird',
+        attempt_assessment: { card_id: 'bird', result: 'wrong', should_advance: false, evidence: 'missed' },
+      },
+    });
+    const result = speechCardAlign(ctx);
+    expect(result.speech).toBe(buildCardPrompt(birdCard, { tone: 'neutral' }));
+    expect(result.speech).not.toContain('老师听到啦');
   });
 });

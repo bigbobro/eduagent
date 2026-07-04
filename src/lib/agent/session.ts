@@ -76,7 +76,7 @@ export function recordQuizAnswer(
       llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
     },
   });
-  touchLessonLog(session.id, session.memory.totalInteractions);
+  touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
   return true;
 }
 
@@ -110,6 +110,26 @@ export async function* streamUserInput(
     yield { type: 'error', message: `Session ${sessionId} not found` };
     return;
   }
+
+  // R4 (2026-07-04, session 6f6e7bec n=42): a real child utterance squeezed in during
+  // reinforcement (after the phaseOpening turn, before/between quizzes — quiz components
+  // route ASR with routeToChat:false, but a stray push-to-talk press from the still-mounted
+  // interactive screen can still land here with routeToChat:true) must not reach the LLM —
+  // the LLM has no teaching role once in reinforcement, and ended up repeating a second,
+  // semantically duplicate "let's play a game" opening. System/opening turns (rawAsrText ===
+  // '', phaseOpening) and quiz-answer turns (recordQuizAnswer never calls this function) are
+  // unaffected by this check.
+  if (
+    session.currentPhase === 'reinforcement'
+    && !opts.phaseOpening
+    && rawAsrText.trim() !== ''
+    && !userText.startsWith('[quiz:')
+    && !userText.startsWith('(切换到')
+  ) {
+    yield* respondWithoutLLM(session, userText, REINFORCEMENT_SQUEEZE_IN_SPEECH, asrResult);
+    return;
+  }
+
   session.memory = addUserMessage(session.memory, userText);
 
   // 2. LLM stream consumption
@@ -176,6 +196,54 @@ export async function* streamUserInput(
   commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency, inputBreakdown }, rawAsrText);
 
   // 7. Yield progress snapshot + done
+  let totalAttempts = 0;
+  session.memory.wordPerformance.forEach((p) => { totalAttempts += p.attempts; });
+  yield {
+    type: 'progress_snapshot',
+    clearedCardIds: [...session.memory.clearedCardIds],
+    totalAttempts,
+    currentPhase: session.currentPhase,
+    allWordsDone: allWordsFinished(session.memory, session.course),
+  };
+  yield { type: 'done' };
+}
+
+// R4 (2026-07-04): fixed reply for a real utterance squeezed in during reinforcement — see
+// the call site in streamUserInput for why the LLM is skipped entirely.
+const REINFORCEMENT_SQUEEZE_IN_SPEECH = '我们来玩游戏吧!';
+
+async function* respondWithoutLLM(
+  session: Session,
+  userText: string,
+  speech: string,
+  asrResult: { latency: number; tokens: number } | undefined,
+): AsyncGenerator<StreamUserEvent> {
+  yield { type: 'speech-delta', text: speech };
+  yield { type: 'speech-end' };
+  yield { type: 'actions', actions: [], state_update: {} };
+
+  // Accounting mirrors commitTurn minus the LLM cost (never called) and any memory/card
+  // mutation (nothing was taught this turn — the LLM guard pipeline never ran). userText is
+  // deliberately NOT added to session.memory.messages — there is no assistant reply to it in
+  // the conversation's sense, so it would otherwise leave a dangling, unanswered turn in the
+  // LLM message history.
+  session.memory.totalInteractions += 1;
+  if (asrResult) { session.tokenUsage.asr.requests += 1; session.tokenUsage.asr.tokens += asrResult.tokens; }
+  session.tokenUsage.tts.requests += 1;
+  session.tokenUsage.tts.characters += speech.length;
+  insertInteraction(session.id, {
+    timestamp: new Date(),
+    userInput: userText,
+    aiResponse: speech,
+    actions: [],
+    modelCalls: {
+      asr: asrResult,
+      llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
+      tts: { latency: 0, characters: speech.length },
+    },
+  });
+  touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+
   let totalAttempts = 0;
   session.memory.wordPerformance.forEach((p) => { totalAttempts += p.attempts; });
   yield {
@@ -257,6 +325,7 @@ function commitTurn(
       ...(Object.keys(guards).length ? { guards } : {}),
     },
   });
-  // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time.
-  touchLessonLog(session.id, session.memory.totalInteractions);
+  // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time
+  // AND a non-empty token_usage (R1 2026-07-04 — session.tokenUsage was already updated above).
+  touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
 }

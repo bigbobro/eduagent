@@ -28,11 +28,15 @@ describe('runMigrations', () => {
       'interaction_logs',
       'word_performance',
     ]));
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
     // v2: R-C 权威账本列(NULL = 未追踪)
     const wordPerfCols = db.prepare('PRAGMA table_info(word_performance)').all()
       .map((row) => (row as { name: string }).name);
     expect(wordPerfCols).toEqual(expect.arrayContaining(['rc_correct', 'rc_cleared']));
+    // v3: 非优雅结束标志(R1 2026-07-04)
+    const lessonLogCols = db.prepare('PRAGMA table_info(lesson_logs)').all()
+      .map((row) => (row as { name: string }).name);
+    expect(lessonLogCols).toContain('ended_gracefully');
   });
 
   it('is idempotent', () => {
@@ -45,6 +49,7 @@ describe('runMigrations', () => {
     expect(rows).toEqual([
       { version: 1, name: 'initial_lesson_schema' },
       { version: 2, name: 'word_performance_rc_state' },
+      { version: 3, name: 'lesson_logs_ended_gracefully' },
     ]);
   });
 
@@ -57,7 +62,7 @@ describe('runMigrations', () => {
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(2);
+    expect(getSchemaVersion(db)).toBe(3);
     expect(db.prepare('SELECT COUNT(*) AS count FROM lesson_logs').get()).toEqual({ count: 1 });
   });
 });

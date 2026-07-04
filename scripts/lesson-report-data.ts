@@ -63,6 +63,11 @@ interface EvalScorecard {
   sessionHealth: {
     status: 'ok' | 'warn' | 'fail';
     ended: boolean;
+    // R1 (2026-07-04, session 6f6e7bec): `ended` only means end_time is non-NULL, which
+    // touchLessonLog now sets on every turn — it no longer implies a graceful action:'end'.
+    // endedGracefully reads the dedicated DB flag (lesson_logs.ended_gracefully) so the report
+    // can tell "client closed the tab mid-lesson" apart from a real graceful end.
+    endedGracefully: boolean;
     durationSec: number | null;
     interactionCount: number;
     recordedInteractionCount: number;
@@ -184,6 +189,8 @@ interface LessonRow {
   end_time: string | null;
   interaction_count: number;
   token_usage: string;
+  // R1 (2026-07-04): undefined on pre-v3 DBs (older row shape) — treated as not-graceful.
+  ended_gracefully?: number | null;
 }
 
 interface InteractionRow {
@@ -488,6 +495,10 @@ function buildSessionHealth(
   return {
     status,
     ended: session.ended,
+    // R1: informational only — does not feed `issues`/`status` (asr/tts-not-tracked anomalies
+    // already self-correct now that touchLessonLog persists token_usage on every turn; the
+    // report author calls this out in prose when a lesson ended via tab-close/crash).
+    endedGracefully: Boolean(lesson.ended_gracefully),
     durationSec: session.durationSec,
     interactionCount: session.interactionCount,
     recordedInteractionCount: Number(lesson.interaction_count ?? 0),

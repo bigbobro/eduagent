@@ -5,6 +5,10 @@
  * - n=50: 转场前挤入的学生轮不得回到已过关词的教学模板。
  * - n=51: reinforcement 开场白(phaseOpening)不被 speechCardAlign 改写。
  * - F3 逃生阀: 连续 5 失败 park + 推进 / 队列尾回头 retry / retry 失败不阻塞转场 / 命中清零 streak。
+ *
+ * 流程正确性回归 (2026-07-04, session 6f6e7bec sports 真人课):
+ * - n=41: reinforcement phase-opening 轮不得强制注入词卡 show_card(R2)。
+ * - n=38→39: 同卡重读的 praise 改写必须带确认语,不能让孩子以为"没被听到"(R3)。
  * 全部使用 sports 课程真实数据(fake transport,不依赖豆包/LLM)。
  */
 import { describe, expect, it, vi } from 'vitest';
@@ -32,6 +36,7 @@ import {
 
 const WORD_ORDER = sportsCourse.teachingHints.newCardIds; // soccer … skating, volleyball, badminton
 const skatingCard = sportsCourse.cards.find((c) => c.id === 'skating')!;
+const badmintonCard = sportsCourse.cards.find((c) => c.id === 'badminton')!;
 
 function sportsMemory(overrides: Partial<LessonMemory> = {}): LessonMemory {
   return { ...initializeCardProgress(createMemory(), sportsCourse), ...overrides };
@@ -201,6 +206,90 @@ describe('n=51 regression: phase-opening 豁免 (R2)', () => {
 
     expect(result.speech).toBe(opening);
     expect(result.speechRewrite).toBeUndefined();
+  });
+});
+
+describe('n=41 regression: reinforcement phase-opening 不强制注入词卡 show_card (R2 2026-07-04)', () => {
+  it('leaves actions empty on the reinforcement opening turn even though jumping is the parked-out currentCardId', () => {
+    const cleared = WORD_ORDER.filter((id) => id !== 'jumping');
+    const memory = sportsMemory({
+      currentCardId: 'jumping',
+      cardProgress: progressWithCleared(cleared, { jumping: 'needs_review' }),
+      clearedCardIds: cleared,
+      parkedCardIds: ['jumping'],
+      parkRetryCardIds: ['jumping'],
+      cardAttemptStreak: { jumping: 1 },
+    });
+    const opening = '接下来我们玩个游戏!找一找,Where is soccer?';
+    const ctx: GuardContext = {
+      speech: opening,
+      actions: [], // LLM's opening speech carries no show_card of its own
+      stateUpdate: {},
+      memory,
+      course: sportsCourse,
+      asrText: '', // system turn
+      currentPhase: 'reinforcement',
+      phaseOpening: true,
+    };
+
+    const result = runGuards(ctx);
+
+    // Pre-fix this would force-inject show_card:jumping (the eval script's n=41 false
+    // positive: speech says "soccer", forced show_card says "jumping").
+    expect(result.actions).toEqual([]);
+    expect(result.speech).toBe(opening); // phaseOpening still exempts the speech itself (R2 07-03)
+  });
+
+  it('interactive phase-opening keeps forcing the first word show_card (zero regression)', () => {
+    const memory = sportsMemory(); // fresh course start, no card touched yet
+    const ctx: GuardContext = {
+      speech: '大家好!我们开始学习运动单词吧!',
+      actions: [], // transition speech also carries no show_card of its own
+      stateUpdate: {},
+      memory,
+      course: sportsCourse,
+      asrText: '',
+      currentPhase: 'interactive',
+      phaseOpening: true,
+    };
+
+    const result = runGuards(ctx);
+
+    // Interactive's phaseOpening (e.g. the n=2 soccer intro) must still get the forced
+    // first-card show_card — the R2 skip is scoped strictly to reinforcement.
+    expect(result.actions).toEqual([{ tool: 'show_card', params: { card_id: WORD_ORDER[0] } }]);
+  });
+});
+
+describe('n=38→39 regression: 同卡重读的 praise 改写带确认语 (R3 2026-07-04)', () => {
+  it('hit1 on badminton (in-progress, not yet cleared) rewrites to the reread confirmation, not a fresh-intro template', () => {
+    const cleared = WORD_ORDER.filter((id) => id !== 'badminton');
+    const memory = sportsMemory({
+      currentCardId: 'badminton',
+      cardProgress: progressWithCleared(cleared, { badminton: 'attempted' }),
+      clearedCardIds: cleared,
+      // no prior R2 hits yet — this turn's raw ASR "Badminton." below produces hit1
+      // (1 of the 2 required to clear), matching the real n=38 shape.
+    });
+    const ctx: GuardContext = {
+      // LLM praised without naming badminton, mentioning the just-cleared volleyball instead —
+      // real n=38 shape (in-progress leak on a same-card hit1).
+      speech: '太棒了!和 volleyball 说得一样好,再来一次!',
+      actions: [{ tool: 'show_card', params: { card_id: 'badminton' } }],
+      stateUpdate: correctAttempt('badminton'),
+      memory,
+      course: sportsCourse,
+      asrText: 'Badminton.',
+      currentPhase: 'interactive',
+    };
+
+    const result = runGuards(ctx);
+
+    expect(result.rcMode).toBe('in-progress'); // same card, not cleared yet
+    expect(result.speechRewrite).toBe('in-progress-leak');
+    expect(result.speech).toBe(buildCardPrompt(badmintonCard, { tone: 'praise', reread: true }));
+    expect(result.speech).toContain('老师听到啦');
+    expect(result.speech).not.toContain('我们看这张卡'); // not the "starting fresh" template
   });
 });
 

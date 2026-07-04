@@ -26,6 +26,7 @@ session: <id 前 8 位>... · <时长> · <轮次>轮 · <input> in / <output> o
 ```
 
 如 `session.ended === false`,在标题下加一行:`⚠️ 课程未正常结束(end_time 为空)`。
+如 `eval.sessionHealth.endedGracefully === false`(即使 `ended === true`,因为 `touchLessonLog` 每轮都会刷 `end_time`),在标题下加一行:`⚠️ 课程非优雅结束(未收到 action:end,可能是关标签页/崩溃)`。
 如 `anomalies.tokensCorrupted === true`,加一行:`⚠️ token_usage 解析失败,token 数字不可信`。
 
 ### 词汇覆盖与掌握

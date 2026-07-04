@@ -89,7 +89,15 @@ export const speechCardAlign: GuardFn = (ctx) => {
     });
     return {
       ...ctx,
-      speech: buildCardPrompt(primaryCard, { tone: assessmentIncorrect(ctx) ? 'neutral' : 'praise' }),
+      // R3 (2026-07-04, n=38→39): a praise-toned rewrite that stays on the SAME card (the
+      // child re-reads it, not a new card) must confirm the child was heard — the generic
+      // "做得好!我们看这张卡…" template reads as "starting fresh", which the child (n=39
+      // "你没读到Badminton?") took as "the teacher didn't hear me". A genuine new-card
+      // introduction (movedToDifferentCard) keeps the original template unchanged.
+      speech: buildCardPrompt(primaryCard, {
+        tone: assessmentIncorrect(ctx) ? 'neutral' : 'praise',
+        reread: !movedToDifferentCard,
+      }),
       speechRewrite: inProgressLeak ? 'in-progress-leak' : 'card-align',
     };
   }
@@ -135,11 +143,16 @@ export function buildParkedSwitchPrompt(
 
 export function buildCardPrompt(
   card: Course['cards'][number],
-  opts: { tone: 'praise' | 'neutral' } = { tone: 'praise' },
+  opts: { tone: 'praise' | 'neutral'; reread?: boolean } = { tone: 'praise' },
 ): string {
   // R4: neutral opener after an incorrect attempt — never "做得好!" when the child was wrong.
   if (opts.tone === 'neutral') {
     return `没关系,看这张卡!这是 ${card.chinese} ${card.english}. 跟老师一起说:${card.english}!`;
+  }
+  // R3 (2026-07-04): same-card reread — confirm the child was heard instead of the
+  // "starting fresh" full introduction template (n=38→39 "你没读到Badminton?" confusion).
+  if (opts.reread) {
+    return `做得好,老师听到啦!再读一遍:${card.english}!`;
   }
   return `做得好!我们看这张卡,这是 ${card.chinese} ${card.english}. 跟老师一起说:${card.english}!`;
 }

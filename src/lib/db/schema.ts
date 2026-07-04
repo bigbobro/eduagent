@@ -67,6 +67,21 @@ const MIGRATIONS: Migration[] = [
       if (!cols.includes('rc_cleared')) db.exec('ALTER TABLE word_performance ADD COLUMN rc_cleared INTEGER');
     },
   },
+  {
+    version: 3,
+    // R1 (2026-07-04, session 6f6e7bec): touchLessonLog now writes token_usage every turn
+    // (see queries.ts), so a non-empty token_usage no longer implies a graceful end. This
+    // explicit flag — set only by finishLessonLog (action:'end') — lets the report tell a
+    // graceful end apart from a lesson that was only ever touched (tab close / crash).
+    name: 'lesson_logs_ended_gracefully',
+    up(db) {
+      const cols = db.prepare('PRAGMA table_info(lesson_logs)').all()
+        .map((row) => (row as { name: string }).name);
+      if (!cols.includes('ended_gracefully')) {
+        db.exec('ALTER TABLE lesson_logs ADD COLUMN ended_gracefully INTEGER DEFAULT 0');
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -212,7 +212,14 @@ export function normalizeAssistantActions(
   course: Course,
   response: AgentResponse,
   rawAsrText?: string,
-  meta?: NormalizeActionsMeta
+  meta?: NormalizeActionsMeta,
+  // R2 (2026-07-04, session 6f6e7bec n=41): reinforcement's phaseOpening turn is server-driven
+  // opening speech, not a word-teaching turn — the reinforcement UI (quiz components) owns
+  // card display, not this action list. Forcing a word show_card here just so it "stays
+  // authoritative" produced a false-positive speech/card mismatch (opening said "soccer",
+  // forced show_card was the unrelated currentCardId "jumping"). skipForceShowCard leaves
+  // whatever the LLM emitted (usually nothing) instead of unshifting forceCardId.
+  opts?: { skipForceShowCard?: boolean }
 ): ToolAction[] {
   // Silent: this derivation only needs forceCardId and discards assessedMemory; the
   // authoritative pass (commitAssistantStreamResult) emits the R-C logs once per turn.
@@ -323,8 +330,9 @@ export function normalizeAssistantActions(
     console.warn('[normalize] show_card rejected by R-C', { rejected: cid, force: forceCardId });
     meta?.rejectedCardIds?.push(cid);
   }
-  // Ensure forceCardId is visible (server-authoritative).
-  if (forceCardId && !hasForceShowCard) {
+  // Ensure forceCardId is visible (server-authoritative) — unless this is a reinforcement
+  // phaseOpening turn (R2 2026-07-04), where forcing a word show_card is pure noise.
+  if (forceCardId && !hasForceShowCard && !opts?.skipForceShowCard) {
     actions.unshift({ tool: 'show_card', params: { card_id: forceCardId } });
   }
   return actions;

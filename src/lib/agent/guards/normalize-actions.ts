@@ -16,12 +16,17 @@ import { GuardFn } from './index';
 export const normalizeActions: GuardFn = (ctx) => {
   const { speech, actions, stateUpdate, memory, course, asrText } = ctx;
   const meta: NormalizeActionsMeta = {};
+  // R2 (2026-07-04, n=41): reinforcement's phaseOpening turn must not get a forced word
+  // show_card — interactive's phaseOpening (e.g. the n=2 soccer intro) is unaffected, this
+  // is scoped strictly to currentPhase === 'reinforcement'.
+  const skipForceShowCard = ctx.phaseOpening === true && ctx.currentPhase === 'reinforcement';
   const normalizedActions = normalizeAssistantActions(
     memory,
     course,
     { speech, actions, state_update: stateUpdate },
     asrText,
     meta,
+    { skipForceShowCard },
   );
   return {
     ...ctx,
