@@ -65,6 +65,25 @@ export function upsertWordPerformance(lessonId: string, word: string, correct: b
   }
 }
 
+// R-C 权威账本(2026-07-03 方案 A):cardCorrectCount / cleared 的落库镜像,只写
+// rc_* 两列,不碰上面 LLM 判定账本(attempts/correct/needs_review),两本账互不改写。
+export function upsertWordRcState(lessonId: string, word: string, rcCorrect: number, rcCleared: boolean): void {
+  const db = getDb();
+  const existing = db.prepare(
+    'SELECT id FROM word_performance WHERE lesson_id = ? AND word = ?'
+  ).get(lessonId, word);
+
+  if (existing) {
+    db.prepare(
+      'UPDATE word_performance SET rc_correct = ?, rc_cleared = ? WHERE lesson_id = ? AND word = ?'
+    ).run(rcCorrect, rcCleared ? 1 : 0, lessonId, word);
+  } else {
+    db.prepare(
+      'INSERT INTO word_performance (lesson_id, word, attempts, correct, needs_review, rc_correct, rc_cleared) VALUES (?, ?, 0, 0, 0, ?, ?)'
+    ).run(lessonId, word, rcCorrect, rcCleared ? 1 : 0);
+  }
+}
+
 // ─── Reads ───────────────────────────────────────────────────────────────
 // The single SQL boundary for the report tables. Read callers (progress.ts / stats.ts)
 // take an injected `db` (so tests can pass an in-memory database) and forward it here;

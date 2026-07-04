@@ -14,7 +14,7 @@ import {
 import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/llm';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
-import { createLessonLog, finishLessonLog, touchLessonLog, insertInteraction, upsertWordPerformance } from '@/lib/db/queries';
+import { createLessonLog, finishLessonLog, touchLessonLog, insertInteraction, upsertWordPerformance, upsertWordRcState } from '@/lib/db/queries';
 import { GuardContext, runPipeline } from './guards/index';
 import { closingGuard } from './guards/closing-guard';
 import { prematureClosingGuard } from './guards/premature-closing-guard';
@@ -197,6 +197,10 @@ function commitTurn(
   rawAsrText: string,
 ): void {
   const beforePerformance = new Map(session.memory.wordPerformance);
+  // R-C 权威账本落库(2026-07-03 方案 A):commit 前快照,commit 后按差异同步 rc_*。
+  const beforeRcCorrect = { ...session.memory.cardCorrectCount };
+  const beforeRcProgress = { ...session.memory.cardProgress };
+  const beforeRcStreak = { ...session.memory.cardAttemptStreak };
   session.memory = commitAssistantStreamResult(
     session.memory, session.course, ctx.speech, ctx.actions, ctx.stateUpdate, rawAsrText
   );
@@ -207,6 +211,21 @@ function commitTurn(
     if (after && (!before || after.attempts > before.attempts)) {
       upsertWordPerformance(session.id, ctx.stateUpdate.current_word, assessment.result === 'correct');
     }
+  }
+  // 任何 R2 命中 / 清卡 / streak 变化(含首个 wrong,让报告可判"已追踪")当轮落库。
+  // 键用 card.english 与 word_performance.word(LLM current_word)对齐。
+  for (const card of session.course.cards) {
+    if (card.kind !== 'word') continue;
+    const changed = (session.memory.cardCorrectCount[card.id] || 0) !== (beforeRcCorrect[card.id] || 0)
+      || session.memory.cardProgress[card.id] !== beforeRcProgress[card.id]
+      || (session.memory.cardAttemptStreak[card.id] || 0) !== (beforeRcStreak[card.id] || 0);
+    if (!changed) continue;
+    upsertWordRcState(
+      session.id,
+      card.english,
+      session.memory.cardCorrectCount[card.id] || 0,
+      session.memory.cardProgress[card.id] === 'cleared',
+    );
   }
   session.tokenUsage.llm.requests += 1;
   session.tokenUsage.llm.inputTokens += llm.inputTokens;

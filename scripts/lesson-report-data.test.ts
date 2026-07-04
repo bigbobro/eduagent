@@ -582,3 +582,109 @@ describe('buildReport — edge cases', () => {
     await expect(buildReport(db, 'nope', noopCourseLoader)).rejects.toThrow(/session not found/);
   });
 });
+
+// ─── R-C 权威账本(schema v2,2026-07-03 方案 A)──────────────────────────────
+// 真实事故:2026-07-03 sports 课运行时 12 词全部 R-C 过关,但 word_performance 的
+// LLM 判定账本每词只有 correct=1,报告按 correct>=2 判 cleared → clearRate=0 假报警。
+describe('buildReport — R-C authoritative clear state (rc_correct / rc_cleared)', () => {
+  function migrateRcColumns(db: Database.Database): void {
+    db.exec(`
+      ALTER TABLE word_performance ADD COLUMN rc_correct INTEGER;
+      ALTER TABLE word_performance ADD COLUMN rc_cleared INTEGER;
+    `);
+  }
+
+  it('prefers rc_cleared over legacy correct>=2 and reports clearRateSource=rc', async () => {
+    const db = createMemDb();
+    migrateRcColumns(db);
+    seedSession(db, { id: 'rc-1', courseId: 'food', startTime: '2026-07-03T13:00:00.000Z', endTime: '2026-07-03T13:20:00.000Z' });
+    // 2026-07-03 真实形态:LLM 账本 correct=1,但 R-C 两次命中已过关。
+    const words = ['apple', 'banana', 'bread', 'milk', 'egg', 'rice'];
+    words.forEach((word) => {
+      db.prepare(
+        'INSERT INTO word_performance (lesson_id, word, attempts, correct, needs_review, rc_correct, rc_cleared) VALUES (?, ?, 1, 1, 0, 2, 1)'
+      ).run('rc-1', word);
+    });
+
+    const r = await buildReport(db, 'rc-1', stubFoodLoader);
+    expect(r.eval.teachingLoop.clearRateSource).toBe('rc');
+    expect(r.eval.teachingLoop.clearedWordCount).toBe(6);
+    expect(r.eval.teachingLoop.clearRate).toBe(1);
+    expect(r.eval.teachingLoop.words.every((w) => w.cleared && w.rcTracked && w.rcCorrect === 2)).toBe(true);
+    // 不再出现 clear_rate_low / clear_rate_source_legacy 假报警
+    const keys = r.eval.nextIterationSignals.map((s) => s.key);
+    expect(keys).not.toContain('clear_rate_low');
+    expect(keys).not.toContain('clear_rate_source_legacy');
+  });
+
+  it('rc_cleared=0 is authoritative too — LLM-lenient correct>=2 no longer fakes a clear', async () => {
+    const db = createMemDb();
+    migrateRcColumns(db);
+    seedSession(db, { id: 'rc-2', courseId: 'food', startTime: '2026-07-03T13:00:00.000Z' });
+    // LLM 判了 2 次 correct(宽松误判),但 raw R2 从未命中 → 权威口径未过关。
+    db.prepare(
+      'INSERT INTO word_performance (lesson_id, word, attempts, correct, needs_review, rc_correct, rc_cleared) VALUES (?, ?, 2, 2, 0, 0, 0)'
+    ).run('rc-2', 'apple');
+
+    const r = await buildReport(db, 'rc-2', stubFoodLoader);
+    const apple = r.eval.teachingLoop.words.find((w) => w.word === 'apple')!;
+    expect(apple.cleared).toBe(false);
+    expect(apple.rcTracked).toBe(true);
+  });
+
+  it('legacy rows (rc columns NULL / absent) fall back to correct>=2 with clearRateSource=legacy_llm_correct + info signal', async () => {
+    const db = createMemDb(); // 老 schema:没有 rc 列
+    seedSession(db, { id: 'legacy-1', courseId: 'food', startTime: '2026-05-02T04:00:00.000Z' });
+    seedWordPerformance(db, 'legacy-1', [
+      { word: 'apple', attempts: 3, correct: 2 },
+      { word: 'banana', attempts: 2, correct: 1 },
+    ]);
+
+    const r = await buildReport(db, 'legacy-1', stubFoodLoader);
+    expect(r.eval.teachingLoop.clearRateSource).toBe('legacy_llm_correct');
+    const apple = r.eval.teachingLoop.words.find((w) => w.word === 'apple')!;
+    expect(apple.cleared).toBe(true); // 旧语义原样保留
+    expect(apple.rcTracked).toBe(false);
+    expect(apple.rcCorrect).toBeNull();
+    const legacySignal = r.eval.nextIterationSignals.find((s) => s.key === 'clear_rate_source_legacy');
+    expect(legacySignal?.severity).toBe('info');
+  });
+});
+
+// ─── R6 守卫活动聚合(model_calls.guards)────────────────────────────────────
+// 盲区背景:守卫改写发生在落库前,存量 ai_response 已是改写后文本,speechCardMismatch
+// 检测器对真实错位(2026-07-03 n=31/n=49)恒为 0。守卫计数是唯一可见的干预痕迹。
+describe('buildReport — guard activity aggregation', () => {
+  it('aggregates rc rejects / suppressions / speech rewrites into agentBehavior + info signal', async () => {
+    const db = createMemDb();
+    seedSession(db, {
+      id: 'g-1',
+      courseId: 'food',
+      startTime: '2026-07-03T13:00:00.000Z',
+      interactions: [
+        { user: 'Stating.', ai: '没关系,看这张卡!', modelCalls: { guards: { rcRejected: ['volleyball'], speechRewrite: 'in-progress-leak' } } },
+        { user: 'I can play soccer.', ai: '说得真棒!', modelCalls: { guards: { rcSuppressed: ['sentence_soccer'], speechRewrite: 'all-cleared-wait' } } },
+        { user: 'ok', ai: '继续!', modelCalls: {} },
+      ],
+    });
+
+    const r = await buildReport(db, 'g-1', stubFoodLoader);
+    expect(r.eval.agentBehavior.guardActivity).toEqual({
+      rcRejectedCount: 1,
+      rcSuppressedCount: 1,
+      speechRewriteCount: 2,
+      speechRewriteByType: { 'in-progress-leak': 1, 'all-cleared-wait': 1 },
+    });
+    const guardSignal = r.eval.nextIterationSignals.find((s) => s.key === 'guard_activity');
+    expect(guardSignal?.severity).toBe('info');
+    expect(guardSignal?.value).toBe(4);
+  });
+
+  it('zero guard activity → no guard_activity signal', async () => {
+    const db = createMemDb();
+    seedSession(db, { id: 'g-2', courseId: 'food', startTime: '2026-07-03T13:00:00.000Z', interactions: [{ user: 'hi', ai: 'hello' }] });
+    const r = await buildReport(db, 'g-2', stubFoodLoader);
+    expect(r.eval.agentBehavior.guardActivity.speechRewriteCount).toBe(0);
+    expect(r.eval.nextIterationSignals.map((s) => s.key)).not.toContain('guard_activity');
+  });
+});

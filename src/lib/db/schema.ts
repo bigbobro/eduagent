@@ -53,6 +53,20 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    // R-C 权威账本落库(2026-07-03 决策方案 A)。NULL = 旧数据未追踪(legacy),
+    // 报告据此区分"权威 clearRate"与"LLM 判定账本回退";新写入路径(session.ts
+    // commitTurn)对每个有 R-C 状态变化的词当轮同步真实值。
+    name: 'word_performance_rc_state',
+    up(db) {
+      // 幂等(与 v1 的 IF NOT EXISTS 同约定):schema_migrations 丢失后重跑不炸。
+      const cols = db.prepare('PRAGMA table_info(word_performance)').all()
+        .map((row) => (row as { name: string }).name);
+      if (!cols.includes('rc_correct')) db.exec('ALTER TABLE word_performance ADD COLUMN rc_correct INTEGER');
+      if (!cols.includes('rc_cleared')) db.exec('ALTER TABLE word_performance ADD COLUMN rc_cleared INTEGER');
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

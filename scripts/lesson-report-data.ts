@@ -101,6 +101,7 @@ interface EvalScorecard {
     attemptsPerClearedWord: number;
     totalAttempts: number;
     totalCorrect: number;
+    clearRateSource: 'rc' | 'legacy_llm_correct' | 'mixed' | 'none';
     words: Array<{
       word: string;
       attempts: number;
@@ -108,6 +109,8 @@ interface EvalScorecard {
       needsReview: boolean;
       attempted: boolean;
       cleared: boolean;
+      rcCorrect: number | null;
+      rcTracked: boolean;
     }>;
     stuckCardRuns: Array<{
       cardId: string;
@@ -128,6 +131,12 @@ interface EvalScorecard {
     prematureClosingTurns: number[];
     emptyAiResponseTurns: number[];
     emptyActionTurns: number[];
+    guardActivity: {
+      rcRejectedCount: number;
+      rcSuppressedCount: number;
+      speechRewriteCount: number;
+      speechRewriteByType: Record<string, number>;
+    };
     repeatedSpeechRuns: Array<{
       startTurn: number;
       endTurn: number;
@@ -190,6 +199,9 @@ interface WordPerformanceRow {
   attempts: number;
   correct: number;
   needs_review: number;
+  // R-C 权威账本(schema v2,2026-07-03)。undefined = 老库无此列;null = 新库旧数据未追踪。
+  rc_correct?: number | null;
+  rc_cleared?: number | null;
 }
 
 export async function buildReport(
@@ -306,6 +318,8 @@ function buildCourseWordCards(course: CourseDefinition | null, targetWords: stri
 }
 
 interface ModelCallsRow {
+  // R6 埋点(2026-07-03):session.ts commitTurn 写入的守卫活动。
+  guards?: { rcRejected?: string[]; rcSuppressed?: string[]; speechRewrite?: string };
   llm?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -415,7 +429,7 @@ function summarizePromptInputBreakdown(modelCalls: ModelCallsRow[]): PromptInput
 function readWordPerformance(db: Database, lessonId: string): WordPerformanceRow[] {
   try {
     return db.prepare(
-      'SELECT word, attempts, correct, needs_review FROM word_performance WHERE lesson_id = ? ORDER BY id ASC'
+      'SELECT * FROM word_performance WHERE lesson_id = ? ORDER BY id ASC'
     ).all(lessonId) as WordPerformanceRow[];
   } catch (err) {
     if (String(err).includes('no such table: word_performance')) return [];
@@ -437,7 +451,7 @@ function buildEvalScorecard(args: {
   const sessionHealth = buildSessionHealth(args.lesson, args.session, args.tokens, args.anomalies);
   const costContext = buildCostContext(args.tokens, args.modelCalls, args.anomalies);
   const teachingLoop = buildTeachingLoop(args.targetWords, args.wordCards, args.wordPerformanceRows, args.interactions);
-  const agentBehavior = buildAgentBehavior(args.interactions, args.wordCards, teachingLoop.clearRate);
+  const agentBehavior = buildAgentBehavior(args.interactions, args.wordCards, teachingLoop.clearRate, args.modelCalls);
   const nextIterationSignals = buildNextIterationSignals({
     sessionHealth,
     costContext,
@@ -517,6 +531,25 @@ function buildCostContext(
   };
 }
 
+// cleared 判定:R-C 权威账本优先(rc_cleared 非 NULL 即已追踪);老库/旧数据回退
+// LLM 判定账本的 correct>=2 旧语义(2026-07-03 之前唯一的账本,已知会假报 0 过关)。
+function scoreWordRow(word: string, row: WordPerformanceRow | undefined) {
+  const attempts = Number(row?.attempts ?? 0);
+  const correct = Number(row?.correct ?? 0);
+  const needsReview = Number(row?.needs_review ?? 0) > 0;
+  const rcTracked = row != null && row.rc_cleared !== null && row.rc_cleared !== undefined;
+  return {
+    word,
+    attempts,
+    correct,
+    needsReview,
+    attempted: attempts > 0 || rcTracked,
+    cleared: rcTracked ? Number(row?.rc_cleared) === 1 : correct >= 2,
+    rcCorrect: rcTracked ? Number(row?.rc_correct ?? 0) : null,
+    rcTracked,
+  };
+}
+
 function buildTeachingLoop(
   targetWords: string[],
   wordCards: CourseWord[],
@@ -525,31 +558,11 @@ function buildTeachingLoop(
 ): EvalScorecard['teachingLoop'] {
   const performanceByWord = new Map(wordPerformanceRows.map((row) => [normalizeWord(row.word), row]));
   const targetSet = new Set(targetWords.map(normalizeWord));
-  const words = targetWords.map((word) => {
-    const row = performanceByWord.get(normalizeWord(word));
-    const attempts = Number(row?.attempts ?? 0);
-    const correct = Number(row?.correct ?? 0);
-    const needsReview = Number(row?.needs_review ?? 0) > 0;
-    return {
-      word,
-      attempts,
-      correct,
-      needsReview,
-      attempted: attempts > 0,
-      cleared: correct >= 2,
-    };
-  });
+  const words = targetWords.map((word) => scoreWordRow(word, performanceByWord.get(normalizeWord(word))));
 
   const nonTargetRows = wordPerformanceRows
     .filter((row) => !targetSet.has(normalizeWord(row.word)))
-    .map((row) => ({
-      word: normalizeWord(row.word),
-      attempts: Number(row.attempts ?? 0),
-      correct: Number(row.correct ?? 0),
-      needsReview: Number(row.needs_review ?? 0) > 0,
-      attempted: Number(row.attempts ?? 0) > 0,
-      cleared: Number(row.correct ?? 0) >= 2,
-    }));
+    .map((row) => scoreWordRow(normalizeWord(row.word), row));
   const allWords = [...words, ...nonTargetRows];
   const scoredWords = targetWords.length > 0 ? words : allWords;
   const clearedWords = scoredWords.filter((word) => word.cleared);
@@ -558,6 +571,12 @@ function buildTeachingLoop(
   const totalCorrect = allWords.reduce((sum, word) => sum + word.correct, 0);
   const targetDenominator = scoredWords.length;
   const stuckCardRuns = findStuckCardRuns(interactions, wordCards);
+  // 数据源只看尝试过的词:未尝试的词两本账都不会有行,不应把 source 拉成 mixed。
+  const attemptedForSource = scoredWords.filter((word) => word.attempted);
+  const trackedCount = attemptedForSource.filter((word) => word.rcTracked).length;
+  const clearRateSource = attemptedForSource.length === 0 ? 'none'
+    : trackedCount === attemptedForSource.length ? 'rc'
+      : trackedCount === 0 ? 'legacy_llm_correct' : 'mixed';
   return {
     targetWordCount: targetWords.length,
     attemptedWordCount: scoredWords.filter((word) => word.attempted).length,
@@ -565,6 +584,7 @@ function buildTeachingLoop(
     needsReviewWordCount: scoredWords.filter((word) => word.needsReview).length,
     coverageRate: roundRatio(scoredWords.filter((word) => word.attempted).length, targetDenominator),
     clearRate: roundRatio(clearedWords.length, targetDenominator),
+    clearRateSource,
     attemptsPerClearedWord: roundRatio(clearedAttempts, clearedWords.length),
     totalAttempts,
     totalCorrect,
@@ -578,7 +598,26 @@ function buildAgentBehavior(
   interactions: ReportData['interactions'],
   wordCards: CourseWord[],
   clearRate: number,
+  modelCalls: ModelCallsRow[],
 ): EvalScorecard['agentBehavior'] {
+  // R6:守卫活动聚合(session.ts commitTurn 落的 model_calls.guards)。改写发生在
+  // 落库前,存量 ai_response 已是改写后文本,只有这里能看到守卫真实拦了多少次。
+  const guardActivity = {
+    rcRejectedCount: 0,
+    rcSuppressedCount: 0,
+    speechRewriteCount: 0,
+    speechRewriteByType: {} as Record<string, number>,
+  };
+  for (const mc of modelCalls) {
+    const guards = mc.guards;
+    if (!guards) continue;
+    guardActivity.rcRejectedCount += Array.isArray(guards.rcRejected) ? guards.rcRejected.length : 0;
+    guardActivity.rcSuppressedCount += Array.isArray(guards.rcSuppressed) ? guards.rcSuppressed.length : 0;
+    if (guards.speechRewrite) {
+      guardActivity.speechRewriteCount += 1;
+      guardActivity.speechRewriteByType[guards.speechRewrite] = (guardActivity.speechRewriteByType[guards.speechRewrite] || 0) + 1;
+    }
+  }
   const wordCardsById = new Map(wordCards.map((card) => [card.id, card]));
   const speechCardMismatches: EvalScorecard['agentBehavior']['speechCardMismatches'] = [];
   const prematureClosingTurns: number[] = [];
@@ -615,6 +654,7 @@ function buildAgentBehavior(
     prematureClosingTurns,
     emptyAiResponseTurns,
     emptyActionTurns,
+    guardActivity,
     repeatedSpeechRuns,
     maxRepeatedSpeechRunLength: repeatedSpeechRuns.reduce((max, run) => Math.max(max, run.length), 0),
   };
@@ -651,6 +691,13 @@ function buildNextIterationSignals(evalParts: {
   }
   if (teachingLoop.needsReviewWordCount > 0) {
     signals.push(signal('needs_review', 'info', 'At least one word ended with needs_review data', 'needsReviewWordCount', teachingLoop.needsReviewWordCount));
+  }
+  if (teachingLoop.targetWordCount > 0 && teachingLoop.clearRateSource !== 'rc') {
+    signals.push(signal('clear_rate_source_legacy', 'info', 'clearRate computed (fully or partly) from the legacy LLM-correct ledger; R-C authoritative state absent for some words', 'clearRateSource', teachingLoop.clearRateSource));
+  }
+  const guardTotal = agentBehavior.guardActivity.rcRejectedCount + agentBehavior.guardActivity.rcSuppressedCount + agentBehavior.guardActivity.speechRewriteCount;
+  if (guardTotal > 0) {
+    signals.push(signal('guard_activity', 'info', 'Server guards intervened this session (R-C rejects/suppressions or speech rewrites)', 'guardActivityTotal', guardTotal));
   }
   if (agentBehavior.speechCardMismatchCount > 0) {
     signals.push(signal('speech_card_alignment', 'critical', 'Teacher speech mentioned a different target word than the final show_card', 'speechCardMismatchCount', agentBehavior.speechCardMismatchCount));

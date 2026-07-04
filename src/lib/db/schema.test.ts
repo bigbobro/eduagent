@@ -28,7 +28,11 @@ describe('runMigrations', () => {
       'interaction_logs',
       'word_performance',
     ]));
-    expect(getSchemaVersion(db)).toBe(1);
+    expect(getSchemaVersion(db)).toBe(2);
+    // v2: R-C 权威账本列(NULL = 未追踪)
+    const wordPerfCols = db.prepare('PRAGMA table_info(word_performance)').all()
+      .map((row) => (row as { name: string }).name);
+    expect(wordPerfCols).toEqual(expect.arrayContaining(['rc_correct', 'rc_cleared']));
   });
 
   it('is idempotent', () => {
@@ -38,7 +42,10 @@ describe('runMigrations', () => {
     const rows = db.prepare(
       'SELECT version, name FROM schema_migrations ORDER BY version',
     ).all();
-    expect(rows).toEqual([{ version: 1, name: 'initial_lesson_schema' }]);
+    expect(rows).toEqual([
+      { version: 1, name: 'initial_lesson_schema' },
+      { version: 2, name: 'word_performance_rc_state' },
+    ]);
   });
 
   it('marks an existing schema without dropping lesson data', () => {
@@ -50,7 +57,7 @@ describe('runMigrations', () => {
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(1);
+    expect(getSchemaVersion(db)).toBe(2);
     expect(db.prepare('SELECT COUNT(*) AS count FROM lesson_logs').get()).toEqual({ count: 1 });
   });
 });
