@@ -125,7 +125,11 @@ function buildMemoryContextParts(memory: LessonMemory, course: Course): PromptSe
   const clearedWordIds = wordOrder.filter((id) => memory.cardProgress[id] === 'cleared');
   const currentWordCardId = wordCardIds.has(memory.currentCardId) ? memory.currentCardId : '';
   const currentWordStillActive = currentWordCardId && memory.cardProgress[currentWordCardId] !== 'cleared';
-  const nextWordCardId = wordOrder.find((id) => memory.cardProgress[id] !== 'cleared') || '';
+  // F3: mirror the server's two-tier pick — fresh (uncleared + unparked) first, then
+  // parked cards that still have their comeback round (so the LLM tracks the R-C card).
+  const nextWordCardId = wordOrder.find((id) => memory.cardProgress[id] !== 'cleared' && !(memory.parkedCardIds || []).includes(id))
+    || wordOrder.find((id) => memory.cardProgress[id] !== 'cleared' && !(memory.parkRetryCardIds || []).includes(id))
+    || '';
   const activeWordCardId = currentWordStillActive ? currentWordCardId : nextWordCardId;
   const activeWordCard = activeWordCardId ? wordCardById.get(activeWordCardId) : undefined;
   const activeSentenceCard = activeWordCard
@@ -149,7 +153,7 @@ function buildMemoryContextParts(memory: LessonMemory, course: Course): PromptSe
 - 当前应练习的 word card: ${activeWordCardId || '(全部完成)'}
 - **当前卡字面通过次数**: ${currentCardR2Count} / 2 ${currentCardR2Count >= 2 ? '(已达成,服务端会自动推进)' : currentCardR2Count === 1 ? '(再 1 次字面通过即推进)' : '(还没通过,正常教学)'}
 - 当前 word 可用短句图卡: ${activeSentenceCard ? `${activeSentenceCard.id} (${activeSentenceCard.english})` : '(无;不要使用其它 sentence_* 卡)'}
-- 已通过 word cards: ${clearedWordIds.join(', ') || '(无)'}
+- 已通过 word cards: ${clearedWordIds.join(', ') || '(无)'}${buildParkedHint(memory)}
 - 不要 show_card 已通过 word cards,除非孩子明确要求复习或"再说那一张"
 - show_card 由服务端兜底(R-C):未通过 2 次时强制保持当前卡;通过的那一轮服务端自动推到下一张。你 emit show_card 也行,会被服务端校验。
 - 如果要说目标短句,必须 show_card 对应短句图卡: ${course.objectives.sentences.map((sentence) => `${sentence} => ${sentenceCardByText.get(sentence) || '(无对应卡)'}`).join(' | ')}`;
@@ -187,6 +191,14 @@ function buildMemoryContextParts(memory: LessonMemory, course: Course): PromptSe
     toPromptSection('lesson_state', lessonState),
     toPromptSection('summary_constraints', summaryConstraints),
   ];
+}
+
+// F3: tell the LLM which words are parked (escape valve) so it narrates "先放一放,
+// 待会再回来" instead of insisting — correctness does not depend on it (guards enforce).
+function buildParkedHint(memory: LessonMemory): string {
+  const parkedNotCleared = (memory.parkedCardIds || []).filter((id) => memory.cardProgress[id] !== 'cleared');
+  if (parkedNotCleared.length === 0) return '';
+  return `\n- 暂时跳过的词卡(先放一放,队列走完服务端会安排回头再试): ${parkedNotCleared.join(', ')}`;
 }
 
 function buildMemoryContext(memory: LessonMemory, course: Course): string {

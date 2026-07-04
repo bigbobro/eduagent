@@ -1,6 +1,7 @@
 import { Course, PhaseName } from '@/types/course';
 import { LessonMemory } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
+import type { RcMode } from '../memory';
 
 export interface GuardContext {
   speech: string;
@@ -12,9 +13,20 @@ export interface GuardContext {
   course: Course;
   asrText?: string;
   currentPhase: PhaseName;
+  // System phase-opening/transition turn ("(课堂开始)" / "(切换到 X 阶段…)").
+  // speechCardAlign exempts these — opening speech legitimately mentions other words
+  // (n=51 reinforcement opening was rewritten into a word template without this).
+  phaseOpening?: boolean;
   // The word card normalizeActions selected as authoritative this turn (R-C).
   // Set by normalizeActions; read by speechCardAlign so it does not re-derive the card.
   forceCardId?: string;
+  // R-C derivation meta (F1/F2 2026-07-03). Set by normalizeActions.
+  rcMode?: RcMode;
+  allWordsCleared?: boolean;
+  // R6 observability: per-turn guard counters, persisted into modelCalls.guards.
+  rcRejectedCardIds?: string[];
+  rcSuppressedCardIds?: string[];
+  speechRewrite?: string;
 }
 
 export type GuardFn = (ctx: GuardContext) => GuardContext;

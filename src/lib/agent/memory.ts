@@ -4,6 +4,10 @@ import { Course, WordCard } from '@/types/course';
 
 const MAX_HISTORY = 12;
 
+// F3 escape valve (2026-07-03): consecutive failures on one card before it is parked
+// (needs_review + skip to next word). Set to Infinity to disable the valve.
+export const PARK_STREAK_THRESHOLD = 5;
+
 export function createMemory(): LessonMemory {
   return {
     messages: [],
@@ -16,6 +20,8 @@ export function createMemory(): LessonMemory {
     cardProgress: {},
     cardAttemptStreak: {},
     cardCorrectCount: {},
+    parkedCardIds: [],
+    parkRetryCardIds: [],
     interestSignals: [],
     wordPerformance: new Map(),
     totalInteractions: 0,
@@ -142,11 +148,28 @@ export function commitAssistantStreamResult(
   // sentence_<active>),但若让它改写 currentCardId,下一轮 applyAttemptAssessment 会因
   // kind !== 'word' 跳过 R2 计数,孩子答对也不推进(DeepSeek 实测踩中,MiMo 从不发 sentence 卡)。
   const nextCardId = getLastWordShowCardId(actions, course) || assessedMemory.currentCardId;
+  // F3: advancing INTO a parked card starts its single comeback (retry) round.
+  // Reset its fail streak so the retry gets a live attempt window; the round ends on
+  // the next failure (streak >= 1 with retry mark) or on clearance.
+  let parkRetryCardIds = assessedMemory.parkRetryCardIds || [];
+  let cardAttemptStreak = assessedMemory.cardAttemptStreak;
+  if (
+    nextCardId
+    && (assessedMemory.parkedCardIds || []).includes(nextCardId)
+    && assessedMemory.cardProgress[nextCardId] !== 'cleared'
+    && !parkRetryCardIds.includes(nextCardId)
+  ) {
+    parkRetryCardIds = [...parkRetryCardIds, nextCardId];
+    cardAttemptStreak = { ...cardAttemptStreak, [nextCardId]: 0 };
+    console.warn('[memory] R-C park retry begins:', nextCardId);
+  }
   const actionProgress = applyShowCardProgress(assessedMemory.cardProgress, actions);
   return {
     ...assessedMemory,
     messages,
     cardProgress: actionProgress,
+    parkRetryCardIds,
+    cardAttemptStreak,
     currentCardId: nextCardId,
     currentWord: stateUpdate.current_word || memory.currentWord,
     phase: resolvePhase(assessedMemory, memory.phase),
@@ -155,51 +178,109 @@ export function commitAssistantStreamResult(
 }
 
 // R-C (2026-05-23): server-authoritative card advance. Replaces R-A celebration-stay
-// and R5 whitelist as the canonical mechanism. Three modes:
-//   (1) No current word card / not a word card → pick first uncleared word card.
-//   (2) Current word card not yet cleared (count < 2) → force stay on currentCard;
-//       reject any show_card to other word cards. LLM speech still flows freely.
-//   (3) Current word card just cleared THIS turn (count just hit 2) → force advance
-//       to next uncleared word card. The "OK 你说对了 → 看下一个动物" moment.
-//   (4) Current card cleared from PRIOR turns → push next uncleared (recovery path;
-//       normally we advance in mode (3) so this state is rare).
+// and R5 whitelist as the canonical mechanism. Modes:
+//   (1) no-current: no current word card / not a word card → pick first uncleared word card.
+//   (2) in-progress: current word card not yet cleared (count < 2) → force stay on
+//       currentCard; reject any show_card to other word cards. LLM speech still flows freely.
+//   (2b) parked-advance (F3, 2026-07-03): current card parked by the escape valve
+//       (fail streak hit the threshold / retry round failed) → advance to next candidate.
+//   (3) just-cleared: current word card cleared THIS turn (count just hit 2) → force
+//       advance to next uncleared word card. The "OK 你说对了 → 看下一个动物" moment.
+//   (4) post-clear-recovery: cleared from PRIOR turns → push next uncleared (recovery
+//       path; normally we advance in mode (3) so this state is rare).
+//
+// F1 (2026-07-03): when no next candidate exists (every word cleared or parked-after-retry),
+// meta.allWordsCleared=true, forceCardId stays on currentCard (screen does not jump), and
+// off-whitelist show_cards are suppressed quietly (no reject warn spam).
 //
 // Sentence cards: only the sentence card matching the active word card is allowed
 // (id === `sentence_${activeWordCardId}`).
+export type RcMode = 'no-current' | 'in-progress' | 'parked-advance' | 'just-cleared' | 'post-clear-recovery';
+
+// Out-parameter so the guard pipeline (normalize-actions.ts) can expose R-C mode /
+// all-cleared / reject counters to speechCardAlign + session metrics without changing
+// the long-standing ToolAction[] return shape.
+export interface NormalizeActionsMeta {
+  mode?: RcMode;
+  allWordsCleared?: boolean;
+  rejectedCardIds?: string[];
+  suppressedCardIds?: string[];
+}
+
 export function normalizeAssistantActions(
   memory: LessonMemory,
   course: Course,
   response: AgentResponse,
-  rawAsrText?: string
+  rawAsrText?: string,
+  meta?: NormalizeActionsMeta
 ): ToolAction[] {
   // Silent: this derivation only needs forceCardId and discards assessedMemory; the
   // authoritative pass (commitAssistantStreamResult) emits the R-C logs once per turn.
   const assessedMemory = applyAttemptAssessment(memory, course, response, rawAsrText, true);
   const wordCardIds = new Set(course.cards.filter((c) => c.kind === 'word').map((c) => c.id));
-  const findFirstUncleared = (excludeId: string = '') => course.teachingHints.newCardIds.find(
-    (id) => wordCardIds.has(id) && id !== excludeId && assessedMemory.cardProgress[id] !== 'cleared',
-  ) || '';
+  // Defensive defaults: hand-rolled partial memories (tests / legacy) may lack the F3 arrays.
+  const parkedCardIds = assessedMemory.parkedCardIds || [];
+  const parkRetryCardIds = assessedMemory.parkRetryCardIds || [];
+  // Two tiers (F3): fresh uncleared-unparked words first; when the fresh queue is
+  // exhausted, parked cards get one comeback (retry) round. The retry tier ignores
+  // excludeId so a parked current card may retry in place when it is the only
+  // candidate left (degenerate last-word case).
+  const findFirstUncleared = (excludeId: string = '') => {
+    const order = course.teachingHints.newCardIds;
+    const fresh = order.find(
+      (id) => wordCardIds.has(id) && id !== excludeId
+        && assessedMemory.cardProgress[id] !== 'cleared'
+        && !parkedCardIds.includes(id),
+    );
+    if (fresh) return fresh;
+    return order.find(
+      (id) => wordCardIds.has(id)
+        && assessedMemory.cardProgress[id] !== 'cleared'
+        && parkedCardIds.includes(id)
+        && !parkRetryCardIds.includes(id),
+    ) || '';
+  };
 
   const currentCardId = assessedMemory.currentCardId;
   const currentIsWordCard = currentCardId !== '' && wordCardIds.has(currentCardId);
   const currentClearedNow = currentIsWordCard && assessedMemory.cardProgress[currentCardId] === 'cleared';
   const currentClearedBefore = currentIsWordCard && memory.cardProgress[currentCardId] === 'cleared';
   const justClearedThisTurn = currentClearedNow && !currentClearedBefore;
+  // F3: parked current card is "failed out" when its streak is at the threshold
+  // (fresh park) or has any failure after the retry round started (retry mark resets
+  // the streak; one more miss ends the round). An R2 hit resets the streak → stays.
+  const currentFailStreak = currentIsWordCard ? (assessedMemory.cardAttemptStreak[currentCardId] || 0) : 0;
+  const currentParkedOut = currentIsWordCard
+    && parkedCardIds.includes(currentCardId)
+    && currentFailStreak >= (parkRetryCardIds.includes(currentCardId) ? 1 : PARK_STREAK_THRESHOLD);
 
   // Determine the card the UI must show this turn.
   let forceCardId: string;
+  let mode: RcMode;
+  let allWordsCleared = false;
   if (!currentIsWordCard) {
-    // Mode (1): no current word context — pick the first uncleared word card.
+    mode = 'no-current';
     forceCardId = findFirstUncleared();
+    allWordsCleared = forceCardId === '';
+  } else if (!currentClearedNow && currentParkedOut) {
+    mode = 'parked-advance';
+    const next = findFirstUncleared(currentCardId);
+    allWordsCleared = next === '';
+    forceCardId = next || currentCardId;
   } else if (!currentClearedNow) {
-    // Mode (2): still teaching currentCard (count < 2).
+    mode = 'in-progress';
     forceCardId = currentCardId;
-  } else if (justClearedThisTurn) {
-    // Mode (3): clearance turn — advance to next.
-    forceCardId = findFirstUncleared(currentCardId) || currentCardId;
   } else {
-    // Mode (4): cleared from a prior turn — recover by advancing.
-    forceCardId = findFirstUncleared(currentCardId) || currentCardId;
+    mode = justClearedThisTurn ? 'just-cleared' : 'post-clear-recovery';
+    const next = findFirstUncleared(currentCardId);
+    allWordsCleared = next === '';
+    forceCardId = next || currentCardId;
+  }
+  if (meta) {
+    meta.mode = mode;
+    meta.allWordsCleared = allWordsCleared;
+    meta.rejectedCardIds = [];
+    meta.suppressedCardIds = [];
   }
 
   // diagnostic snapshot — keep tight, one line.
@@ -207,9 +288,11 @@ export function normalizeAssistantActions(
   console.log('[normalize] snapshot', JSON.stringify({
     currentCardId,
     forceCardId,
-    mode: !currentIsWordCard ? 'no-current' : !currentClearedNow ? 'in-progress' : justClearedThisTurn ? 'just-cleared' : 'post-clear-recovery',
+    mode,
     correctCount: assessedMemory.cardCorrectCount,
     cleared: clearedList,
+    ...(parkedCardIds.length ? { parked: parkedCardIds, parkRetried: parkRetryCardIds } : {}),
+    ...(allWordsCleared ? { allWordsCleared } : {}),
     llmActions: response.actions.map((a) => `${a.tool}:${a.params.card_id}`),
     asrText: rawAsrText,
   }));
@@ -230,13 +313,38 @@ export function normalizeAssistantActions(
       actions.push(action);
       continue;
     }
+    if (allWordsCleared) {
+      // F1: terminal state — expected noise (LLM tries sentence_* etc.). Log quietly,
+      // count separately; no reject warn spam (n=49 `sentence_soccer` case).
+      console.log('[normalize] show_card suppressed (all words cleared/parked)', { suppressed: cid, force: forceCardId });
+      meta?.suppressedCardIds?.push(cid);
+      continue;
+    }
     console.warn('[normalize] show_card rejected by R-C', { rejected: cid, force: forceCardId });
+    meta?.rejectedCardIds?.push(cid);
   }
   // Ensure forceCardId is visible (server-authoritative).
   if (forceCardId && !hasForceShowCard) {
     actions.unshift({ tool: 'show_card', params: { card_id: forceCardId } });
   }
   return actions;
+}
+
+// F1/F3 (2026-07-03): word queue exhausted — every word card is either cleared, or
+// parked with its retry round finished. Drives the client's interactive→reinforcement
+// transition (progress_snapshot.allWordsDone): parked-after-retry counts as done.
+export function allWordsFinished(memory: LessonMemory, course: Course): boolean {
+  const wordCardIds = new Set(course.cards.filter((c) => c.kind === 'word').map((c) => c.id));
+  const order = course.teachingHints.newCardIds.filter((id) => wordCardIds.has(id));
+  if (order.length === 0) return false;
+  return order.every((id) => {
+    if (memory.cardProgress[id] === 'cleared') return true;
+    if (!(memory.parkedCardIds || []).includes(id) || !(memory.parkRetryCardIds || []).includes(id)) return false;
+    // Retry round still live on the current card (streak was reset on retry entry and
+    // no failure yet) → not finished.
+    if (id === memory.currentCardId && (memory.cardAttemptStreak[id] || 0) < 1) return false;
+    return true;
+  });
 }
 
 /** The last show_card that targets a WORD card (sentence siblings are display-only). */
@@ -356,9 +464,17 @@ function applyAttemptAssessment(
   if (assessment.result === 'close' || assessment.result === 'wrong') {
     const nextStreak = (streak[targetCardId] || 0) + 1;
     streak[targetCardId] = nextStreak;
-    progress[targetCardId] = nextStreak >= 3 ? 'needs_review' : 'attempted';
+    // Parked cards stay needs_review even when the retry round resets the streak.
+    let parkedCardIds = memory.parkedCardIds || [];
+    progress[targetCardId] = nextStreak >= 3 || parkedCardIds.includes(targetCardId) ? 'needs_review' : 'attempted';
+    // F3 escape valve: too many consecutive failures → park the card (skip to the
+    // next word; parked cards get one comeback round when the fresh queue is done).
+    if (nextStreak >= PARK_STREAK_THRESHOLD && !parkedCardIds.includes(targetCardId)) {
+      parkedCardIds = [...parkedCardIds, targetCardId];
+      warn('[memory] R-C parked (fail streak ' + nextStreak + '):', targetCardId);
+    }
     memory = updateWordPerformance(memory, targetCard.english, false);
-    return { ...memory, cardProgress: progress, cardAttemptStreak: streak };
+    return { ...memory, cardProgress: progress, cardAttemptStreak: streak, parkedCardIds };
   }
   // off_topic / unknown — no progress change.
   return memory;

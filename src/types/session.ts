@@ -37,6 +37,11 @@ export interface LessonMemory {
   // R-C (2026-05-23): count of confirmed R2 literal hits per card. Card stays in
   // 'attempted' until count reaches 2, then 'cleared' (locked — further hits ignored).
   cardCorrectCount: Record<string, number>;
+  // F3 escape valve (2026-07-03): cards parked after PARK_STREAK_THRESHOLD consecutive
+  // failures (needs_review + temporarily skipped). parkRetryCardIds marks parked cards
+  // whose single queue-exhausted comeback round has started.
+  parkedCardIds: string[];
+  parkRetryCardIds: string[];
   interestSignals: InterestSignal[];
   wordPerformance: Map<string, WordPerf>;
   totalInteractions: number;
@@ -51,6 +56,9 @@ export interface InteractionLog {
     asr?: { latency: number; tokens: number };
     llm: { latency: number; inputTokens: number; outputTokens: number; inputBreakdown?: PromptInputBreakdown };
     tts?: { latency: number; characters: number };
+    // R6 observability (2026-07-03): per-turn guard counters (R-C rejects / speech rewrites)
+    // so lesson reports can see guard activity (speechCardMismatchCount=0 blind spot fix).
+    guards?: { rcRejected?: string[]; rcSuppressed?: string[]; speechRewrite?: string };
   };
 }
 

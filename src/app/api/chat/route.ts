@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
     }
     const session = createSession(course);
     // System turn (not the child speaking) → rawAsrText '' so it never counts an R2 hit.
-    const stream = streamUserInputToSSE(session.id, '(课堂开始)', undefined, '');
+    // phaseOpening: opening speech is exempt from speechCardAlign rewrite.
+    const stream = streamUserInputToSSE(session.id, '(课堂开始)', undefined, '', { phaseOpening: true });
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
@@ -61,7 +62,9 @@ export async function POST(req: NextRequest) {
     }
     setSessionPhase(body.sessionId, body.to);
     // System turn → rawAsrText '' so the transition prompt never counts an R2 hit.
-    const stream = streamUserInputToSSE(body.sessionId, `(切换到 ${body.to} 阶段,请说一句简短开场)`, undefined, '');
+    // phaseOpening: transition opening speech legitimately mentions other words —
+    // exempt from speechCardAlign rewrite (n=51 reinforcement opening bug).
+    const stream = streamUserInputToSSE(body.sessionId, `(切换到 ${body.to} 阶段,请说一句简短开场)`, undefined, '', { phaseOpening: true });
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',

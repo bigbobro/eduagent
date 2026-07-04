@@ -9,7 +9,9 @@ export function streamUserInputToSSE(
   userText: string,
   asrResult?: { latency: number; tokens: number },
   // R2 literal-hit text. Defaults to userText (real utterance); system turns pass '' to opt out.
-  rawAsrText: string = userText
+  rawAsrText: string = userText,
+  // phaseOpening: system opening/transition turn — exempt from speechCardAlign rewrite.
+  opts: { phaseOpening?: boolean } = {}
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const ac = new AbortController();
@@ -19,7 +21,7 @@ export function streamUserInputToSSE(
   return new ReadableStream({
     async start(controller) {
       try {
-        for await (const ev of streamUserInput(sessionId, userText, asrResult, ac.signal, rawAsrText)) {
+        for await (const ev of streamUserInput(sessionId, userText, asrResult, ac.signal, rawAsrText, opts)) {
           if (ev.type === 'speech-delta') {
             // session yields the whole speech as a single delta; log it directly.
             const s = ev.text.replace(/\s+/g, ' ').trim();
@@ -58,6 +60,7 @@ function mapEventToSSE(ev: StreamUserEvent): string {
         clearedCardIds: ev.clearedCardIds,
         totalAttempts: ev.totalAttempts,
         currentPhase: ev.currentPhase,
+        allWordsDone: ev.allWordsDone,
       });
     case 'done':         return sseFrame('done', {});
     case 'error':        return sseFrame('error', { message: ev.message });

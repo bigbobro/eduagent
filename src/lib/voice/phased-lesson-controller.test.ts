@@ -104,6 +104,26 @@ describe('PhasedLessonController phase transitions', () => {
     expect(v2.sendCustomAction).toHaveBeenCalledWith({ action: 'phase-transition', to: 'reinforcement' });
   });
 
+  it('interactive to reinforcement when snapshot reports allWordsDone with a parked word (F3)', async () => {
+    await ctrl.startLesson();
+    (ctrl as any).currentPhase = 'interactive';
+    const phaseChanges: PhaseName[] = [];
+    const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
+    ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
+
+    v2.emit('state', 'awaiting');
+    // 逃生阀:一个词 parked 未 cleared,cleared 数不满,但服务端判定队列已完成。
+    v2.emit('progress', {
+      clearedCardIds: wordCards.slice(1).map((card) => card.id),
+      totalAttempts: 0,
+      currentPhase: 'interactive',
+      allWordsDone: true,
+    });
+
+    await vi.waitFor(() => expect(phaseChanges).toContain('reinforcement'));
+    expect(v2.sendCustomAction).toHaveBeenCalledWith({ action: 'phase-transition', to: 'reinforcement' });
+  });
+
   it('interactive to reinforcement when max attempts reached', async () => {
     await ctrl.startLesson();
     (ctrl as any).currentPhase = 'interactive';

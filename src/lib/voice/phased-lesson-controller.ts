@@ -13,6 +13,9 @@ interface ProgressSnapshot {
   clearedCardIds: string[];
   totalAttempts: number;
   currentPhase: PhaseName | null;
+  // F3 (2026-07-03): server-computed word-queue completion — cleared + parked-after-retry
+  // both count as done, so a parked (escape-valve) word never blocks the phase switch.
+  allWordsDone?: boolean;
 }
 
 export class PhasedLessonController {
@@ -201,7 +204,9 @@ export class PhasedLessonController {
 
     if (this.currentPhase === 'interactive' && this.lastSnapshot) {
       const clearedWordCount = this.lastSnapshot.clearedCardIds.filter((id) => this.wordCardIds.has(id)).length;
-      const allCleared = clearedWordCount >= this.wordCardCount;
+      // allWordsDone: server-side "cleared + parked-after-retry" completion (F3 escape
+      // valve). Falls back to the cleared count for older snapshots without the field.
+      const allCleared = clearedWordCount >= this.wordCardCount || this.lastSnapshot.allWordsDone === true;
       const maxAttemptsReached = this.lastSnapshot.totalAttempts >= 3 * this.wordCardCount;
       if (allCleared || maxAttemptsReached) {
         this.pendingTransition = 'reinforcement';

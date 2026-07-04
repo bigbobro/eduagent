@@ -9,6 +9,7 @@ import {
   getMessagesForLLM,
   commitAssistantStreamResult,
   initializeCardProgress,
+  allWordsFinished,
 } from './memory';
 import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/llm';
@@ -83,7 +84,9 @@ export type StreamUserEvent =
   | { type: 'speech-delta'; text: string }
   | { type: 'speech-end' }
   | { type: 'actions'; actions: ToolAction[]; state_update: AgentResponse['state_update'] }
-  | { type: 'progress_snapshot'; clearedCardIds: string[]; totalAttempts: number; currentPhase: PhaseName }
+  // allWordsDone (F3 2026-07-03): cleared + parked-after-retry — drives the client's
+  // interactive→reinforcement transition even when a parked word never cleared.
+  | { type: 'progress_snapshot'; clearedCardIds: string[]; totalAttempts: number; currentPhase: PhaseName; allWordsDone: boolean }
   | { type: 'done' }
   | { type: 'error'; message: string };
 
@@ -96,7 +99,10 @@ export async function* streamUserInput(
   // utterance this equals userText (default). System turns (lesson start / phase transition /
   // "请老师再说") pass '' so their instruction text — which may contain the target word — is
   // never miscounted as the child saying it.
-  rawAsrText: string = userText
+  rawAsrText: string = userText,
+  // phaseOpening (R2 2026-07-03): marks system opening/transition turns so speechCardAlign
+  // does not rewrite the opening speech into a word-teaching template.
+  opts: { phaseOpening?: boolean } = {}
 ): AsyncGenerator<StreamUserEvent> {
   // 1. Session lookup + user message
   const session = sessionStore.get(sessionId);
@@ -152,6 +158,7 @@ export async function* streamUserInput(
   const initialCtx: GuardContext = {
     speech: result.speech, actions: result.actions, stateUpdate: result.state_update,
     memory: session.memory, course: session.course, asrText: rawAsrText, currentPhase: session.currentPhase,
+    phaseOpening: opts.phaseOpening,
   };
   const finalCtx = runPipeline(initialCtx, [
     closingGuard,           // R4/R6: unlearned-word closing override
@@ -171,7 +178,13 @@ export async function* streamUserInput(
   // 7. Yield progress snapshot + done
   let totalAttempts = 0;
   session.memory.wordPerformance.forEach((p) => { totalAttempts += p.attempts; });
-  yield { type: 'progress_snapshot', clearedCardIds: [...session.memory.clearedCardIds], totalAttempts, currentPhase: session.currentPhase };
+  yield {
+    type: 'progress_snapshot',
+    clearedCardIds: [...session.memory.clearedCardIds],
+    totalAttempts,
+    currentPhase: session.currentPhase,
+    allWordsDone: allWordsFinished(session.memory, session.course),
+  };
   yield { type: 'done' };
 }
 
@@ -201,6 +214,13 @@ function commitTurn(
   if (asrResult) { session.tokenUsage.asr.requests += 1; session.tokenUsage.asr.tokens += asrResult.tokens; }
   session.tokenUsage.tts.requests += 1;
   session.tokenUsage.tts.characters += ctx.speech.length;
+  // R6 observability: persist per-turn guard activity (R-C rejects / suppressions /
+  // speech rewrites) into model_calls JSON so lesson reports can aggregate it.
+  const guards = {
+    ...(ctx.rcRejectedCardIds?.length ? { rcRejected: ctx.rcRejectedCardIds } : {}),
+    ...(ctx.rcSuppressedCardIds?.length ? { rcSuppressed: ctx.rcSuppressedCardIds } : {}),
+    ...(ctx.speechRewrite ? { speechRewrite: ctx.speechRewrite } : {}),
+  };
   insertInteraction(session.id, {
     timestamp: new Date(),
     userInput: userText,
@@ -215,6 +235,7 @@ function commitTurn(
         ...(llm.inputBreakdown ? { inputBreakdown: llm.inputBreakdown } : {}),
       },
       tts: { latency: 0, characters: ctx.speech.length },
+      ...(Object.keys(guards).length ? { guards } : {}),
     },
   });
   // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time.
