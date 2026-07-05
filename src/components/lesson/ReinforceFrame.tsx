@@ -8,22 +8,27 @@ import { Cat, PaperButton, PictureCard } from '@/components/magic';
 import { toPictureCardData } from '@/components/magic/cardData';
 import { useStaticPromptSpeech } from './useStaticPromptSpeech';
 
+type RepeatAfterMeQuiz = Extract<Quiz, { type: 'repeat-after-me' }>;
+
 interface ReinforceFrameProps {
-  quiz: Extract<Quiz, { type: 'repeat-after-me' }>;
+  quiz: RepeatAfterMeQuiz;
   course: Course;
   controller: LessonController;
   onAnswer: (result: { correct: boolean; said: string }) => void;
 }
 
+interface RepeatAfterMeScoring {
+  contentWords: string[];
+  coreWords: string[];
+}
+
 export function ReinforceFrame({ quiz, course, controller, onAnswer }: ReinforceFrameProps) {
   const [listening, setListening] = useState(false);
   const [heardSentence, setHeardSentence] = useState(false);
-  const { state, promptPlaying, hasHeardPrompt } = useStaticPromptSpeech(controller, quiz.targetText, quiz.id);
+  const spokenPrompt = useMemo(() => buildRepeatAfterMePrompt(quiz.targetText), [quiz.targetText]);
+  const { state, promptPlaying, hasHeardPrompt } = useStaticPromptSpeech(controller, spokenPrompt, quiz.id);
   const card = course.cards.find((item) => item.id === quiz.cardId);
-  const targetWords = useMemo(
-    () => quiz.targetText.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/).filter((word) => word.length > 2),
-    [quiz.targetText],
-  );
+  const scoring = useMemo(() => buildRepeatAfterMeScoring(quiz, course), [course, quiz]);
   // ASR 热词候选句:当前 quiz 句在前,同组其余 repeat-after-me 句作次级候选
   // (孩子偶尔会读到别的句子;proxy 端按顺序注入 corpus.context)。
   const asrSentenceTexts = useMemo(() => {
@@ -40,18 +45,15 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
   // onAnswer every render (it closes over quiz index / retries), so depending on it here would
   // detach + reattach the listener on every render. Read the latest values from refs instead.
   const onAnswerRef = useRef(onAnswer);
-  const targetWordsRef = useRef(targetWords);
+  const scoringRef = useRef(scoring);
   useEffect(() => {
     onAnswerRef.current = onAnswer;
-    targetWordsRef.current = targetWords;
+    scoringRef.current = scoring;
   });
 
   useEffect(() => {
     const onFinal = (event: { text: string }) => {
-      const said = event.text.toLowerCase();
-      const words = targetWordsRef.current;
-      const matchedCount = words.filter((word) => said.includes(word)).length;
-      const correct = matchedCount >= Math.min(2, words.length);
+      const correct = isRepeatAfterMeCorrect(scoringRef.current, event.text);
       if (correct) setHeardSentence(true);
       onAnswerRef.current({ correct, said: event.text });
     };
@@ -131,4 +133,54 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
       </aside>
     </div>
   );
+}
+
+export function buildRepeatAfterMePrompt(targetText: string): string {
+  const sentence = targetText.trim();
+  const words = extractEnglishWords(sentence);
+  if (!sentence || words.length <= 1) return sentence;
+
+  const chunks: string[] = [];
+  for (let i = 0; i < words.length; i += 2) {
+    chunks.push(words.slice(i, i + 2).join(' '));
+  }
+  return `${sentence} 慢一点: ${chunks.map((chunk) => `${chunk}.`).join(' ')} ${sentence}`;
+}
+
+export function buildRepeatAfterMeScoring(quiz: RepeatAfterMeQuiz, course: Course): RepeatAfterMeScoring {
+  const targetWords = uniqueWords(extractEnglishWords(quiz.targetText).map((word) => word.toLowerCase()));
+  const contentWords = targetWords.filter((word) => !SENTENCE_HELPER_WORDS.has(word));
+  const linkedWordId = quiz.cardId.startsWith('sentence_') ? quiz.cardId.slice('sentence_'.length) : '';
+  const linkedWordCard = course.cards.find((item) => item.kind === 'word' && item.id === linkedWordId);
+  const coreWords = linkedWordCard
+    ? uniqueWords(extractEnglishWords(linkedWordCard.english).map((word) => word.toLowerCase()))
+    : [];
+
+  return {
+    contentWords: contentWords.length > 0 ? contentWords : targetWords,
+    coreWords,
+  };
+}
+
+export function isRepeatAfterMeCorrect(scoring: RepeatAfterMeScoring, saidText: string): boolean {
+  const saidWords = new Set(extractEnglishWords(saidText).map((word) => word.toLowerCase()));
+  if (saidWords.size === 0) return false;
+
+  const coreMatched = scoring.coreWords.length === 0
+    || scoring.coreWords.every((word) => saidWords.has(word));
+  if (!coreMatched) return false;
+
+  const matchedContentCount = scoring.contentWords.filter((word) => saidWords.has(word)).length;
+  const requiredContentCount = Math.min(2, scoring.contentWords.length);
+  return matchedContentCount >= requiredContentCount;
+}
+
+const SENTENCE_HELPER_WORDS = new Set(['a', 'an', 'the', 'i']);
+
+function extractEnglishWords(text: string): string[] {
+  return text.match(/[A-Za-z]+(?:[-'][A-Za-z]+)?/g) ?? [];
+}
+
+function uniqueWords(words: string[]): string[] {
+  return Array.from(new Set(words));
 }

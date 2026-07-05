@@ -125,6 +125,18 @@ describe('speechCardAlign', () => {
     const result = speechCardAlign(ctx);
     expect(result.speech).toBe(ctx.speech);
   });
+
+  it('rewrites all-cleared just-cleared speech that claims cards remain', () => {
+    const ctx = makeCtx({
+      speech: '太棒了!不过我们还有几张水果卡片没看呢,继续加油吧!',
+      rcMode: 'just-cleared',
+      allWordsCleared: true,
+      currentPhase: 'interactive',
+    });
+    const result = speechCardAlign(ctx);
+    expect(result.speech).toBe('太棒了!所有单词都完成了!接下来我们玩个游戏!');
+    expect(result.speechRewrite).toBe('all-cleared-celebration');
+  });
 });
 
 describe('buildCardPrompt tone', () => {

@@ -1,8 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
+import { fruitsCourse } from '@/data/courses/fruits';
 import type { LessonStateName } from '@/lib/voice/lesson-controller';
-import { ReinforceFrame } from './ReinforceFrame';
+import {
+  ReinforceFrame,
+  buildRepeatAfterMePrompt,
+  buildRepeatAfterMeScoring,
+  isRepeatAfterMeCorrect,
+} from './ReinforceFrame';
 
 const quiz = foodCourse.phases.reinforcement.quizzes.find((item) => item.type === 'repeat-after-me') as Extract<
   (typeof foodCourse.phases.reinforcement.quizzes)[number],
@@ -18,6 +24,7 @@ const expectedAsrSentenceTexts = [
     .map((item) => item.targetText)
     .filter((text) => text !== quiz.targetText),
 ];
+const expectedSpokenPrompt = buildRepeatAfterMePrompt(quiz.targetText);
 
 function mockController(state: LessonStateName): any {
   const handlers = new Map<string, (event: any) => void>();
@@ -37,7 +44,7 @@ describe('ReinforceFrame', () => {
     const controller = mockController('awaiting');
     render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith(quiz.targetText));
+    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith(expectedSpokenPrompt));
     await waitFor(() => expect(screen.getByRole('button', { name: '按住 Space' })).toHaveProperty('disabled', false));
 
     fireEvent.pointerDown(screen.getByRole('button', { name: '按住 Space' }));
@@ -103,7 +110,7 @@ describe('ReinforceFrame', () => {
     const onAnswer = vi.fn();
     const { container } = render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith(quiz.targetText));
+    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith(expectedSpokenPrompt));
     expect(screen.getAllByText(quiz.targetText).length).toBeGreaterThan(0);
     expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="listening"]')).toBeTruthy();
     act(() => {
@@ -112,5 +119,33 @@ describe('ReinforceFrame', () => {
 
     expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="correct"]')).toBeTruthy();
     expect(onAnswer).toHaveBeenCalledWith({ correct: true, said: quiz.targetText });
+  });
+});
+
+describe('repeat-after-me prompt and scoring helpers', () => {
+  it('builds a full-sentence, slow-chunk, full-sentence prompt', () => {
+    expect(buildRepeatAfterMePrompt('I see the grape.')).toBe(
+      'I see the grape. 慢一点: I see. the grape. I see the grape.',
+    );
+  });
+
+  it('does not mark a sentence correct when the target word is missing', () => {
+    const grapeQuiz = fruitsCourse.phases.reinforcement.quizzes.find(
+      (item): item is typeof quiz => item.type === 'repeat-after-me' && item.id === 'q7',
+    )!;
+    const scoring = buildRepeatAfterMeScoring(grapeQuiz, fruitsCourse);
+
+    expect(isRepeatAfterMeCorrect(scoring, 'See the.')).toBe(false);
+    expect(isRepeatAfterMeCorrect(scoring, 'I see the grape.')).toBe(true);
+  });
+
+  it('requires more than the target word alone for sentence repetition', () => {
+    const bananaQuiz = fruitsCourse.phases.reinforcement.quizzes.find(
+      (item): item is typeof quiz => item.type === 'repeat-after-me' && item.id === 'q8',
+    )!;
+    const scoring = buildRepeatAfterMeScoring(bananaQuiz, fruitsCourse);
+
+    expect(isRepeatAfterMeCorrect(scoring, 'Baby is banana.')).toBe(false);
+    expect(isRepeatAfterMeCorrect(scoring, 'Give me banana.')).toBe(true);
   });
 });

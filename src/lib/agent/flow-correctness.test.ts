@@ -138,6 +138,17 @@ describe('n=49 regression: 最后一个词过关轮收尾,不教句子 (R1)', ()
     expect(result.speechRewrite).toBe('all-cleared-celebration');
   });
 
+  it('rewrites a contradictory final-clear speech that claims more cards remain (2026-07-05 n=28)', () => {
+    const ctx = lastWordClearingCtx();
+    ctx.speech = '太棒了!今天的单词全部完成。不过我们还有几张水果卡片没看呢,继续加油吧!';
+
+    const result = runGuards(ctx);
+
+    expect(result.speech).toBe(ALL_CLEARED_CELEBRATION);
+    expect(result.speech).not.toContain('还有几张');
+    expect(result.speechRewrite).toBe('all-cleared-celebration');
+  });
+
   it('keeps a clean LLM celebration speech untouched (no leak → no rewrite)', () => {
     const ctx = lastWordClearingCtx();
     ctx.speech = '哇,badminton 也通过啦!今天的单词全部完成,你真厉害!';

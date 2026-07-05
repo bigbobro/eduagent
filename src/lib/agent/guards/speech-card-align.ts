@@ -28,9 +28,10 @@ export const speechCardAlign: GuardFn = (ctx) => {
   if (ctx.allWordsCleared && ctx.currentPhase === 'interactive') {
     if (ctx.rcMode === 'just-cleared') {
       // Last word's clearance turn: keep the LLM celebration unless it starts teaching
-      // new content (sentence-card english / "学一个短句" phrasing — n=49 leak).
-      if (speechLeaksNewTeaching(speech, course)) {
-        console.warn('[session] all-cleared speech leaked new teaching — overriding', {
+      // new content (sentence-card english / "学一个短句" phrasing — n=49 leak) or
+      // contradicts the terminal state by claiming more cards remain (2026-07-05 n=28).
+      if (speechLeaksNewTeaching(speech, course) || speechContradictsAllCleared(speech)) {
+        console.warn('[session] all-cleared speech unsafe — overriding', {
           speech: speech.slice(0, 120),
         });
         return { ...ctx, speech: ALL_CLEARED_CELEBRATION, speechRewrite: 'all-cleared-celebration' };
@@ -119,6 +120,12 @@ function speechLeaksNewTeaching(speech: string, course: Course): boolean {
   });
   if (sentenceLeak) return true;
   return /短句|新的?句子|(来|再|要)学|学一个|跟(老师|我)(说|读)/.test(speech);
+}
+
+function speechContradictsAllCleared(speech: string): boolean {
+  return /还有[^。！!？?]{0,24}(没看|没学|没认识|没练|没完成|未看|未学|未练|未完成)/.test(speech)
+    || /(下一个|下一张|新的?)(水果|食物|动物|单词|词|卡片)/.test(speech)
+    || /(继续|接着|再来)[^。！!？?]{0,12}(认识|学习|学|看看|看|练)[^。！!？?]{0,12}(下一个|下一张|新的?)/.test(speech);
 }
 
 function speechMentionsCard(speech: string, card: Course['cards'][number]): boolean {
