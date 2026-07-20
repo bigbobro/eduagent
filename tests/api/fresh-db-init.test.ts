@@ -5,6 +5,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ORIGINAL_DATABASE_PATH = process.env.DATABASE_PATH;
 
+// One entry per read-only route that must stand up a fresh DB on its own.
+// Each case imports ONLY its own route against its own empty database — if they
+// shared one, whichever route ran first would run the migrations and cover for
+// the others, so dropping `ensureDatabaseInitialized()` from any single route
+// would still pass.
+const ROUTES = [
+  {
+    name: '/api/progress',
+    get: async () => (await import('@/app/api/progress/route')).GET(),
+    expectBody: (body: unknown) => expect(body).toMatchObject({ totalWordsMastered: 0 }),
+  },
+  {
+    name: '/api/stats',
+    get: async () => (await import('@/app/api/stats/route')).GET(),
+    expectBody: (body: unknown) => expect(body).toMatchObject({ totalMinutes: 0, totalSessions: 0 }),
+  },
+  {
+    name: '/api/sessions',
+    get: async () => (await import('@/app/api/sessions/route')).GET(new Request('http://x/api/sessions')),
+    expectBody: (body: unknown) => expect(body).toEqual([]),
+  },
+];
+
 describe('fresh DB route initialization', () => {
   let tempDir: string;
 
@@ -33,26 +56,14 @@ describe('fresh DB route initialization', () => {
   // (CPU contention from concurrent jsdom environments + vi.resetModules()
   // forcing a full re-transform of the route's module graph). Widen the budget
   // instead of masking the timing with retries/skip/reduced concurrency.
-  it('serves progress, stats, and sessions before /api/chat has initialized the DB', async () => {
-    const progress = await import('@/app/api/progress/route');
-    const stats = await import('@/app/api/stats/route');
-    const sessions = await import('@/app/api/sessions/route');
+  it.each(ROUTES)(
+    '$name serves a fresh DB on its own, before /api/chat has initialized one',
+    async ({ get, expectBody }) => {
+      const res = await get();
 
-    const progressRes = await progress.GET();
-    const statsRes = await stats.GET();
-    const sessionsRes = await sessions.GET(new Request('http://x/api/sessions'));
-
-    expect(progressRes.status).toBe(200);
-    expect(statsRes.status).toBe(200);
-    expect(sessionsRes.status).toBe(200);
-
-    await expect(progressRes.json()).resolves.toMatchObject({
-      totalWordsMastered: 0,
-    });
-    await expect(statsRes.json()).resolves.toMatchObject({
-      totalMinutes: 0,
-      totalSessions: 0,
-    });
-    await expect(sessionsRes.json()).resolves.toEqual([]);
-  }, 20000);
+      expect(res.status).toBe(200);
+      expectBody(await res.json());
+    },
+    20000,
+  );
 });
