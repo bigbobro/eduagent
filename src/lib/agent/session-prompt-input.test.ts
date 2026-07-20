@@ -9,6 +9,7 @@ vi.mock('@/lib/db/queries', () => ({
   insertInteraction: vi.fn(),
   upsertWordPerformance: vi.fn(),
   upsertWordRcState: vi.fn(),
+  upsertCourseProgress: vi.fn(),
 }));
 
 vi.mock('@/lib/llm', () => ({

@@ -10,12 +10,19 @@ interface ReinforcementFlowProps {
   course: Course;
   controller: LessonController;
   sessionId: string;
+  // R1/R3 (2026-07-20 session persistence): quiz ids already answered correctly in a prior
+  // session for this course — a resumed reinforcement phase starts at the first quiz NOT in
+  // this list instead of always at quiz 0. Omitted/empty for a fresh lesson (today's default).
+  passedQuizIds?: string[];
   onAllDone: () => void;
 }
 
-export function ReinforcementFlow({ course, controller, sessionId, onAllDone }: ReinforcementFlowProps) {
+export function ReinforcementFlow({ course, controller, sessionId, passedQuizIds = [], onAllDone }: ReinforcementFlowProps) {
   const quizzes = course.phases.reinforcement.quizzes;
-  const [idx, setIdx] = useState(0);
+  const [idx, setIdx] = useState(() => {
+    const firstUnpassed = quizzes.findIndex((quiz) => !passedQuizIds.includes(quiz.id));
+    return firstUnpassed === -1 ? quizzes.length : firstUnpassed;
+  });
   const [retries, setRetries] = useState(0);
   const current = quizzes[idx];
 

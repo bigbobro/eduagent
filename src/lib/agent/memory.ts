@@ -25,6 +25,7 @@ export function createMemory(): LessonMemory {
     interestSignals: [],
     wordPerformance: new Map(),
     totalInteractions: 0,
+    passedQuizIds: [],
   };
 }
 

@@ -263,6 +263,91 @@ describe('LessonController', () => {
   });
 });
 
+describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info header', () => {
+  beforeEach(() => {
+    asrInstances.length = 0;
+    asrOpenQueue.length = 0;
+    ttsInstances.length = 0;
+    setAsrSessionContextMock.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function resumeSseResponse(resumeInfo: Record<string, unknown> | null): Response {
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.close();
+      },
+    }), {
+      status: 200,
+      headers: {
+        'X-Session-Id': 'test-session',
+        ...(resumeInfo ? { 'X-Resume-Info': JSON.stringify(resumeInfo) } : {}),
+      },
+    });
+  }
+
+  it('exposes parsed resume info after a resumed start', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => resumeSseResponse({
+      resumed: true,
+      phase: 'interactive',
+      clearedCardIds: ['cat', 'dog'],
+      resumeCardId: 'bird',
+      passedQuizIds: ['q1'],
+    })));
+    const controller = new LessonController();
+
+    await controller.startLesson('animals');
+
+    expect(controller.getResumeInfo()).toEqual({
+      resumed: true,
+      phase: 'interactive',
+      clearedCardIds: ['cat', 'dog'],
+      resumeCardId: 'bird',
+      passedQuizIds: ['q1'],
+    });
+  });
+
+  it('has no resume info for a fresh start (header absent) — byte-identical to today', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => resumeSseResponse(null)));
+    const controller = new LessonController();
+
+    await controller.startLesson('animals');
+
+    expect(controller.getResumeInfo()).toBeNull();
+  });
+
+  it('degrades to null on a malformed X-Resume-Info header instead of throwing', async () => {
+    const res = new Response(new ReadableStream<Uint8Array>({
+      start(c) { c.close(); },
+    }), { status: 200, headers: { 'X-Session-Id': 'test-session', 'X-Resume-Info': '{not json' } });
+    vi.stubGlobal('fetch', vi.fn(async () => res));
+    const controller = new LessonController();
+
+    await expect(controller.startLesson('animals')).resolves.toBe(true);
+    expect(controller.getResumeInfo()).toBeNull();
+  });
+
+  it('clears resume info on endLesson', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => resumeSseResponse({
+      resumed: true,
+      phase: 'interactive',
+      clearedCardIds: [],
+      resumeCardId: 'cat',
+      passedQuizIds: [],
+    })));
+    const controller = new LessonController();
+    await controller.startLesson('animals');
+    expect(controller.getResumeInfo()).not.toBeNull();
+
+    await controller.endLesson();
+
+    expect(controller.getResumeInfo()).toBeNull();
+  });
+});
+
 describe('R1: actions buffered until TTS session-finished', () => {
   beforeEach(() => {
     asrInstances.length = 0;

@@ -158,6 +158,21 @@ function buildMemoryContextParts(memory: LessonMemory, course: Course): PromptSe
 - show_card 由服务端兜底(R-C):未通过 2 次时强制保持当前卡;通过的那一轮服务端自动推到下一张。你 emit show_card 也行,会被服务端校验。
 - 如果要说目标短句,必须 show_card 对应短句图卡: ${course.objectives.sentences.map((sentence) => `${sentence} => ${sentenceCardByText.get(sentence) || '(无对应卡)'}`).join(' | ')}`;
 
+  // R1 (2026-07-20 session persistence, frontend delivery): the opening turn of a RESUMED
+  // session has empty `messages` (conversation history is deliberately not restored, see
+  // course-progress.ts) but a nonzero `totalInteractions` carried over from the persisted
+  // breakpoint. A brand-new session's opening turn always has both at zero. This is the only
+  // signal already present in LessonMemory that reliably distinguishes "first turn of a resumed
+  // session" from "first turn of a fresh session" without a dedicated flag threaded through
+  // route.ts/session.ts — it self-limits to exactly one turn (the very next turn already has a
+  // non-empty `messages` array), so it never fires on ordinary mid-lesson turns.
+  const isResumeOpening = memory.messages.length === 0 && memory.totalInteractions > 0;
+  if (isResumeOpening) {
+    lessonState += `\n\n## 续课提示(仅本轮开场生效)
+- 孩子是回来接着上次没上完的课,不是第一次上这门课;这一句开场必须先说类似"欢迎回来"的话,不要用"今天我们要学 XX"这种新课开场白。
+- 直接引导孩子接着练"当前应练习的 word card"(${activeWordCardId || memory.currentWord || '(全部完成)'}),不要重新介绍或考核已经通过的 word cards。`;
+  }
+
   if (memory.interestSignals.length > 0) {
     lessonState += `\n\n## 学生兴趣信号`;
     for (const signal of memory.interestSignals.slice(-5)) {

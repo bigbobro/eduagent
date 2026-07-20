@@ -74,6 +74,26 @@ describe('LessonMandalaV2', () => {
     expect(within(hero as HTMLElement).getByText('banana')).toBeTruthy();
   });
 
+  it('R1 (2026-07-20): positions on initialCardId instead of the first word card', () => {
+    const controller = mockController('awaiting');
+    const { container } = render(<LessonMandalaV2 course={foodCourse} controller={controller} initialCardId="milk" />);
+
+    const hero = container.querySelector('[data-picture-card-size="hero"]');
+    expect(hero).toBeTruthy();
+    expect(within(hero as HTMLElement).getByText('milk')).toBeTruthy();
+  });
+
+  it('R1 (2026-07-20): seeds cleared state from initialClearedCardIds', () => {
+    const controller = mockController('awaiting');
+    const { container } = render(
+      <LessonMandalaV2 course={foodCourse} controller={controller} initialCardId="milk" initialClearedCardIds={['apple']} />,
+    );
+
+    const chips = container.querySelectorAll('[data-picture-card-size="chip"]');
+    const appleChip = Array.from(chips).find((chip) => within(chip as HTMLElement).queryByText('apple'));
+    expect(appleChip?.getAttribute('data-picture-card-state')).toBe('correct');
+  });
+
   it('asks the teacher to repeat the current visible card', () => {
     const controller = mockController('awaiting');
     render(<LessonMandalaV2 course={foodCourse} controller={controller} />);

@@ -2,7 +2,7 @@
 
 import { Course, PhaseName } from '@/types/course';
 import { ToolAction } from '@/types/tools';
-import { LessonController } from './lesson-controller';
+import { LessonController, type ResumeInfo } from './lesson-controller';
 
 export type { PhaseName } from '@/types/course';
 
@@ -27,6 +27,9 @@ export class PhasedLessonController {
   private introStartupUnlockTimer: ReturnType<typeof setTimeout> | null = null;
   private introBusy = false;
   private introActiveCardId: string | null = null;
+  // R1 (2026-07-20 session persistence): populated from LessonController.getResumeInfo() once
+  // startLesson() detects the server resumed an incomplete course_progress breakpoint.
+  private resumeInfo: ResumeInfo | null = null;
   private readonly wordCardIds: Set<string>;
   private readonly wordCardCount: number;
   private static readonly INTRO_STARTUP_UNLOCK_MS = 7000;
@@ -64,6 +67,11 @@ export class PhasedLessonController {
     return this.introActiveCardId;
   }
 
+  /** R1 (2026-07-20): non-null only after startLesson() resolved into a resumed session. */
+  getResumeInfo(): ResumeInfo | null {
+    return this.resumeInfo;
+  }
+
   async startLesson(): Promise<boolean> {
     this.setIntroBusy(true);
     this.armIntroStartupUnlockTimer();
@@ -74,12 +82,35 @@ export class PhasedLessonController {
         if (this.currentPhase === 'intro') this.setIntroBusy(false);
         return false;
       }
+      this.applyResumeInfo(this.v2.getResumeInfo());
       return true;
     } catch {
       this.clearIntroStartupUnlockTimer();
       if (this.currentPhase === 'intro') this.setIntroBusy(false);
       return false;
     }
+  }
+
+  // R1 (2026-07-20 session persistence): jump straight to the resumed phase instead of the
+  // default intro→interactive auto-transition (onV2State), and seed a progress baseline so
+  // maybeArmTransition already knows about previously-cleared cards before the first real
+  // `progress` event arrives. phase:'intro' (the very-first-turn-only edge case, see
+  // course-progress.ts resolveResumeCardId) is a harmless no-op — it matches the constructor
+  // default and the normal intro flow still applies.
+  private applyResumeInfo(resume: ResumeInfo | null): void {
+    if (!resume?.resumed) return;
+    this.resumeInfo = resume;
+    this.clearIntroStartupUnlockTimer();
+    const resumedPhase = resume.phase as PhaseName;
+    this.currentPhase = resumedPhase;
+    this.setIntroBusy(false);
+    this.setIntroActiveCardId(null);
+    this.lastSnapshot = {
+      clearedCardIds: resume.clearedCardIds,
+      totalAttempts: 0,
+      currentPhase: resumedPhase,
+    };
+    this.emit('phase-change', resumedPhase);
   }
 
   async endLesson(): Promise<void> {
@@ -92,6 +123,7 @@ export class PhasedLessonController {
     this.v2.off('state', this.onV2State);
     await this.v2.endLesson();
     this.currentPhase = 'done';
+    this.resumeInfo = null;
     this.setIntroBusy(false);
     this.setIntroActiveCardId(null);
   }

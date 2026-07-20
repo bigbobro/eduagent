@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
+import type { ResumeInfo } from './lesson-controller';
 import { PhasedLessonController, PhaseName } from './phased-lesson-controller';
 
-function mockV2() {
+function mockV2(resumeInfo: ResumeInfo | null = null) {
   const listeners = new Map<string, Set<Function>>();
   let state = 'idle';
   return {
@@ -24,6 +25,9 @@ function mockV2() {
     sendCustomAction: vi.fn(async () => {}),
     getSessionId: vi.fn(() => 'mock-session'),
     getState: vi.fn(() => state),
+    // R1 (2026-07-20 session persistence): defaults to "no resume" so existing tests keep
+    // exercising the fresh-start intro→interactive path unchanged.
+    getResumeInfo: vi.fn(() => resumeInfo),
   };
 }
 
@@ -165,6 +169,79 @@ describe('PhasedLessonController phase transitions', () => {
 
     resolveTransition();
     await vi.waitFor(() => expect(phaseChanges).toContain('reinforcement'));
+  });
+});
+
+describe('PhasedLessonController resume (2026-07-20 session persistence)', () => {
+  it('jumps straight to the resumed phase instead of intro→interactive auto-transition', async () => {
+    const resume: ResumeInfo = {
+      resumed: true,
+      phase: 'interactive',
+      clearedCardIds: ['apple'],
+      resumeCardId: 'banana',
+      passedQuizIds: [],
+    };
+    const v2 = mockV2(resume);
+    const ctrl = new PhasedLessonController(v2 as any, foodCourse);
+    const phaseChanges: PhaseName[] = [];
+    ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
+
+    await ctrl.startLesson();
+
+    expect(ctrl.getCurrentPhase()).toBe('interactive');
+    expect(phaseChanges).toEqual(['interactive']);
+    expect(ctrl.getResumeInfo()).toEqual(resume);
+
+    // The default intro auto-transition (onV2State: currentPhase==='intro' → performTransition)
+    // must not also fire once TTS finishes — currentPhase is already 'interactive'.
+    v2.emit('state', 'awaiting');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(phaseChanges).toEqual(['interactive']);
+    expect(v2.sendCustomAction).not.toHaveBeenCalled();
+  });
+
+  it('jumps straight to reinforcement when resumed there', async () => {
+    const resume: ResumeInfo = {
+      resumed: true,
+      phase: 'reinforcement',
+      clearedCardIds: foodCourse.cards.filter((c) => c.kind === 'word').map((c) => c.id),
+      resumeCardId: '',
+      passedQuizIds: ['q1'],
+    };
+    const v2 = mockV2(resume);
+    const ctrl = new PhasedLessonController(v2 as any, foodCourse);
+
+    await ctrl.startLesson();
+
+    expect(ctrl.getCurrentPhase()).toBe('reinforcement');
+  });
+
+  it('has no resume info for a fresh (non-resumed) start', async () => {
+    const v2 = mockV2(null);
+    const ctrl = new PhasedLessonController(v2 as any, foodCourse);
+
+    await ctrl.startLesson();
+
+    expect(ctrl.getCurrentPhase()).toBe('intro');
+    expect(ctrl.getResumeInfo()).toBeNull();
+  });
+
+  it('clears resume info on endLesson', async () => {
+    const resume: ResumeInfo = {
+      resumed: true,
+      phase: 'interactive',
+      clearedCardIds: [],
+      resumeCardId: 'apple',
+      passedQuizIds: [],
+    };
+    const v2 = mockV2(resume);
+    const ctrl = new PhasedLessonController(v2 as any, foodCourse);
+    await ctrl.startLesson();
+    expect(ctrl.getResumeInfo()).not.toBeNull();
+
+    await ctrl.endLesson();
+
+    expect(ctrl.getResumeInfo()).toBeNull();
   });
 });
 

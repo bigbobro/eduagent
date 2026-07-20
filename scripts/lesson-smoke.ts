@@ -13,6 +13,7 @@
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { getCourseById } from '../src/data/courses';
 import type { WordCard } from '../src/types/course';
@@ -346,8 +347,33 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// R1 (2026-07-20 session persistence): ANIMALS_SCRIPT above hard-codes an assumed fresh start
+// (phase-transition→interactive expects show_card=cat). The 'start' route now resumes from any
+// incomplete `course_progress` breakpoint (src/app/api/chat/route.ts), and this same script's
+// own `action:'end'` call at the bottom leaves exactly that: an incomplete breakpoint (the fixed
+// script never clears every word card or answers every quiz). Without this reset, the SECOND
+// (and every later) run against the same dev DB would resume mid-course instead of starting at
+// cat, and every `expectShowCard` assertion would fail — not a product bug, a fixture-vs-feature
+// interaction. Best-effort and non-fatal: a fresh checkout's DB has no course_progress table yet
+// (created lazily on first /api/chat call), which is equally "nothing to reset".
+function resetCourseProgressBreakpoint(courseId: string): void {
+  const dbPath = path.resolve(process.cwd(), process.env.DATABASE_PATH || './db/eduagent.db');
+  if (!existsSync(dbPath)) return;
+  try {
+    const db = new Database(dbPath);
+    try {
+      db.prepare('DELETE FROM course_progress WHERE course_id = ?').run(courseId);
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    console.warn('[smoke] could not reset course_progress breakpoint (continuing):', (e as Error).message);
+  }
+}
+
 async function main(): Promise<number> {
   console.log(`[smoke] base=${BASE} course=${COURSE_ID}`);
+  resetCourseProgressBreakpoint(COURSE_ID);
 
   const health = await fetch(`${BASE}/api/courses`).catch(() => null);
   if (!health || !health.ok) {

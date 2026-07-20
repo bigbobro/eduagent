@@ -3,6 +3,14 @@
 import type { Course } from '@/types/course';
 import { Cat, PaperBg, PaperButton, Sparkle, Star, palette } from '@/components/magic';
 
+// Session persistence (2026-07-20) — per-course home status keyed by course id.
+export interface CourseCardStatus {
+  timesStarted: number;
+  progressPercent: number;
+  hasResume: boolean;
+  completed: boolean;
+}
+
 interface HomeStudyProps {
   courses: Course[] | null;
   error?: boolean;
@@ -11,6 +19,14 @@ interface HomeStudyProps {
   onJournal: () => void;
   onParents: () => void;
   stats?: { stars: number; streak: number };
+  progress?: Record<string, CourseCardStatus>;
+}
+
+function courseStatusLine(wordCount: number, status?: CourseCardStatus): string {
+  if (!status || status.timesStarted === 0) return `${wordCount} 个词`;
+  if (status.completed) return `已学完 · 上过 ${status.timesStarted} 次`;
+  if (status.hasResume) return `上过 ${status.timesStarted} 次 · 学到 ${status.progressPercent}%`;
+  return `上过 ${status.timesStarted} 次`;
 }
 
 const bookRotation = [-1.2, 0.8, -0.6, 1.1];
@@ -23,6 +39,7 @@ export function HomeStudy({
   onJournal,
   onParents,
   stats = { stars: 0, streak: 0 },
+  progress,
 }: HomeStudyProps) {
   return (
     <PaperBg tone="paperDeep" className="h-screen w-screen">
@@ -55,7 +72,10 @@ export function HomeStudy({
                 <div key={i} className="h-44 animate-pulse rounded-paper-lg border-2 border-inkPale bg-paper/60 shadow-paper" />
               ))}
 
-              {!error && courses?.map((course, index) => (
+              {!error && courses?.map((course, index) => {
+                const wordCount = course.cards.filter((card) => card.kind === 'word').length;
+                const status = progress?.[course.id];
+                return (
                 <button
                   key={course.id}
                   type="button"
@@ -69,16 +89,24 @@ export function HomeStudy({
                     style={{ background: palette[course.tone] }}
                     aria-hidden="true"
                   />
+                  {status?.hasResume && (
+                    <span className="absolute right-3 top-3 z-10 rounded-paper-pill border-2 border-ink bg-butter px-2.5 py-0.5 font-zh text-xs text-ink shadow-paper">
+                      继续
+                    </span>
+                  )}
                   <div className="ml-12 flex h-full flex-col justify-between">
                     <div>
                       <div className="font-display text-[26px] leading-tight text-ink">{course.title}</div>
                       <div className="mt-2 font-en text-base text-inkSoft">{course.id}</div>
                     </div>
-                    <div className="font-zh text-sm text-inkSoft">{course.cards.filter((card) => card.kind === 'word').length} 个词</div>
+                    <div className="font-zh text-sm text-inkSoft">{courseStatusLine(wordCount, status)}</div>
                   </div>
-                  <Sparkle className="absolute right-5 top-5 opacity-0 transition-opacity group-hover:opacity-100" />
+                  {!status?.hasResume && (
+                    <Sparkle className="absolute right-5 top-5 opacity-0 transition-opacity group-hover:opacity-100" />
+                  )}
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
 

@@ -51,8 +51,9 @@
 | `src/lib/voice/lesson-controller.ts` | **浏览器侧调度器,8 状态机,统一编排 ASR + SSE + TTS + 静态 quiz TTS** |
 | `src/lib/voice/turn-timeout-guard.ts` | 命名一次性恢复计时器(asrFinal 5s / chatWatchdog 25s / speechFinish 1.5s)的 arm/clear/clearAll 记账;recovery 回调仍在 controller(staticSpeech 10s promise 超时不归它管) |
 | `src/lib/agent/orchestrator.ts` | 把 `streamUserInput` 包成 SSE `ReadableStream` 给 `/api/chat` |
-| `src/lib/agent/session-store.ts` | 活动课堂 session 的存取边界;当前默认实现是进程内 `InMemorySessionStore`,后续 SQLite resume 应替换这里而不是在 `session.ts` 里加第二套 Map |
-| `src/lib/agent/session.ts` | LLM 一轮对话骨架:通过 `SessionStore` 查找 session + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn |
+| `src/lib/agent/session-store.ts` | 活动课堂 session 的存取边界;运行态 session 仍是进程内 `InMemorySessionStore`(退出即焚)。**跨会话续课(2026-07-20)不替换这里**——而是把"每门课的进度断点"落 `course_progress` 表,进课时 `createSessionFromSnapshot` 重建 memory(见 `course-progress.ts` / §3.1b) |
+| `src/lib/agent/session.ts` | LLM 一轮对话骨架:通过 `SessionStore` 查找 session + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn;`commitTurn`/`recordQuizAnswer` 每轮 `upsertCourseProgress` 落断点,`createSessionFromSnapshot` 从断点重建会话 |
+| `src/lib/agent/course-progress.ts` | **会话持久化(2026-07-20)**:LessonMemory 进度子集 ↔ `course_progress` 快照序列化(排除 messages/interestSignals);`isCourseComplete`(全 word cleared + 全 quiz passed)、`isResumableProgress`(排除 completed 与空 intro 断点)、`resolveResumeCardId` |
 | `src/lib/agent/guards/` | **Guard pipeline**(见下方 §Agent Guard Pipeline) |
 | `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta;导出 `sanitizeSpeech` 剥离 `xxx_yyy` 这种 card_id token,防止 TTS 把 `_` 读成"下划线 / underscore"** |
 | `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史、当前词精确尝试判定 |
@@ -78,7 +79,7 @@
 | `src/components/parents/PINGateFrame.tsx` / `ParentsPage.tsx` | 家长阁楼 PIN 解锁 + stats/session dashboard |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/index.ts` | SQLite 连接持有者。`getDb()` **每次调用时**解析 `DATABASE_PATH`(相对 `process.cwd()`),路径与已开连接不同则 close 旧的重开——正常运行路径恒定,行为仍是进程内单连接;开库前 `mkdirSync(dirname, {recursive:true})`(better-sqlite3 只建文件不建目录,而 `db/` 不在 git 里,fresh checkout 没有该目录);导出 `closeDb()` 供测试在切临时 DB 前后显式释放,堵住"模块加载期捕获路径"导致的跨测试文件泄漏 |
-| `src/lib/db/schema.ts` + `queries.ts` | `schema.ts`:SQLite migration runner / 表结构 / `schema_migrations` 版本记录;`queries.ts`:全部业务 SQL 的单一边界——写入 + 报表只读(`getLessonTimings` / `getRecentLessons` / `getLessonWordPerfCount` / `getWordPerformanceByCourse`),调用方注入 `db` 只做 JS 聚合,自己不写 SQL |
+| `src/lib/db/schema.ts` + `queries.ts` | `schema.ts`:SQLite migration runner / 表结构 / `schema_migrations` 版本记录(**v4 加 `course_progress` 断点表**,PK=course_id);`queries.ts`:全部业务 SQL 的单一边界——写入 + 断点读写(`upsert`/`getCourseProgress`)+ 报表只读(`getLessonTimings` / `getRecentLessons` / `getLessonWordPerfCount` / `getWordPerformanceByCourse` / **`getLessonCountByCourse` / `getAllCourseProgress`**),调用方注入 `db` 只做 JS 聚合,自己不写 SQL |
 
 ---
 
@@ -102,6 +103,14 @@ PhasedLessonView mount → new LessonController → new PhasedLessonController
   │              └─ done → tts.finishSession (event=102)
   │                   ◀── SessionFinished (event=152) → state→awaiting
 ```
+
+### 3.1b 断点续课恢复(2026-07-20)
+
+`POST /api/chat?action=start` 每门课查 `course_progress`:
+- `isResumableProgress` 为真(未完成 + 非空 intro 断点)→ `createSessionFromSnapshot` 用断点重建 memory(messages 清空,**不回放对话**),`currentPhase` 恢复到断点阶段,响应头 `X-Resume-Info`(JSON:`{resumed,phase,clearedCardIds,resumeCardId,passedQuizIds}`);前端据此从断点阶段起播、老师"欢迎回来"、reinforcement 从第一个未过 quiz 起。
+- 否则(新课 / 已完成 / 空 intro 断点)→ 现状 `createSession`,无 `X-Resume-Info`,响应字节同旧版(PRD"否则现状")。
+
+每轮 `commitTurn` / `recordQuizAnswer` 用 `serializeProgress` upsert 断点(`isCourseComplete` 判 `completed`)。**完成 = 全 word cleared + 全 quiz passed**(quiz 答对累积 `passedQuizIds`)。**不过期**(PRD R4)——断点一直有效到该课完成;完成后行仍保留但不再恢复(下次是复习式全新开始)。「空 intro 断点」判据(`isResumableProgress`)专门挡住"进课只听开场白就退→误判续课、老师错误地说欢迎回来"。
 
 ### 3.2 一轮对话
 
@@ -494,6 +503,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 - 2026-05-26 — **Prompt input quantification** — `/api/chat` 每轮 LLM 调用前通过 `buildPromptInput()` 生成同一份 system prompt 与 inputBreakdown,按 static rules / phase rules / course definition / lesson state / summary constraints / history / separators 记录字符数,并在拿到 MiMo `prompt_tokens` 后按字符占比估算各 bucket token;`interaction_logs.model_calls.llm.inputBreakdown` 持久化该诊断,`lesson-report-data.ts` 聚合 trackedTurns、平均字符、最大 bucket 和估算 token share,用于决定下一轮 prompt slimming 先压哪里。
 - 2026-05-26 — **Eval v1 lesson quality scorecard** — `lesson-report-data.ts` 在原有 session/tokens/interactions 基础上输出 `eval` 结构化评分卡:session health、cost/context、teaching-loop outcomes、agent behavior risks、next-iteration signals。所有指标从 `lesson_logs`、`interaction_logs`、课程词卡定义和 `word_performance` 确定性计算,不引入 LLM-as-judge,用于把课后报告里的人工判断沉淀成可回归、可比较的数据。
 - 2026-07-05 — **repeat-after-me 降难度 + final-clear 矛盾话术拦截** — fruits 真人课(session `893ed393`)暴露 q7 `I see the grape.` 被 `See the.` 过宽判 correct,以及最后词 clear 当轮 n=28 仍说"还有几张水果卡片没看"。修法:repeat-after-me 初次静态 TTS 改为"完整句 → 慢速拆分 → 完整句",判分要求目标词/核心内容词出现并覆盖足够句子内容;`speechCardAlign` all-cleared just-cleared 分支新增终态矛盾话术检测,命中"还有...没看/继续学下一个"等续课句时改写为 `ALL_CLEARED_CELEBRATION`。
+- 2026-07-20 — **会话持久化与断点续课**(真人课信号触发:课上一半退出下次从头) — 新增 `course_progress` 表(migration v4,PK=course_id,每门课一条断点)+ `course-progress.ts`(进度序列化 / `isCourseComplete` / `isResumableProgress` / `resolveResumeCardId`);`/api/chat` start 从有效断点 `createSessionFromSnapshot` 恢复(响应头 `X-Resume-Info`,新课字节不变),每轮 upsert 断点,quiz 答对累积 `passedQuizIds`;完成 = 全 word cleared + 全 quiz passed,**不过期**;前端从断点阶段起播 + 老师"欢迎回来" + reinforcement 跳过已过 quiz(§3.1b);首页 `HomeStudy` 每门课展示上课次数 + 完成度% + "继续"角标(`/api/progress` 扩展 `timesStarted`/`progressPercent`/`hasResume`/`completed`,`getLessonCountByCourse` + `getAllCourseProgress` 聚合)。次数 = 每次进课(含续课)计一次。同批「工程安全债」评估为单用户纯本地无外部攻击面、收益低,整批 park(见 TODO.md)。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
 

@@ -82,6 +82,30 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 4,
+    // Session persistence (2026-07-20 PRD): one "current breakpoint" row per course, so a
+    // lesson interrupted mid-way (tab close / crash / deliberate exit) can resume from where
+    // it left off instead of always restarting at intro. snapshot is a JSON-serialized
+    // CourseProgressSnapshot (see src/lib/agent/course-progress.ts) — a progress-only subset
+    // of LessonMemory, deliberately excluding conversation history. `phase` is the course-level
+    // intro/interactive/reinforcement/done breakpoint (PhaseName), not the snapshot's internal
+    // LessonMemory.phase. `completed` gates resume: a completed course is treated as "no
+    // breakpoint" on the next start (fresh restart = review), so it is left in place rather
+    // than deleted.
+    name: 'course_progress_table',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS course_progress (
+          course_id  TEXT PRIMARY KEY,
+          snapshot   TEXT NOT NULL,
+          phase      TEXT NOT NULL,
+          completed  INTEGER DEFAULT 0,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

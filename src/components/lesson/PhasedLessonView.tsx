@@ -27,16 +27,45 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const [introBusy, setIntroBusy] = useState(false);
   const [introActiveCardId, setIntroActiveCardId] = useState<string | null>(null);
   const [clearedWordCount, setClearedWordCount] = useState(0);
+  // R1 (2026-07-20 session persistence): populated from PhasedLessonController.getResumeInfo()
+  // right after a resumed startLesson() resolves, so LessonMandalaV2/ReinforcementFlow can
+  // position on the breakpoint instead of flashing the default first card / quiz 0.
+  const [resumeCardId, setResumeCardId] = useState<string | null>(null);
+  const [resumeClearedCardIds, setResumeClearedCardIds] = useState<string[]>([]);
+  const [resumePassedQuizIds, setResumePassedQuizIds] = useState<string[]>([]);
   const [lessonRun, setLessonRun] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // R1 (2026-07-20): guards against re-applying resume info on later, ordinary phase changes
+  // (e.g. a post-resume interactive→reinforcement transition once the child finishes the rest
+  // of the words) — resume info must only ever seed the *first* phase-change of a lesson.
+  const resumeAppliedRef = useRef(false);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
 
   useEffect(() => {
     const v2 = new LessonController();
     const phased = new PhasedLessonController(v2, course);
-    const onPhaseChange = (next: PhaseName) => setPhase(next);
+    // R1 (2026-07-20 session persistence): a resumed session's very first 'phase-change' event
+    // IS the resume application itself (PhasedLessonController.applyResumeInfo emits it
+    // synchronously before startLesson() resolves — see phased-lesson-controller.ts). Reading
+    // getResumeInfo() here, in the SAME synchronous callback as setPhase, guarantees both land
+    // in one React update instead of two — otherwise LessonMandalaV2/ReinforcementFlow can
+    // mount one tick early with the still-default card/passedQuizIds (verified by a failing
+    // test before this fix: quiz 0 briefly won the race against the resumed passedQuizIds).
+    const onPhaseChange = (next: PhaseName) => {
+      setPhase(next);
+      if (!resumeAppliedRef.current) {
+        const resume = phased.getResumeInfo();
+        if (resume?.resumed) {
+          resumeAppliedRef.current = true;
+          setResumeCardId(resume.resumeCardId || null);
+          setResumeClearedCardIds(resume.clearedCardIds);
+          setResumePassedQuizIds(resume.passedQuizIds);
+          setClearedWordCount(resume.clearedCardIds.filter((cardId) => wordCardIds.has(cardId)).length);
+        }
+      }
+    };
     const onIntroBusyChange = (busy: boolean) => setIntroBusy(busy);
     const onIntroActiveCardChange = (cardId: string | null) => setIntroActiveCardId(cardId);
     const onProgress = (next: ProgressSnapshot) => {
@@ -75,6 +104,8 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
       setIntroBusy(false);
       setIntroActiveCardId(null);
     }
+    // Resume info (if any) is applied by onPhaseChange, in the same tick as the resumed
+    // phase's 'phase-change' event — see the useEffect above.
   };
 
   const handleHotspotClick = (cardId: string) => {
@@ -89,6 +120,10 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     setIntroBusy(false);
     setIntroActiveCardId(null);
     setClearedWordCount(0);
+    setResumeCardId(null);
+    setResumeClearedCardIds([]);
+    setResumePassedQuizIds([]);
+    resumeAppliedRef.current = false;
     setLessonRun((run) => run + 1);
   };
   const v2 = v2Ref.current;
@@ -137,12 +172,20 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
             started
           />
         )}
-        {started && phase === 'interactive' && v2 && <LessonMandalaV2 course={course} controller={v2} />}
+        {started && phase === 'interactive' && v2 && (
+          <LessonMandalaV2
+            course={course}
+            controller={v2}
+            initialCardId={resumeCardId || undefined}
+            initialClearedCardIds={resumeClearedCardIds}
+          />
+        )}
         {started && phase === 'reinforcement' && v2 && (
           <ReinforcementFlow
             course={course}
             controller={v2}
             sessionId={sessionId}
+            passedQuizIds={resumePassedQuizIds}
             onAllDone={() => phasedRef.current?.completeReinforcement()}
           />
         )}

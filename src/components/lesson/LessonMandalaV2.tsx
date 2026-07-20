@@ -11,6 +11,11 @@ import { toPictureCardData } from '@/components/magic/cardData';
 interface LessonMandalaV2Props {
   course: Course;
   controller: LessonController;
+  // R1 (2026-07-20 session persistence): position on the breakpoint card / cleared set for a
+  // resumed session instead of the first word card and an empty cleared set. Undefined/omitted
+  // for a fresh (non-resumed) lesson — falls back to today's default.
+  initialCardId?: string;
+  initialClearedCardIds?: string[];
 }
 
 interface ProgressSnapshot {
@@ -18,14 +23,14 @@ interface ProgressSnapshot {
   totalAttempts: number;
 }
 
-export function LessonMandalaV2({ course, controller }: LessonMandalaV2Props) {
+export function LessonMandalaV2({ course, controller, initialCardId, initialClearedCardIds }: LessonMandalaV2Props) {
   const cards = useMemo(() => course.cards, [course.cards]);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const [state, setState] = useState<LessonStateName>(controller.getState());
   const [subtitle, setSubtitle] = useState<{ text: string; source: 'user' | 'ai' | 'idle' }>({ text: '', source: 'idle' });
-  const [currentCardId, setCurrentCardId] = useState(wordCards[0]?.id ?? '');
-  const [clearedCardIds, setClearedCardIds] = useState<Set<string>>(new Set());
-  const clearedCardIdsRef = useRef<Set<string>>(new Set());
+  const [currentCardId, setCurrentCardId] = useState(initialCardId || wordCards[0]?.id || '');
+  const [clearedCardIds, setClearedCardIds] = useState<Set<string>>(() => new Set(initialClearedCardIds));
+  const clearedCardIdsRef = useRef<Set<string>>(new Set(initialClearedCardIds));
   const showableCardIds = useMemo(() => new Set(cards.map((card) => card.id)), [cards]);
   const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
   const cardWordIds = useMemo(() => {

@@ -46,6 +46,43 @@ describe('ReinforcementFlow', () => {
     await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith('再听一次: Where is the apple?'));
   });
 
+  it('R1 (2026-07-20): resumes at the first quiz not in passedQuizIds', async () => {
+    const controller = mockController();
+    const firstQuizId = foodCourse.phases.reinforcement.quizzes[0].id;
+    render(
+      <ReinforcementFlow
+        course={foodCourse}
+        controller={controller}
+        onAllDone={() => {}}
+        sessionId="s1"
+        passedQuizIds={[firstQuizId]}
+      />,
+    );
+    expect(screen.getByText(/Find the milk/)).toBeTruthy();
+    expect(screen.queryByText(/Where is the apple/)).toBeNull();
+  });
+
+  it('R1 (2026-07-20): falls back to quiz 0 when passedQuizIds is omitted', async () => {
+    const controller = mockController();
+    render(<ReinforcementFlow course={foodCourse} controller={controller} onAllDone={() => {}} sessionId="s1" />);
+    expect(screen.getByText(/Where is the apple/)).toBeTruthy();
+  });
+
+  it('R1 (2026-07-20): shows the completion message when every quiz is already passed', async () => {
+    const controller = mockController();
+    const allQuizIds = foodCourse.phases.reinforcement.quizzes.map((q) => q.id);
+    render(
+      <ReinforcementFlow
+        course={foodCourse}
+        controller={controller}
+        onAllDone={() => {}}
+        sessionId="s1"
+        passedQuizIds={allQuizIds}
+      />,
+    );
+    expect(screen.getByText('今天的练习完成啦')).toBeTruthy();
+  });
+
   it('calls onAllDone after last quiz', async () => {
     const onAllDone = vi.fn();
     const slim = {

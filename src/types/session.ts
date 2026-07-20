@@ -45,6 +45,40 @@ export interface LessonMemory {
   interestSignals: InterestSignal[];
   wordPerformance: Map<string, WordPerf>;
   totalInteractions: number;
+  // R3 (2026-07-20 session persistence PRD): reinforcement quiz ids answered correctly at
+  // least once, this session. Accumulates via recordQuizAnswer; drives isCourseComplete()
+  // and lets a resumed reinforcement phase skip already-passed quizzes.
+  passedQuizIds: string[];
+}
+
+// R1/R3 (2026-07-20 session persistence): the durable-enough subset of LessonMemory that
+// survives a lesson interruption, persisted to `course_progress` (one row per course).
+// Deliberately excludes `messages` (conversation history) and `interestSignals` — resume
+// restarts the LLM context, it does not replay old chat. `phase` here is
+// LessonMemory.phase (the internal teaching micro-phase), NOT the course-level
+// intro/interactive/reinforcement/done phase — that one is stored as the separate
+// `course_progress.phase` column (see queries.ts upsertCourseProgress).
+export interface SerializedWordPerf {
+  attempts: number;
+  correct: number;
+  lastAttempt: string; // ISO date string
+}
+
+export interface CourseProgressSnapshot {
+  currentWord: string;
+  currentCardId: string;
+  phase: LessonPhase;
+  wordsLearned: string[];
+  wordsToReview: string[];
+  clearedCardIds: string[];
+  cardProgress: Record<string, CardProgressState>;
+  cardAttemptStreak: Record<string, number>;
+  cardCorrectCount: Record<string, number>;
+  parkedCardIds: string[];
+  parkRetryCardIds: string[];
+  wordPerformance: Array<[string, SerializedWordPerf]>;
+  totalInteractions: number;
+  passedQuizIds: string[];
 }
 
 export interface InteractionLog {

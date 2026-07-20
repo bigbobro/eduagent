@@ -169,6 +169,43 @@ describe('buildSystemPrompt v1.1 progress and drill contract', () => {
   });
 });
 
+describe('buildSystemPrompt resume opening (2026-07-20 session persistence)', () => {
+  it('injects a resume welcome hint on the opening turn of a resumed session', () => {
+    const memory = {
+      ...createMemory(),
+      messages: [],
+      totalInteractions: 3,
+      currentCardId: 'apple',
+      currentWord: 'apple',
+      cardProgress: { apple: 'attempted' as const, banana: 'untouched' as const },
+    };
+
+    const prompt = buildSystemPrompt(foodCourse, memory);
+
+    expect(prompt).toContain('续课提示');
+    expect(prompt).toContain('欢迎回来');
+    expect(prompt).toContain('apple');
+  });
+
+  it('does not inject the resume hint on a fresh session opening turn', () => {
+    const prompt = buildSystemPrompt(foodCourse, createMemory());
+
+    expect(prompt).not.toContain('续课提示');
+  });
+
+  it('does not inject the resume hint once conversation history exists (later turns)', () => {
+    const memory = {
+      ...createMemory(),
+      messages: [{ role: 'user' as const, content: '(课堂开始)', timestamp: new Date() }],
+      totalInteractions: 3,
+    };
+
+    const prompt = buildSystemPrompt(foodCourse, memory);
+
+    expect(prompt).not.toContain('续课提示');
+  });
+});
+
 describe('buildPromptInput measurement', () => {
   it('keeps v1 prompt buckets below the measured pre-slimming baseline', () => {
     const input = buildPromptInput(

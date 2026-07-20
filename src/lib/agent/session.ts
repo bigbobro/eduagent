@@ -11,15 +11,33 @@ import {
   initializeCardProgress,
   allWordsFinished,
 } from './memory';
+import { deserializeProgress, isCourseComplete, serializeProgress } from './course-progress';
 import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/llm';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
-import { createLessonLog, finishLessonLog, touchLessonLog, insertInteraction, upsertWordPerformance, upsertWordRcState } from '@/lib/db/queries';
+import {
+  createLessonLog,
+  finishLessonLog,
+  touchLessonLog,
+  insertInteraction,
+  upsertWordPerformance,
+  upsertWordRcState,
+  upsertCourseProgress,
+  type CourseProgressRow,
+} from '@/lib/db/queries';
 import { GuardContext, runPipeline } from './guards/index';
 import { closingGuard } from './guards/closing-guard';
 import { prematureClosingGuard } from './guards/premature-closing-guard';
 import { normalizeActions } from './guards/normalize-actions';
 import { speechCardAlign } from './guards/speech-card-align';
+
+function freshTokenUsage(): TokenUsage {
+  return {
+    asr: { requests: 0, tokens: 0 },
+    llm: { requests: 0, inputTokens: 0, outputTokens: 0 },
+    tts: { requests: 0, characters: 0 },
+  };
+}
 
 export function createSession(course: Course): Session {
   const id = uuidv4();
@@ -28,16 +46,41 @@ export function createSession(course: Course): Session {
     courseId: course.id,
     course,
     memory: initializeCardProgress(createMemory(), course),
-    tokenUsage: {
-      asr: { requests: 0, tokens: 0 },
-      llm: { requests: 0, inputTokens: 0, outputTokens: 0 },
-      tts: { requests: 0, characters: 0 },
-    },
+    tokenUsage: freshTokenUsage(),
     startTime: new Date(),
     currentPhase: 'intro',
   };
   sessionStore.save(session);
   createLessonLog(id, course.id);
+  return session;
+}
+
+// R1 (2026-07-20 session persistence): rebuild a session from a persisted course_progress
+// breakpoint instead of starting fresh. Conversation history (messages/interestSignals) is
+// NOT restored — PRD R1 is "跳到上次位置,重新开个头", not a seamless resume. New cards added
+// to the course since the snapshot was taken are backfilled via initializeCardProgress.
+export function createSessionFromSnapshot(course: Course, progress: CourseProgressRow): Session {
+  const id = uuidv4();
+  const restoredMemory = deserializeProgress(createMemory(), progress.snapshot);
+  const memory = initializeCardProgress(restoredMemory, course);
+  const session: Session = {
+    id,
+    courseId: course.id,
+    course,
+    memory,
+    tokenUsage: freshTokenUsage(),
+    startTime: new Date(),
+    currentPhase: progress.phase,
+  };
+  sessionStore.save(session);
+  createLessonLog(id, course.id);
+  console.log('[session] resumed from breakpoint', {
+    courseId: course.id,
+    sessionId: id,
+    phase: progress.phase,
+    clearedCount: memory.clearedCardIds.length,
+    passedQuizCount: memory.passedQuizIds.length,
+  });
   return session;
 }
 
@@ -49,6 +92,11 @@ export function endSession(sessionId: string): void {
   const session = sessionStore.get(sessionId);
   if (!session) return;
   finishLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+  // R1 (2026-07-20 session persistence): final breakpoint flush on a graceful end, mirroring
+  // finishLessonLog. Redundant with the last commitTurn/recordQuizAnswer write in practice
+  // (memory does not change between the last turn and 'end'), but matches the design doc's
+  // explicit "endSession upserts once more for the final value" and costs one extra write.
+  persistCourseProgress(session);
   sessionStore.delete(sessionId);
 }
 
@@ -67,6 +115,11 @@ export function recordQuizAnswer(
   const session = sessionStore.get(sessionId);
   if (!session) return false;
   session.memory.totalInteractions += 1;
+  // R3 (2026-07-20 session persistence PRD): accumulate passed quiz ids — a resumed
+  // reinforcement phase skips these. Cumulative/dedup, never removed on a wrong answer.
+  if (correct && !session.memory.passedQuizIds.includes(quizId)) {
+    session.memory.passedQuizIds = [...session.memory.passedQuizIds, quizId];
+  }
   insertInteraction(session.id, {
     timestamp: new Date(),
     userInput: `[quiz:${quizId} ${correct ? 'correct' : 'wrong'}] ${answer}`,
@@ -77,7 +130,20 @@ export function recordQuizAnswer(
     },
   });
   touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+  persistCourseProgress(session);
   return true;
+}
+
+// R1/R3 (2026-07-20 session persistence): write the current breakpoint after every committed
+// turn / quiz answer, mirroring the existing touchLessonLog incremental-finalization pattern
+// (commit 6f6e7bec R1) so a tab-close/refresh/crash still leaves a resumable checkpoint.
+function persistCourseProgress(session: Session): void {
+  upsertCourseProgress(
+    session.courseId,
+    serializeProgress(session.memory),
+    session.currentPhase,
+    isCourseComplete(session.course, session.memory),
+  );
 }
 
 export type StreamUserEvent =
@@ -328,4 +394,7 @@ function commitTurn(
   // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time
   // AND a non-empty token_usage (R1 2026-07-04 — session.tokenUsage was already updated above).
   touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+  // R1 (2026-07-20 session persistence): same incremental-finalization reasoning — the
+  // resume breakpoint must survive a non-graceful exit, not just a clean endLesson.
+  persistCourseProgress(session);
 }

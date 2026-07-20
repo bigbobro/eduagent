@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import { getDb } from './index';
-import { TokenUsage, InteractionLog } from '@/types/session';
+import { TokenUsage, InteractionLog, CourseProgressSnapshot } from '@/types/session';
+import { PhaseName } from '@/types/course';
 
 export function createLessonLog(id: string, courseId: string): void {
   const db = getDb();
@@ -88,10 +89,102 @@ export function upsertWordRcState(lessonId: string, word: string, rcCorrect: num
   }
 }
 
+// R1/R3 (2026-07-20 session persistence): one breakpoint row per course. `phase` here is the
+// course-level PhaseName (intro/interactive/reinforcement/done), distinct from
+// CourseProgressSnapshot.phase (LessonMemory's internal teaching micro-phase). `completed`
+// gates resume in the /api/chat 'start' route — a completed course is not deleted, it is
+// just ignored on the next start (fresh restart = review). No expiry (PRD R4: not implemented
+// — if a future iteration needs it, compare `updated_at` against a threshold at the read site).
+export function upsertCourseProgress(
+  courseId: string,
+  snapshot: CourseProgressSnapshot,
+  phase: PhaseName,
+  completed: boolean,
+): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(course_id) DO UPDATE SET
+      snapshot = excluded.snapshot,
+      phase = excluded.phase,
+      completed = excluded.completed,
+      updated_at = excluded.updated_at
+  `).run(courseId, JSON.stringify(snapshot), phase, completed ? 1 : 0, new Date().toISOString());
+}
+
+export interface CourseProgressRow {
+  courseId: string;
+  snapshot: CourseProgressSnapshot;
+  phase: PhaseName;
+  completed: boolean;
+  updatedAt: string;
+}
+
+// Malformed/legacy snapshot JSON is treated as "no usable breakpoint" (returns undefined)
+// rather than throwing — a corrupt row must not break the 'start' route; the caller falls
+// back to a fresh session, same as if no row existed.
+export function getCourseProgress(courseId: string): CourseProgressRow | undefined {
+  const db = getDb();
+  const row = db.prepare(
+    'SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress WHERE course_id = ?',
+  ).get(courseId) as { courseId: string; snapshot: string; phase: string; completed: number; updatedAt: string } | undefined;
+  if (!row) return undefined;
+  try {
+    const snapshot = JSON.parse(row.snapshot) as CourseProgressSnapshot;
+    return { courseId: row.courseId, snapshot, phase: row.phase as PhaseName, completed: row.completed === 1, updatedAt: row.updatedAt };
+  } catch (err) {
+    console.error('[db] course_progress snapshot JSON parse failed for', courseId, err);
+    return undefined;
+  }
+}
+
 // ─── Reads ───────────────────────────────────────────────────────────────
 // The single SQL boundary for the report tables. Read callers (progress.ts / stats.ts)
 // take an injected `db` (so tests can pass an in-memory database) and forward it here;
 // they keep only the JS shaping/aggregation, no SQL strings.
+
+// Session persistence (2026-07-20): per-course "times started" for the home list. Each
+// createSession AND createSessionFromSnapshot inserts a lesson_logs row, so this counts
+// every entry into the course including resumes (PRD R2 semantics).
+export function getLessonCountByCourse(db: Database): Map<string, number> {
+  const rows = db
+    .prepare('SELECT course_id AS courseId, COUNT(*) AS n FROM lesson_logs GROUP BY course_id')
+    .all() as Array<{ courseId: string; n: number }>;
+  const map = new Map<string, number>();
+  for (const r of rows) map.set(r.courseId, r.n);
+  return map;
+}
+
+// db-injectable read of every course_progress breakpoint, for the home progress aggregation.
+// Tolerant of a missing table (fresh checkout before the first /api/chat call, or a minimal
+// test DB) and of a corrupt snapshot row (skipped) — a bad breakpoint must never break the
+// home list. Mirrors getCourseProgress's per-row JSON-parse guard.
+export function getAllCourseProgress(db: Database): Map<string, CourseProgressRow> {
+  const map = new Map<string, CourseProgressRow>();
+  let rows: Array<{ courseId: string; snapshot: string; phase: string; completed: number; updatedAt: string }>;
+  try {
+    rows = db
+      .prepare('SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress')
+      .all() as Array<{ courseId: string; snapshot: string; phase: string; completed: number; updatedAt: string }>;
+  } catch {
+    return map; // table not created yet — treat as "no breakpoints"
+  }
+  for (const row of rows) {
+    try {
+      map.set(row.courseId, {
+        courseId: row.courseId,
+        snapshot: JSON.parse(row.snapshot) as CourseProgressSnapshot,
+        phase: row.phase as PhaseName,
+        completed: row.completed === 1,
+        updatedAt: row.updatedAt,
+      });
+    } catch (err) {
+      console.error('[db] course_progress snapshot JSON parse failed for', row.courseId, err);
+    }
+  }
+  return map;
+}
 
 export interface LessonTimingRow {
   id: string;

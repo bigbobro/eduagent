@@ -18,6 +18,11 @@ export interface CourseProgress {
   totalWords: number;
   masteredWords: number;
   words: WordMastery[];
+  // Session persistence (2026-07-20) — per-course status for the home list (PRD R2).
+  timesStarted: number; // lesson_logs count for this course (includes resumes)
+  progressPercent: number; // 0-100, current breakpoint progress; 100 once completed
+  hasResume: boolean; // has a resumable (incomplete, non-empty) breakpoint to continue
+  completed: boolean; // course fully finished (all word cards cleared + all quizzes passed)
 }
 
 export interface ProgressSnapshot {

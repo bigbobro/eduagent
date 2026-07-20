@@ -52,7 +52,7 @@
 6. ✅ **CI workflow**(2026-07-20) — [.github/workflows/ci.yml](../.github/workflows/ci.yml) · low — push / PR 触发 `VOICE_MOCK=true` 门禁:`pnpm typecheck` → `lint` → `test` → `build`,任一失败即红。`typecheck` script 跑两个 tsconfig(`tsconfig.json` + `tsconfig.server.json`),覆盖默认被排除的 `server.ts`(负向用例实证:注入类型错 exit 2)。**前置修了 flaky**:`src/lib/db/index.ts` 原先在模块加载期把 `DATABASE_PATH` 读进顶层 const,vitest 并发下 `fresh-db-init` 偶挂;改为 `getDb()` 调用时解析路径、路径变则 close+reopen,并导出 `closeDb()` 供测试隔离(生产语义不变,仍是进程内单连接)。`pnpm test` ×5 全绿(65 文件 / 386 用例)。
 7. **logger 迁移收尾 + 降噪** — [logger.ts](../src/lib/logger.ts) · medium — 结构化 logger 13 模块只 1 个用;[memory.ts:202](../src/lib/agent/memory.ts#L202) 每轮无条件 warn 级打诊断快照(违反"验收后删打点")。二选一并 gate 热路径日志。
 8. **chat route 加固 + DB 生命周期** · low — [route.ts](../src/app/api/chat/route.ts) `req.json()` 无 zod 校验;无 graceful shutdown(WAL 不 checkpoint);in-memory session 无淘汰;DB word-performance 与内存 R2 真相分叉([session.ts:176](../src/lib/agent/session.ts#L176))。
-9. **Next.js 15 升级** — [package.json:22](../package.json#L22) · medium — 14.2.35 是 14.x 冻结末端,5 个 high CVE(含 WS-upgrade SSRF,命中自定义 server)只在 15.x 修。当独立任务做(custom server + framer-motion transpile),非对外暴露前可缓。
+9. **Next.js 15 升级** · **🅿️ park(2026-07-20)** — [package.json:22](../package.json#L22) · medium — 14.2.35 是 14.x 冻结末端,5 个 high CVE(含 WS-upgrade SSRF,命中自定义 server)只在 15.x 修。**2026-07-20 评估:单用户纯本地不公开,CVE 无外部可达面,收益低 → park;恢复条件=对外发布/多用户。** 届时当独立任务做(custom server + framer-motion transpile)。
 10. ✅ **文档漂移**(2026-06-25,部分) — 课程数已修:README(中英两处)+ architecture.md(:354/:546 当前态)改成"以 `index.ts`(`allCourses`)为准"的防漂写法,不再写死数字;历史 changelog 条目按"只读快照"未动。**logger.ts "已删但活着" 留给 #7**(logger 迁移收尾时一并把它纳入模块表),本任务不越界。
 11. ✅ **前端交互打磨**(2026-06-25) — ① Quiz 双击双答:`QuizPickWordFrame` 加 `answeredRef` 同步守卫,每题 `onAnswer` 至多一次;② `ReinforceFrame` 用 ref 持有最新 `onAnswer`/`targetWords`,asr-final 监听器 effect 只依赖 `[controller]`,不再每渲染重挂;③ push-to-talk 按钮加 `aria-pressed`。locked 卡片已是原生 `<button disabled>`(本就不可聚焦),无需改。
 
@@ -61,8 +61,8 @@
 > 纯工程视角看不到。单用户本地阶段多为 P2,但作为**风险类别**价值最高。
 
 - ⭐ **Agent 护栏机制(LLM 输出 + 行为)** · **优先级提升(2026-06-25 用户定为重点)· design-first 复杂任务** — 比"内容安全过滤"更大:安全只是其中一格。完整护栏至少三层 ——(1)**内容安全**:[orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,目前零审核;(2)**交互逻辑/控制权**:孩子说"跳过这个词""我想学别的"时,Agent 该不该听他的(准许 vs 不准许的策略),现状已无任何'跳过当前词'通道(dev `debugSkipCurrentWord` 已于 2026-06-30 移除),只有 R2 字面两次命中才切卡,没有面向孩子、被策略管控的"请求"通道;(3)**行为准则**:不只约束 LLM 说什么,还约束 Agent 接下来做什么(切卡/推进/改节奏)。**核心交付是先把"机制长什么样"设计清楚(prd + design),再动代码**——决策点:事前(prompt rules)管什么 vs 事后(`src/lib/agent/guards/` pipeline)拦什么;孩子意图请求走哪条路、按什么策略准许;准则怎么写得下、可回归。启动时先写 PRD + design。
-- **孩子语音转写永久明文留存** · P2 — [session.ts:189](../src/lib/agent/session.ts#L189) 每轮写 ASR 原文进 SQLite,全仓库无删除/TTL/清理。加保留策略 + "清除历史"入口。
-- **家长门禁是纯客户端摆设** · P2 — `pin.ts` 硬编码 salt + localStorage;`/api/stats`、`/api/sessions` 服务端零鉴权,谁打都能拿孩子全部进度。
+- **孩子语音转写永久明文留存** · P2 · **🅿️ park(2026-07-20)** — [session.ts:189](../src/lib/agent/session.ts#L189) 每轮写 ASR 原文进 SQLite,全仓库无删除/TTL/清理。加保留策略 + "清除历史"入口。(park 理由同下:纯本地无外部读取路径。)
+- **家长门禁是纯客户端摆设(= API 服务端鉴权)** · P2 · **🅿️ park(2026-07-20)** — `pin.ts` 硬编码 salt + localStorage;`/api/stats`、`/api/sessions` 服务端零鉴权。**2026-07-20 评估:纯本地不公开 = 无外部攻击面,唯一残留威胁(局域网/curl)概率≈0、数据低敏感(学习进度),做鉴权是过度设计 → 整批 park(含转写 TTL + Next15);恢复条件=对外发布/多用户。** Trellis 任务 `07-08-eng-security-debt` 及子任务已 archive(可 `task.py list-archive` 找回)。
 - **其它** · P3 — 无 CSP/Permissions-Policy;麦克风权限被拒无面向孩子 UI([recorder.ts:58](../src/lib/audio/recorder.ts#L58) 只 console.warn);SQLite 无备份/损坏恢复;错误只进 console 无遥测(=总得手动贴日志的根因);~~无 `.nvmrc`/engines(better-sqlite3 跨 Node 版本会崩)~~ ✅ 2026-07-20 已加 `.nvmrc`(23)+ `engines.node`(`>=23 <24`)+ `packageManager`(pnpm@10.33.2),与本地一致、CI 读同一份;`/api/chat` 无 rate-limit。
 
 ### P3 / 维护性(顺手做,单用户阶段低优先)
@@ -157,7 +157,7 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 
 ## 远期 backlog
 
-1. **Session persistence / resume** — `sessions` 是 in-memory Map,server 重启 / 刷新会让客户端 sessionId 失效。9 分钟一节课中断概率低,真被坑了再升回当前 backlog。
+1. ✅ **Session persistence / resume**(2026-07-20 完成) — 真人课信号触发(课上一半退出、下次从头)。实现:`course_progress` 断点表(每门课独立、**不过期**)+ `/api/chat` start 从有效断点恢复(`X-Resume-Info`)+ 前端中途起播 + 老师"欢迎回来" + reinforcement 跳过已过 quiz;首页 `HomeStudy` 进度可见(上课次数 / 完成度% / "继续"角标)。运行态 session 仍 in-memory(server 重启丢的只是"当前活动 session",断点已落库、重进即恢复)。详见 architecture.md §3.1b + §10(2026-07-20)。
 2. **课程产出自动化** — 课程作者ing SOP 已在本地 agent 工作流中稳定,10 门课沿用同一模板没出问题;公开仓库先不提交 agent 过程文件,等用户扩展课程节奏 / 引入第二位作课者时再决定是否产品化。
 3. **兴趣 / 困惑记忆** — 在词汇表现之外识别 confusion / engagement,等真实报告证明有价值再做。
 4. **长期语音 UX** — VAD 自动停止 / 连续对话 / WebSocket 退避重连 / 开场白 TTS 预加载。

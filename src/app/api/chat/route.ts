@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createSession, getSession, endSession, recordQuizAnswer, setSessionPhase } from '@/lib/agent/session';
+import { createSession, createSessionFromSnapshot, getSession, endSession, recordQuizAnswer, setSessionPhase } from '@/lib/agent/session';
+import { resolveResumeCardId, isResumableProgress } from '@/lib/agent/course-progress';
 import { streamUserInputToSSE } from '@/lib/agent/orchestrator';
 import { getCourseById } from '@/data/courses';
+import { getCourseProgress } from '@/lib/db/queries';
 import { ensureInitialized } from '@/lib/init';
 import { PhaseName } from '@/types/course';
 
@@ -18,7 +20,41 @@ export async function POST(req: NextRequest) {
       console.warn('[chat] 404 course not found:', body.courseId);
       return NextResponse.json({ error: 'Course not found' }, { status: 404 });
     }
-    const session = createSession(course);
+
+    // R1 (2026-07-20 session persistence): resume from a *resumable* breakpoint instead of
+    // starting fresh. isResumableProgress excludes both completed courses (kept but ignored —
+    // next start is a fresh review, PRD R3) and empty intro-only breakpoints (the opening-speech
+    // turn persists an intro snapshot with nothing cleared; resuming that would give a child who
+    // only heard the intro a misplaced "welcome back").
+    // R4 (PRD, deliberate): no expiry. A breakpoint stays valid forever until the course is
+    // completed. Future extension point, not implemented: if a stale breakpoint ever needs to
+    // expire, compare `progress.updatedAt` against a threshold here and fall through to the
+    // fresh-start branch instead of resuming.
+    let session;
+    let resumeHeader: string | undefined;
+    const progress = getCourseProgress(course.id);
+    if (progress && isResumableProgress(progress)) {
+      session = createSessionFromSnapshot(course, progress);
+      const resumeCardId = resolveResumeCardId(course, session.memory);
+      console.log('[chat] resume hit', {
+        courseId: course.id,
+        phase: progress.phase,
+        resumeCardId,
+        clearedCount: session.memory.clearedCardIds.length,
+        passedQuizCount: session.memory.passedQuizIds.length,
+      });
+      resumeHeader = JSON.stringify({
+        resumed: true,
+        phase: progress.phase,
+        clearedCardIds: session.memory.clearedCardIds,
+        resumeCardId,
+        passedQuizIds: session.memory.passedQuizIds,
+      });
+    } else {
+      session = createSession(course);
+      console.log('[chat] fresh start', { courseId: course.id, hadProgress: !!progress, completed: progress?.completed ?? false });
+    }
+
     // System turn (not the child speaking) → rawAsrText '' so it never counts an R2 hit.
     // phaseOpening: opening speech is exempt from speechCardAlign rewrite.
     const stream = streamUserInputToSSE(session.id, '(课堂开始)', undefined, '', { phaseOpening: true });
@@ -28,6 +64,10 @@ export async function POST(req: NextRequest) {
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
         'X-Session-Id': session.id,
+        // Only present when resumed=true — absence keeps today's fresh-start response shape
+        // byte-identical (PRD: "否则现状"). JSON-encoded because header values are single
+        // strings; all fields are ASCII card/quiz ids and a PhaseName, safe to encode directly.
+        ...(resumeHeader ? { 'X-Resume-Info': resumeHeader } : {}),
       },
     });
   }

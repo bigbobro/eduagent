@@ -11,6 +11,35 @@ import { TurnTimeoutGuard } from './turn-timeout-guard';
 export type LessonStateName =
   | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending';
 
+// R1 (2026-07-20 session persistence, frontend delivery): parsed from the `X-Resume-Info`
+// response header that `/api/chat` action:'start' sends only when it resumed an incomplete
+// course_progress breakpoint (see src/app/api/chat/route.ts). Absent header → no resume.
+export interface ResumeInfo {
+  resumed: true;
+  phase: string;
+  clearedCardIds: string[];
+  resumeCardId: string;
+  passedQuizIds: string[];
+}
+
+function parseResumeInfo(header: string | null): ResumeInfo | null {
+  if (!header) return null;
+  try {
+    const parsed = JSON.parse(header);
+    if (!parsed || parsed.resumed !== true) return null;
+    return {
+      resumed: true,
+      phase: typeof parsed.phase === 'string' ? parsed.phase : 'interactive',
+      clearedCardIds: Array.isArray(parsed.clearedCardIds) ? parsed.clearedCardIds : [],
+      resumeCardId: typeof parsed.resumeCardId === 'string' ? parsed.resumeCardId : '',
+      passedQuizIds: Array.isArray(parsed.passedQuizIds) ? parsed.passedQuizIds : [],
+    };
+  } catch (e) {
+    console.warn('[lesson] failed to parse X-Resume-Info header:', e);
+    return null;
+  }
+}
+
 type EventName =
   | 'state'
   | 'subtitle'           // { text: string, source: 'user' | 'ai' }
@@ -55,6 +84,7 @@ export class LessonController {
   private clearedCardIds: string[] = [];
   private asrSentenceTexts: string[] = [];
   private ttsHandlersBound = false;
+  private resumeInfo: ResumeInfo | null = null;
   private staticSpeech: {
     resolve: () => void;
     reject: (error: Error) => void;
@@ -127,6 +157,7 @@ export class LessonController {
       return false;
     }
     this.sessionId = res.headers.get('X-Session-Id');
+    this.resumeInfo = parseResumeInfo(res.headers.get('X-Resume-Info'));
 
     await this.consumeSSE(res.body, /* afterDone= */ () => {
       // greeting 不立刻切到 awaiting,等 TTS session-finished 来了再切
@@ -139,6 +170,7 @@ export class LessonController {
     this.chatAbort?.abort();
     this.timers.clearAll();
     this.pendingActions = null;
+    this.resumeInfo = null;
     this.courseId = null;
     this.currentAsrCardId = null;
     this.clearedCardIds = [];
@@ -187,6 +219,10 @@ export class LessonController {
 
   getSessionId(): string | null {
     return this.sessionId;
+  }
+
+  getResumeInfo(): ResumeInfo | null {
+    return this.resumeInfo;
   }
 
   async speakStatic(text: string): Promise<void> {

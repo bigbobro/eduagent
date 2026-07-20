@@ -29,6 +29,7 @@ function makeDb() {
   db.exec(`
     CREATE TABLE lesson_logs (id TEXT PRIMARY KEY, course_id TEXT, start_time TEXT, end_time TEXT, interaction_count INTEGER, token_usage TEXT);
     CREATE TABLE word_performance (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson_id TEXT, word TEXT, attempts INTEGER, correct INTEGER, needs_review INTEGER);
+    CREATE TABLE course_progress (course_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, phase TEXT NOT NULL, completed INTEGER DEFAULT 0, updated_at TEXT NOT NULL);
   `);
   return db;
 }
@@ -85,5 +86,58 @@ describe('buildProgressSnapshot', () => {
     expect(apple.attempts).toBe(10);
     expect(apple.correct).toBe(7);
     expect(apple.lastPracticed).toBe('2026-05-10T10:00:00Z');
+  });
+});
+
+describe('buildProgressSnapshot — session persistence (R2 home status)', () => {
+  let db: Database.Database;
+  beforeEach(() => {
+    db = makeDb();
+  });
+
+  it('no lessons / no breakpoint → timesStarted 0, 0%, no resume, not completed', () => {
+    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    expect(c.timesStarted).toBe(0);
+    expect(c.progressPercent).toBe(0);
+    expect(c.hasResume).toBe(false);
+    expect(c.completed).toBe(false);
+  });
+
+  it('counts every entry (incl. resumes) as timesStarted and derives breakpoint %', () => {
+    // fixture food has 2 word cards (apple, milk), 0 quizzes → 1 cleared = 50%.
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-07-20T10:00:00Z',NULL,3,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l2','food','2026-07-20T11:00:00Z',NULL,4,'{}')`).run();
+    db.prepare(
+      `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'interactive', 0, '2026-07-20T11:05:00Z')`,
+    ).run(JSON.stringify({ clearedCardIds: ['apple'], passedQuizIds: [] }));
+
+    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    expect(c.timesStarted).toBe(2);
+    expect(c.progressPercent).toBe(50);
+    expect(c.hasResume).toBe(true);
+    expect(c.completed).toBe(false);
+  });
+
+  it('completed breakpoint → 100%, no resume (kept for review)', () => {
+    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-07-20T10:00:00Z',NULL,9,'{}')`).run();
+    db.prepare(
+      `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'reinforcement', 1, '2026-07-20T10:30:00Z')`,
+    ).run(JSON.stringify({ clearedCardIds: ['apple', 'milk'], passedQuizIds: [] }));
+
+    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    expect(c.timesStarted).toBe(1);
+    expect(c.progressPercent).toBe(100);
+    expect(c.hasResume).toBe(false);
+    expect(c.completed).toBe(true);
+  });
+
+  it('empty intro-only breakpoint is not resumable (misplaced welcome-back guard)', () => {
+    db.prepare(
+      `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'intro', 0, '2026-07-20T10:00:00Z')`,
+    ).run(JSON.stringify({ clearedCardIds: [], passedQuizIds: [] }));
+
+    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    expect(c.hasResume).toBe(false);
+    expect(c.progressPercent).toBe(0);
   });
 });

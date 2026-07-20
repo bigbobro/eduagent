@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
 import { PhasedLessonView } from './PhasedLessonView';
@@ -7,6 +7,15 @@ const routerPush = vi.hoisted(() => vi.fn());
 const lessonInstances = vi.hoisted(() => [] as any[]);
 const phasedInstances = vi.hoisted(() => [] as any[]);
 const phasedStartQueue = vi.hoisted(() => [] as Array<() => Promise<boolean | void>>);
+// R1 (2026-07-20 session persistence): when set, the next mocked PhasedLessonController's
+// startLesson() applies this resume phase/info instead of the default fresh intro→interactive
+// path — mirrors what the real PhasedLessonController does after LessonController.getResumeInfo().
+const phasedResumeQueue = vi.hoisted(() => [] as Array<{
+  phase: string;
+  resumeCardId: string;
+  clearedCardIds: string[];
+  passedQuizIds: string[];
+}>);
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: routerPush }),
@@ -70,6 +79,13 @@ vi.mock('@/lib/voice/lesson-controller', () => {
 vi.mock('@/lib/voice/phased-lesson-controller', () => {
   class PhasedLessonController {
     private listeners = new Map<string, Set<Function>>();
+    private resumeInfo: {
+      resumed: true;
+      phase: string;
+      resumeCardId: string;
+      clearedCardIds: string[];
+      passedQuizIds: string[];
+    } | null = null;
 
     constructor(private v2: any) {
       phasedInstances.push(this);
@@ -88,8 +104,18 @@ vi.mock('@/lib/voice/phased-lesson-controller', () => {
       const queued = phasedStartQueue.shift();
       if (queued) return queued();
       await this.v2.startLesson();
+      const resume = phasedResumeQueue.shift();
+      if (resume) {
+        this.resumeInfo = { resumed: true, ...resume };
+        this.emit('phase-change', resume.phase);
+        return true;
+      }
       this.emit('phase-change', 'interactive');
       return true;
+    }
+
+    getResumeInfo() {
+      return this.resumeInfo;
     }
 
     async endLesson() {}
@@ -112,6 +138,7 @@ describe('PhasedLessonView', () => {
     lessonInstances.length = 0;
     phasedInstances.length = 0;
     phasedStartQueue.length = 0;
+    phasedResumeQueue.length = 0;
     routerPush.mockClear();
   });
 
@@ -173,5 +200,41 @@ describe('PhasedLessonView', () => {
     });
 
     expect(await screen.findByText('2 个词')).toBeTruthy();
+  });
+
+  it('R1 (2026-07-20): resumed interactive session skips IntroFrame and positions on the breakpoint card', async () => {
+    phasedResumeQueue.push({
+      phase: 'interactive',
+      resumeCardId: 'milk',
+      clearedCardIds: ['apple'],
+      passedQuizIds: [],
+    });
+    const { container } = render(<PhasedLessonView course={foodCourse} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /按住 Space 跟我读/ })).toBeTruthy();
+    });
+    expect(screen.queryByText(/餐桌上摆着各种食物/)).toBeNull();
+    const hero = container.querySelector('[data-picture-card-size="hero"]');
+    expect(hero).toBeTruthy();
+    expect(within(hero as HTMLElement).getByText('milk')).toBeTruthy();
+  });
+
+  it('R1 (2026-07-20): resumed reinforcement session renders quizzes directly, skipping passed ones', async () => {
+    const passedQuizId = foodCourse.phases.reinforcement.quizzes[0].id;
+    phasedResumeQueue.push({
+      phase: 'reinforcement',
+      resumeCardId: '',
+      clearedCardIds: foodCourse.cards.filter((c) => c.kind === 'word').map((c) => c.id),
+      passedQuizIds: [passedQuizId],
+    });
+    render(<PhasedLessonView course={foodCourse} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
+
+    expect(await screen.findByText(/Find the milk/)).toBeTruthy();
+    expect(screen.queryByText(/Where is the apple/)).toBeNull();
   });
 });

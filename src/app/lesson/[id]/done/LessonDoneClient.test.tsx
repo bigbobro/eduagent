@@ -17,6 +17,10 @@ const progress: ProgressSnapshot = {
       courseTone: 'peach',
       totalWords: 12,
       masteredWords: 2,
+      timesStarted: 0,
+      progressPercent: 0,
+      hasResume: false,
+      completed: false,
       words: [
         { word: 'apple', zh: '苹果', attempts: 2, correct: 2, masteryStars: 2, lastPracticed: '2026-05-22T00:00:00.000Z' },
         { word: 'milk', zh: '牛奶', attempts: 2, correct: 2, masteryStars: 2, lastPracticed: '2026-05-22T00:00:00.000Z' },

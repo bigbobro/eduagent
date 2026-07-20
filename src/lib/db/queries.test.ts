@@ -11,9 +11,9 @@ vi.mock('./index', async () => {
 });
 
 import { runMigrations } from './schema';
-import { createLessonLog, finishLessonLog, touchLessonLog, getRecentLessons } from './queries';
+import { createLessonLog, finishLessonLog, touchLessonLog, getRecentLessons, upsertCourseProgress, getCourseProgress } from './queries';
 import { buildStatsSnapshot } from '../stats';
-import type { TokenUsage } from '@/types/session';
+import type { CourseProgressSnapshot, TokenUsage } from '@/types/session';
 
 const db = () => holder.db!;
 
@@ -98,5 +98,71 @@ describe('touchLessonLog — incremental lesson finalization', () => {
       ended_gracefully: number;
     };
     expect(row.ended_gracefully).toBe(1);
+  });
+});
+
+const sampleSnapshot: CourseProgressSnapshot = {
+  currentWord: 'apple',
+  currentCardId: 'apple',
+  phase: 'learning',
+  wordsLearned: ['apple'],
+  wordsToReview: [],
+  clearedCardIds: ['apple'],
+  cardProgress: { apple: 'cleared', banana: 'attempted' },
+  cardAttemptStreak: { banana: 1 },
+  cardCorrectCount: { apple: 2 },
+  parkedCardIds: [],
+  parkRetryCardIds: [],
+  wordPerformance: [['apple', { attempts: 2, correct: 2, lastAttempt: '2026-07-20T00:00:00.000Z' }]],
+  totalInteractions: 5,
+  passedQuizIds: ['q1'],
+};
+
+describe('course_progress upsert/get (2026-07-20 session persistence)', () => {
+  beforeEach(() => db().exec('DELETE FROM course_progress'));
+
+  it('returns undefined when no breakpoint exists for a course', () => {
+    expect(getCourseProgress('food')).toBeUndefined();
+  });
+
+  it('round-trips a snapshot through JSON storage', () => {
+    upsertCourseProgress('food', sampleSnapshot, 'interactive', false);
+
+    const row = getCourseProgress('food');
+    expect(row).toBeDefined();
+    expect(row!.phase).toBe('interactive');
+    expect(row!.completed).toBe(false);
+    expect(row!.snapshot).toEqual(sampleSnapshot);
+    expect(row!.updatedAt).toEqual(expect.any(String));
+  });
+
+  it('upserts in place — a second write for the same course replaces the row, not adds one', () => {
+    upsertCourseProgress('food', sampleSnapshot, 'interactive', false);
+    const updated: CourseProgressSnapshot = { ...sampleSnapshot, currentCardId: 'banana', totalInteractions: 9 };
+
+    upsertCourseProgress('food', updated, 'reinforcement', true);
+
+    const row = getCourseProgress('food');
+    expect(row!.snapshot.currentCardId).toBe('banana');
+    expect(row!.snapshot.totalInteractions).toBe(9);
+    expect(row!.phase).toBe('reinforcement');
+    expect(row!.completed).toBe(true);
+    expect(db().prepare('SELECT COUNT(*) AS count FROM course_progress').get()).toEqual({ count: 1 });
+  });
+
+  it('treats corrupt snapshot JSON as no breakpoint instead of throwing', () => {
+    db().prepare(
+      "INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('broken', '{not valid json', 'intro', 0, ?)",
+    ).run(new Date().toISOString());
+
+    expect(getCourseProgress('broken')).toBeUndefined();
+  });
+
+  it('tracks separate breakpoints per course', () => {
+    upsertCourseProgress('food', sampleSnapshot, 'interactive', false);
+    upsertCourseProgress('animals', { ...sampleSnapshot, currentCardId: 'cat' }, 'intro', false);
+
+    expect(getCourseProgress('food')!.snapshot.currentCardId).toBe('apple');
+    expect(getCourseProgress('animals')!.snapshot.currentCardId).toBe('cat');
   });
 });

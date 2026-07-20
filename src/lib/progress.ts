@@ -1,7 +1,8 @@
 import type { Database } from 'better-sqlite3';
 import type { Course } from '@/types/course';
 import type { ProgressSnapshot, CourseProgress, WordMastery } from '@/types/progress';
-import { getWordPerformanceByCourse, type WordPerfByCourseRow } from './db/queries';
+import { getWordPerformanceByCourse, getLessonCountByCourse, getAllCourseProgress, type WordPerfByCourseRow } from './db/queries';
+import { isResumableProgress } from './agent/course-progress';
 
 export function masteryStarsFromRatio(correct: number, attempts: number): 0 | 1 | 2 | 3 {
   if (attempts === 0) return 0;
@@ -21,6 +22,10 @@ export function buildProgressSnapshot(db: Database, courses: Course[]): Progress
     perfByCourse.get(r.courseId)!.set(r.word, r);
   }
 
+  // Session persistence (2026-07-20, PRD R2): per-course times-started + breakpoint state.
+  const lessonCounts = getLessonCountByCourse(db);
+  const progressRows = getAllCourseProgress(db);
+
   const courseSnapshots: CourseProgress[] = courses.map((course) => {
     const perfMap = perfByCourse.get(course.id) ?? new Map<string, WordPerfByCourseRow>();
     const words: WordMastery[] = course.cards
@@ -39,6 +44,28 @@ export function buildProgressSnapshot(db: Database, courses: Course[]): Progress
           lastPracticed: p?.lastPracticed ?? null,
         };
       });
+
+    // progressPercent = current breakpoint progress = (cleared word cards + passed quizzes)
+    // / (total word cards + total quizzes), matching the R3 completion definition so 100% == done.
+    const wordCardIds = new Set(course.cards.filter((c) => c.kind === 'word').map((c) => c.id));
+    const quizIds = new Set(course.phases.reinforcement.quizzes.map((q) => q.id));
+    const totalUnits = wordCardIds.size + quizIds.size;
+    const row = progressRows.get(course.id);
+    let progressPercent = 0;
+    let hasResume = false;
+    let completed = false;
+    if (row) {
+      completed = row.completed;
+      hasResume = isResumableProgress(row);
+      if (completed) {
+        progressPercent = 100;
+      } else if (totalUnits > 0) {
+        const wordCleared = row.snapshot.clearedCardIds.filter((id) => wordCardIds.has(id)).length;
+        const quizPassed = row.snapshot.passedQuizIds.filter((id) => quizIds.has(id)).length;
+        progressPercent = Math.round(((wordCleared + quizPassed) / totalUnits) * 100);
+      }
+    }
+
     return {
       courseId: course.id,
       courseTitle: course.title,
@@ -46,6 +73,10 @@ export function buildProgressSnapshot(db: Database, courses: Course[]): Progress
       totalWords: words.length,
       masteredWords: words.filter((w) => w.masteryStars === 3).length,
       words,
+      timesStarted: lessonCounts.get(course.id) ?? 0,
+      progressPercent,
+      hasResume,
+      completed,
     };
   });
 
