@@ -89,6 +89,8 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     phased.on('intro-busy-change', onIntroBusyChange);
     phased.on('intro-active-card-change', onIntroActiveCardChange);
     return () => {
+      if (phasedRef.current === phased) phasedRef.current = null;
+      if (v2Ref.current === v2) v2Ref.current = null;
       v2.off('progress', onProgress);
       v2.off('error', onError);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
@@ -102,7 +104,9 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
 
   const handleStart = async () => {
     setStarted(true);
-    const startedOk = await phasedRef.current?.startLesson();
+    const phased = phasedRef.current;
+    const startedOk = await phased?.startLesson();
+    if (phasedRef.current !== phased) return;
     if (startedOk === false) {
       setStarted(false);
       setPhase('intro');
@@ -163,8 +167,9 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
           <div role="alert" className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-paper text-ink">
             <p>老师还没准备好下一步,再试一次吧</p>
             <button type="button" disabled={retrying} className="rounded-paper-md border-2 border-ink bg-butter px-5 py-3 focus-visible:outline" onClick={async () => {
+              const phased = phasedRef.current;
               setRetrying(true);
-              try { await phasedRef.current?.retryTransition(); } finally { setRetrying(false); }
+              try { await phased?.retryTransition(); } finally { if (phasedRef.current === phased) setRetrying(false); }
             }}>
               {retrying ? '准备中…' : '再试一次'}
             </button>

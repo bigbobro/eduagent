@@ -136,3 +136,56 @@ describe('TtsClient reconnect backoff', () => {
     expect(FakeWebSocket.instances.length).toBe(1);
   });
 });
+
+
+describe('TTS socket ownership', () => {
+  it('settles a pending open when explicitly closed', async () => {
+    const client = new TtsClient();
+    const pending = client.open();
+    client.close();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    FakeWebSocket.instances[0].triggerOpen();
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it('drops all events from an old socket after reopening', async () => {
+    const client = new TtsClient();
+    await openClient(client);
+    const old = FakeWebSocket.instances[0];
+    client.close();
+    await openClient(client);
+    client.startSession('new-session');
+    const events = track(client);
+    const pcm = vi.fn(); const subtitle = vi.fn(); const finished = vi.fn();
+    client.on('pcm', pcm); client.on('subtitle', subtitle); client.on('session-finished', finished);
+    old.triggerOpen(); old.triggerClose(); old.onerror?.(new Error('late'));
+    old.onmessage?.({ data: new ArrayBuffer(2) });
+    old.onmessage?.({ data: JSON.stringify({ type: 'subtitle', text: 'late' }) });
+    old.onmessage?.({ data: JSON.stringify({ type: 'session-finished' }) });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(events).toEqual([]);
+    expect(pcm).not.toHaveBeenCalled(); expect(subtitle).not.toHaveBeenCalled(); expect(finished).not.toHaveBeenCalled();
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    client.sendText('current');
+    expect(FakeWebSocket.instances[1].sent.at(-1)).toContain('current');
+  });
+
+  it('cancels an old reconnect timer when explicitly reopened', async () => {
+    const client = new TtsClient(); await openClient(client);
+    FakeWebSocket.instances[0].triggerClose();
+    await openClient(client);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('does not announce reconnection if closed while reconnect is opening', async () => {
+    const client = new TtsClient(); await openClient(client);
+    const events = track(client);
+    FakeWebSocket.instances[0].triggerClose();
+    await vi.advanceTimersByTimeAsync(500);
+    client.close();
+    FakeWebSocket.instances[1].triggerOpen();
+    await Promise.resolve();
+    expect(events.some((event) => event.e === 'reconnected')).toBe(false);
+  });
+});

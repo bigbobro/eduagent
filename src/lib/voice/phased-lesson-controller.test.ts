@@ -65,6 +65,30 @@ describe('PhasedLessonController phase transitions', () => {
     expect(retry).toHaveBeenLastCalledWith(false);
   });
 
+  it('ignores a transition response that arrives after end', async () => {
+    await ctrl.startLesson();
+    let resolve!: (result: LessonCommandResult) => void;
+    v2.sendCustomAction.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const changed = vi.fn(); ctrl.on('phase-change', changed);
+    v2.emit('state', 'awaiting');
+    await vi.waitFor(() => expect(resolve).toBeDefined());
+    await ctrl.endLesson();
+    resolve({ ok: true, acceptedPhase: 'interactive' });
+    await Promise.resolve(); await Promise.resolve();
+    expect(ctrl.getCurrentPhase()).toBe('done');
+    expect(changed).not.toHaveBeenCalled();
+  });
+
+  it('does not apply a late resumed start after end', async () => {
+    let resolve!: (value: boolean) => void;
+    v2.startLesson.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const starting = ctrl.startLesson();
+    await ctrl.endLesson();
+    resolve(true);
+    await expect(starting).resolves.toBe(false);
+    expect(ctrl.getCurrentPhase()).toBe('done');
+  });
+
   it('starts at phase=intro', async () => {
     await ctrl.startLesson();
     expect(ctrl.getCurrentPhase()).toBe('intro');
@@ -267,6 +291,24 @@ describe('PhasedLessonController resume (2026-07-20 session persistence)', () =>
     await ctrl.endLesson();
 
     expect(ctrl.getResumeInfo()).toBeNull();
+  });
+
+  it('clears previous resume state when restarting before old end completes', async () => {
+    const v2 = mockV2({ resumed: true, phase: 'interactive', clearedCardIds: ['apple'], resumeCardId: 'banana', passedQuizIds: [] });
+    const ctrl = new PhasedLessonController(v2 as any, foodCourse);
+    await ctrl.startLesson();
+    let finishEnd!: () => void;
+    v2.endLesson.mockImplementationOnce(() => new Promise<void>((resolve) => { finishEnd = resolve; }));
+    const ending = ctrl.endLesson();
+    v2.getResumeInfo.mockReturnValue(null);
+
+    await ctrl.startLesson();
+    expect(ctrl.getResumeInfo()).toBeNull();
+    expect(ctrl.getCurrentPhase()).toBe('intro');
+    finishEnd();
+    await ending;
+    expect(ctrl.getCurrentPhase()).toBe('intro');
+    await ctrl.endLesson();
   });
 });
 

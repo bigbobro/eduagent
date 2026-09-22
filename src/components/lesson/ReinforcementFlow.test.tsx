@@ -52,6 +52,22 @@ describe('ReinforcementFlow', () => {
     expect(await screen.findByText(/Find the milk/)).toBeTruthy();
   });
 
+  it('does not complete a flow unmounted while its answer is saving', async () => {
+    const controller = mockController();
+    let resolve!: (value: { ok: boolean }) => void;
+    controller.submitQuizAnswer.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    const done = vi.fn();
+    const slim = { ...foodCourse, phases: { ...foodCourse.phases, reinforcement: { quizzes: [foodCourse.phases.reinforcement.quizzes[0]] } } };
+    const view = render(<ReinforcementFlow course={slim} controller={controller} onAllDone={done} />);
+    const apple = screen.getByRole('button', { name: /apple/i });
+    await waitFor(() => expect(apple).toHaveProperty('disabled', false));
+    fireEvent.click(apple);
+    view.unmount();
+    resolve({ ok: true });
+    await Promise.resolve();
+    expect(done).not.toHaveBeenCalled();
+  });
+
   it('uses the prompt or target text for retry hints', () => {
     expect(getRetryPrompt(foodCourse.phases.reinforcement.quizzes[0])).toBe('Where is the apple?');
     expect(getRetryPrompt(foodCourse.phases.reinforcement.quizzes[4])).toBe('This is an apple.');

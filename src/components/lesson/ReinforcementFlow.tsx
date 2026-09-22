@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Course, Quiz } from '@/types/course';
 import type { LessonController } from '@/lib/voice/lesson-controller';
 import { QuizPickWordFrame } from './QuizPickWordFrame';
@@ -29,13 +29,21 @@ export function ReinforcementFlow({ course, controller, passedQuizIds = [], onAl
   const [failedAnswer, setFailedAnswer] = useState<Answer | null>(null);
   const [attempt, setAttempt] = useState(0);
   const submitting = useRef(false);
+  const lifetime = useRef({ active: true });
+  useEffect(() => {
+    const owner = { active: true };
+    lifetime.current = owner;
+    return () => { owner.active = false; };
+  }, [controller]);
   const current = quizzes[idx];
 
   const handleAnswer = async (result: Answer) => {
     if (!current || submitting.current) return;
+    const generation = lifetime.current;
     submitting.current = true;
     setSaving(true);
     const saved = await controller.submitQuizAnswer(current.id, result.picked || result.said || '', result.correct);
+    if (!generation.active) return;
     if (!saved.ok) {
       setFailedAnswer(result);
       setSaving(false);
@@ -53,6 +61,7 @@ export function ReinforcementFlow({ course, controller, passedQuizIds = [], onAl
       setRetries(0);
     } else {
       await controller.speakStatic(`再听一次: ${getRetryPrompt(current)}`).catch(() => {});
+      if (!generation.active) return;
       setRetries((value) => value + 1);
       setAttempt((value) => value + 1);
     }

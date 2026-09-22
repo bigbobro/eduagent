@@ -3,6 +3,7 @@ import type { LessonMemory, TokenUsage } from '@/types/session';
 
 export interface Session {
   id: string;
+  lifetime: AbortController;
   courseId: string;
   course: Course;
   memory: LessonMemory;

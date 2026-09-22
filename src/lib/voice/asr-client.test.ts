@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AsrClient, buildAsrUrl, setAsrSessionContext } from './asr-client';
+import { AsrClient, buildAsrUrl } from './asr-client';
 
 const sockets: MockWebSocket[] = [];
 
@@ -24,32 +24,49 @@ class MockWebSocket {
 describe('AsrClient session URL context', () => {
   beforeEach(() => {
     sockets.length = 0;
-    setAsrSessionContext({});
     vi.stubGlobal('WebSocket', MockWebSocket);
   });
 
   afterEach(() => {
-    setAsrSessionContext({});
     vi.unstubAllGlobals();
   });
 
-  it('omits cardId when only courseId is set', async () => {
-    setAsrSessionContext({ courseId: 'animals' });
+  it('keeps two classroom context snapshots separate', async () => {
+    const words = ['cat'];
+    const first = new AsrClient({ courseId: 'animals', clearedCardIds: words });
+    const second = new AsrClient({ courseId: 'food', cardId: 'apple' });
+    words.push('dog');
+    await second.open();
+    await first.open();
+    expect(sockets[0].url).toContain('courseId=food');
+    expect(sockets[1].url).toContain('courseId=animals');
+    expect(sockets[1].url).toContain('clearedCardIds=cat');
+    expect(sockets[1].url).not.toContain('dog');
+  });
 
-    await new AsrClient().open();
+  it('settles pending open on close and ignores late open', async () => {
+    const client = new AsrClient();
+    const opened = vi.fn();
+    client.on('open', opened);
+    const pending = client.open();
+    client.close();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(opened).not.toHaveBeenCalled();
+  });
+
+  it('omits cardId when only courseId is set', async () => {
+    await new AsrClient({ courseId: 'animals' }).open();
 
     expect(sockets[0].url).toContain('/api/voice/asr?courseId=animals');
     expect(sockets[0].url).not.toContain('cardId=');
   });
 
   it('includes cardId and clearedCardIds when present', async () => {
-    setAsrSessionContext({
+    await new AsrClient({
       courseId: 'animals',
       cardId: 'dog',
       clearedCardIds: ['cat', ''],
-    });
-
-    await new AsrClient().open();
+    }).open();
 
     expect(sockets[0].url).toContain('courseId=animals');
     expect(sockets[0].url).toContain('cardId=dog');

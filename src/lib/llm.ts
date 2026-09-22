@@ -33,7 +33,7 @@ export async function* streamLLM(
   signal?: AbortSignal
 ): AsyncGenerator<StreamEvent> {
   if (process.env.VOICE_MOCK === 'true') {
-    yield* mockStreamLLM();
+    yield* mockStreamLLM(signal);
     return;
   }
   const config = getConfig();
@@ -125,7 +125,7 @@ export async function* streamLLM(
   };
 }
 
-async function* mockStreamLLM(): AsyncGenerator<StreamEvent> {
+async function* mockStreamLLM(signal?: AbortSignal): AsyncGenerator<StreamEvent> {
   const fixed = JSON.stringify({
     speech: '你好!我是兔老师。Look at this. 这是 a cat,小猫!你跟我说一遍,cat。',
     actions: [{ tool: 'show_card', params: { card_id: 'cat' } }],
@@ -134,7 +134,9 @@ async function* mockStreamLLM(): AsyncGenerator<StreamEvent> {
   // 模拟 token 流
   const chunkSize = 8;
   for (let i = 0; i < fixed.length; i += chunkSize) {
+    signal?.throwIfAborted();
     await sleep(50);
+    signal?.throwIfAborted();
     yield { delta: fixed.slice(i, i + chunkSize), done: false };
   }
   yield {

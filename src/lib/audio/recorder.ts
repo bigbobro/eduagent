@@ -1,130 +1,107 @@
-let sharedCtx: AudioContext | null = null;
-let workletAdded = false;
-let sharedStream: MediaStream | null = null;
-let sharedSource: MediaStreamAudioSourceNode | null = null;
-
-async function ensureStream(): Promise<MediaStream> {
-  if (sharedStream && sharedStream.getTracks().every((t) => t.readyState === 'live')) {
-    return sharedStream;
-  }
-  // 已死的 stream 释放,重新拿
-  sharedStream?.getTracks().forEach((t) => t.stop());
-  sharedSource = null;
-  sharedStream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      channelCount: 1,
-      sampleRate: 16000,
-    },
-  });
-  return sharedStream;
-}
-
-async function ensureCtx(): Promise<AudioContext> {
-  if (!sharedCtx || sharedCtx.state === 'closed') {
-    sharedCtx = new AudioContext({ sampleRate: 16000 });
-    workletAdded = false;
-    sharedSource = null; // ctx 换了,旧的 source 失效
-  }
-  if (sharedCtx.state === 'suspended') {
-    await sharedCtx.resume();
-  }
-  if (!workletAdded) {
-    await sharedCtx.audioWorklet.addModule('/worklets/pcm-recorder.worklet.js');
-    workletAdded = true;
-  }
-  return sharedCtx;
-}
-
-async function ensureSource(): Promise<MediaStreamAudioSourceNode> {
-  const ctx = await ensureCtx();
-  const stream = await ensureStream();
-  if (!sharedSource) {
-    sharedSource = ctx.createMediaStreamSource(stream);
-  }
-  return sharedSource;
-}
-
 export interface RecorderHandle {
   stop: () => Promise<void>;
 }
 
-/**
- * 课开始时预热:把权限框 + AudioContext + Worklet + MediaStream 全提前启好。
- * 之后按住说话只剩 new AudioWorkletNode + connect(< 5ms),用户按下立刻能录。
- */
-export async function prewarmRecorder(): Promise<void> {
-  try {
-    await ensureSource();
-  } catch (e) {
-    console.warn('[recorder] prewarm failed:', e);
-    throw e;
+/** One classroom owns the mic/context; recording taps reuse them within that classroom. */
+export class LessonRecorder {
+  private ctx: AudioContext | null = null;
+  private stream: MediaStream | null = null;
+  private source: MediaStreamAudioSourceNode | null = null;
+  private initializing: Promise<{ ctx: AudioContext; source: MediaStreamAudioSourceNode }> | null = null;
+  private disposed = false;
+  private taps = new Set<RecorderHandle>();
+
+  private assertActive(): void {
+    if (this.disposed) throw new DOMException('Recorder disposed', 'AbortError');
   }
-}
 
-/**
- * 启动一次录音 tap。每 200ms 把 Int16 PCM (mono, 16kHz) 通过 onChunk 送出。
- * 假定已预热(prewarmRecorder)。stop() 只断开 worklet 节点,stream/ctx/source 留着复用。
- */
-export async function startRecorder(opts: {
-  onChunk: (pcm: ArrayBuffer) => void;
-}): Promise<RecorderHandle> {
-  const ctx = await ensureCtx();
-  const source = await ensureSource();
-  const node = new AudioWorkletNode(ctx, 'pcm-recorder');
-  source.connect(node);
-
-  let flushAckReceived = false;
-
-  // 不连 destination — 否则会回灌
-  node.port.onmessage = (e) => {
-    const msg = e.data;
-    if (msg && typeof msg === 'object' && msg.type === 'flush-ack') {
-      flushAckReceived = true;
-    } else {
-      opts.onChunk(msg as ArrayBuffer);
+  private async initialize(): Promise<{ ctx: AudioContext; source: MediaStreamAudioSourceNode }> {
+    this.assertActive();
+    this.source?.disconnect();
+    this.stream?.getTracks().forEach((track) => track.stop());
+    if (this.ctx) void this.ctx.close().catch(() => {});
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    this.ctx = ctx;
+    if (ctx.state === 'suspended') await ctx.resume();
+    this.assertActive();
+    await ctx.audioWorklet.addModule('/worklets/pcm-recorder.worklet.js');
+    this.assertActive();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: 16000 },
+    });
+    if (this.disposed) {
+      stream.getTracks().forEach((track) => track.stop());
+      this.assertActive();
     }
-  };
+    this.stream = stream;
+    this.source = ctx.createMediaStreamSource(stream);
+    return { ctx, source: this.source };
+  }
 
-  return {
-    stop: async () => {
-      try {
-        // 通知 worklet flush 残余 PCM(< 200ms),等待 ack 确认,
-        // 然后再断 onmessage 防止竞态。
-        // 没这个的话,用户松手时 worklet 当前 buffer 里 0-199ms 数据被丢,体感是"尾字截断"。
-        try {
-          node.port.postMessage({ type: 'flush' });
-        } catch {}
+  private async resources(): Promise<{ ctx: AudioContext; source: MediaStreamAudioSourceNode }> {
+    this.assertActive();
+    if (this.ctx && this.source && this.stream?.getTracks().every((track) => track.readyState === 'live')) {
+      return { ctx: this.ctx, source: this.source };
+    }
+    if (!this.initializing) this.initializing = this.initialize();
+    const pending = this.initializing;
+    try { return await pending; }
+    finally { if (this.initializing === pending) this.initializing = null; }
+  }
 
-        // Wait up to 100ms for flush ack, then proceed
-        const deadline = Date.now() + 100;
-        while (!flushAckReceived && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 10));
-        }
+  async prewarm(): Promise<void> {
+    await this.resources();
+  }
 
-        node.port.onmessage = null;
-        node.disconnect();
-        // 不 disconnect source — 留着给下次 startRecorder 复用
-      } catch (e) {
-        console.warn('[recorder] stop error:', e);
-      }
-    },
-  };
-}
+  async start(opts: { onChunk: (pcm: ArrayBuffer) => void }): Promise<RecorderHandle> {
+    const { ctx, source } = await this.resources();
+    this.assertActive();
+    const node = new AudioWorkletNode(ctx, 'pcm-recorder');
+    source.connect(node);
+    let flushAckReceived = false;
+    let stopping: Promise<void> | null = null;
+    node.port.onmessage = (event) => {
+      const msg = event.data;
+      if (msg && typeof msg === 'object' && msg.type === 'flush-ack') flushAckReceived = true;
+      else if (!this.disposed) opts.onChunk(msg as ArrayBuffer);
+    };
+    const handle: RecorderHandle = {
+      stop: () => {
+        if (stopping) return stopping;
+        stopping = (async () => {
+          try {
+            // Preserve tail PCM -> flush ack -> disconnect ordering (100ms fallback).
+            try { node.port.postMessage({ type: 'flush' }); } catch {}
+            const deadline = Date.now() + 100;
+            while (!flushAckReceived && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+          } finally {
+            node.port.onmessage = null;
+            try { source.disconnect(node); } catch {}
+            try { node.disconnect(); } catch {}
+            this.taps.delete(handle);
+          }
+        })();
+        return stopping;
+      },
+    };
+    this.taps.add(handle);
+    return handle;
+  }
 
-/** lesson 结束时彻底释放 mic 与 audio 资源。 */
-export async function disposeRecorder(): Promise<void> {
-  try {
-    sharedSource?.disconnect();
-  } catch {}
-  sharedSource = null;
-  sharedStream?.getTracks().forEach((t) => t.stop());
-  sharedStream = null;
-  if (sharedCtx) {
-    try { await sharedCtx.close(); } catch {}
-    sharedCtx = null;
-    workletAdded = false;
+  async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    const ctx = this.ctx;
+    const source = this.source;
+    const stream = this.stream;
+    this.ctx = null;
+    this.source = null;
+    this.stream = null;
+    try { source?.disconnect(); } catch {}
+    stream?.getTracks().forEach((track) => track.stop());
+    await Promise.all([
+      ...Array.from(this.taps, (tap) => tap.stop()),
+      ctx?.close().catch(() => {}),
+    ]);
   }
 }

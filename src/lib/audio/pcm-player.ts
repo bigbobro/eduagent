@@ -7,6 +7,8 @@
 export class PcmPlayer {
   private ctx: AudioContext | null = null;
   private nextStartTime = 0;
+  private disposed = false;
+  private revision = 0;
   private active = new Set<AudioBufferSourceNode>();
   private idleListeners = new Set<() => void>();
   private readonly sampleRate: number;
@@ -28,6 +30,7 @@ export class PcmPlayer {
    * 应在 lesson 启动时调用(与 prewarmRecorder 并行)。
    */
   async prewarm(): Promise<void> {
+    this.disposed = false;
     this.ensureContext();
     // Resume context if suspended (Safari may suspend on creation)
     if (this.ctx && this.ctx.state === 'suspended') {
@@ -37,6 +40,8 @@ export class PcmPlayer {
 
   /** 立刻把 PCM (Int16, little-endian) chunk 排入播放队列。 */
   enqueue(pcm: ArrayBuffer): void {
+    if (this.disposed) return;
+    this.revision++;
     const ctx = this.ensureContext();
     const i16 = new Int16Array(pcm);
     if (i16.length === 0) return;
@@ -54,6 +59,7 @@ export class PcmPlayer {
     this.nextStartTime = startAt + buf.duration;
     this.active.add(src);
     src.onended = () => {
+      if (this.ctx !== ctx) return;
       this.active.delete(src);
       this.emitIdleIfNeeded();
     };
@@ -64,8 +70,10 @@ export class PcmPlayer {
    * 改为异步以避免同步迭代 50+ sources 造成主线程卡顿。
    */
   async stop(): Promise<void> {
+    const revision = ++this.revision;
     const sources = Array.from(this.active);
     this.active.clear();
+    if (this.ctx) this.nextStartTime = this.ctx.currentTime;
 
     // Stop all sources asynchronously to avoid blocking main thread
     await Promise.all(
@@ -78,9 +86,7 @@ export class PcmPlayer {
       })
     );
 
-    if (this.ctx) {
-      this.nextStartTime = this.ctx.currentTime;
-    }
+    if (revision !== this.revision) return;
     this.emitIdleIfNeeded();
   }
 
@@ -99,10 +105,9 @@ export class PcmPlayer {
   }
 
   async dispose(): Promise<void> {
-    this.stop();
-    if (this.ctx) {
-      try { await this.ctx.close(); } catch {}
-      this.ctx = null;
-    }
+    this.disposed = true;
+    const ctx = this.ctx;
+    this.ctx = null;
+    await Promise.all([this.stop(), ctx?.close().catch(() => {})]);
   }
 }

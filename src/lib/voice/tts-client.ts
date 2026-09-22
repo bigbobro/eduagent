@@ -25,6 +25,8 @@ export class TtsClient {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wasOpen = false;
+  private generation = 0;
+  private rejectOpening: ((reason: Error) => void) | null = null;
 
   on(event: TtsEventName, fn: Listener): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
@@ -40,6 +42,7 @@ export class TtsClient {
   }
 
   async open(): Promise<void> {
+    this.close();
     this.intentionallyClosed = false;
     this.reconnectAttempt = 0;
     return this.connect();
@@ -54,22 +57,30 @@ export class TtsClient {
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
+      this.rejectOpening = reject;
       let opened = false;
       ws.onopen = () => {
+        if (this.ws !== ws) return;
+        this.rejectOpening = null;
         opened = true;
         this.wasOpen = true;
         this.reconnectAttempt = 0;
         this.emit('open');
         resolve();
       };
-      ws.onmessage = (e) => this.handleMessage(e);
+      ws.onmessage = (e) => { if (this.ws === ws) this.handleMessage(e); };
       ws.onclose = () => {
+        if (this.ws !== ws) return;
+        this.ws = null;
+        this.rejectOpening = null;
+        if (!opened) reject(new Error('TTS closed before opening'));
         this.emit('close');
         if (!this.intentionallyClosed && this.wasOpen) {
           this.attemptReconnect();
         }
       };
       ws.onerror = (e) => {
+        if (this.ws !== ws) return;
         this.emit('error', { code: 'ws', message: 'WebSocket error' });
         if (!opened) reject(e);
       };
@@ -77,7 +88,8 @@ export class TtsClient {
   }
 
   private attemptReconnect(): void {
-    if (this.intentionallyClosed) return;
+    if (this.intentionallyClosed || this.reconnectTimer) return;
+    const generation = this.generation;
 
     // Emit session-lost if a session was active during disconnect
     if (this.currentSessionId) {
@@ -100,10 +112,10 @@ export class TtsClient {
     this.emit('reconnecting', { attempt: this.reconnectAttempt, maxRetries: RECONNECT_MAX_RETRIES });
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
-      if (this.intentionallyClosed) return;
+      if (this.intentionallyClosed || generation !== this.generation) return;
       try {
         await this.connect();
-        this.emit('reconnected');
+        if (!this.intentionallyClosed && generation === this.generation) this.emit('reconnected');
       } catch {
         // connect() rejected → ws.onerror already fired, onclose will trigger next attemptReconnect
       }
@@ -134,14 +146,19 @@ export class TtsClient {
 
   close(): void {
     this.intentionallyClosed = true;
+    this.generation++;
+    this.rejectOpening?.(new DOMException('TTS closed', 'AbortError'));
+    this.rejectOpening = null;
+    this.currentSessionId = null;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     this.reconnectAttempt = 0;
     this.wasOpen = false;
-    try { this.ws?.close(); } catch {}
+    const ws = this.ws;
     this.ws = null;
+    try { ws?.close(); } catch {}
   }
 
   private send(obj: object): void {

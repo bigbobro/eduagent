@@ -43,6 +43,7 @@ export function createSession(course: Course): Session {
   const id = uuidv4();
   const session: Session = {
     id,
+    lifetime: new AbortController(),
     courseId: course.id,
     course,
     memory: initializeCardProgress(createMemory(), course),
@@ -65,6 +66,7 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
   const memory = initializeCardProgress(restoredMemory, course);
   const session: Session = {
     id,
+    lifetime: new AbortController(),
     courseId: course.id,
     course,
     memory,
@@ -91,13 +93,14 @@ export function getSession(id: string): Session | undefined {
 export function endSession(sessionId: string): void {
   const session = sessionStore.get(sessionId);
   if (!session) return;
+  session.lifetime.abort();
+  sessionStore.delete(sessionId);
   finishLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
   // R1 (2026-07-20 session persistence): final breakpoint flush on a graceful end, mirroring
   // finishLessonLog. Redundant with the last commitTurn/recordQuizAnswer write in practice
   // (memory does not change between the last turn and 'end'), but matches the design doc's
   // explicit "endSession upserts once more for the final value" and costs one extra write.
   persistCourseProgress(session);
-  sessionStore.delete(sessionId);
 }
 
 export function setSessionPhase(sessionId: string, phase: PhaseName): void {
@@ -113,7 +116,7 @@ export function recordQuizAnswer(
   correct: boolean,
 ): boolean {
   const session = sessionStore.get(sessionId);
-  if (!session) return false;
+  if (!session || session.lifetime.signal.aborted) return false;
   session.memory.totalInteractions += 1;
   // R3 (2026-07-20 session persistence PRD): accumulate passed quiz ids — a resumed
   // reinforcement phase skips these. Cumulative/dedup, never removed on a wrong answer.
@@ -177,6 +180,26 @@ export async function* streamUserInput(
     return;
   }
 
+  const turnSignal = signal ? AbortSignal.any([signal, session.lifetime.signal]) : session.lifetime.signal;
+  if (!isTurnActive(session, turnSignal)) return;
+  for await (const event of streamSessionInput(session, userText, asrResult, turnSignal, rawAsrText, opts)) {
+    if (!isTurnActive(session, turnSignal)) return;
+    yield event;
+  }
+}
+
+function isTurnActive(session: Session, signal: AbortSignal): boolean {
+  return !signal.aborted && sessionStore.get(session.id) === session;
+}
+
+async function* streamSessionInput(
+  session: Session,
+  userText: string,
+  asrResult: { latency: number; tokens: number } | undefined,
+  signal: AbortSignal,
+  rawAsrText: string,
+  opts: { phaseOpening?: boolean },
+): AsyncGenerator<StreamUserEvent> {
   // R4 (2026-07-04, session 6f6e7bec n=42): a real child utterance squeezed in during
   // reinforcement (after the phaseOpening turn, before/between quizzes — quiz components
   // route ASR with routeToChat:false, but a stray push-to-talk press from the still-mounted
@@ -192,7 +215,7 @@ export async function* streamUserInput(
     && !userText.startsWith('[quiz:')
     && !userText.startsWith('(切换到')
   ) {
-    yield* respondWithoutLLM(session, userText, REINFORCEMENT_SQUEEZE_IN_SPEECH, asrResult);
+    yield* respondWithoutLLM(session, userText, REINFORCEMENT_SQUEEZE_IN_SPEECH, asrResult, signal);
     return;
   }
 
@@ -209,6 +232,7 @@ export async function* streamUserInput(
     const promptInput = buildPromptInput(session.course, session.memory, session.currentPhase, messages);
     inputBreakdown = promptInput.breakdown;
     for await (const ev of streamLLM(promptInput.systemPrompt, messages, signal)) {
+      if (!isTurnActive(session, signal)) return;
       if (ev.done) {
         inputTokens = ev.usage.inputTokens;
         outputTokens = ev.usage.outputTokens;
@@ -228,6 +252,8 @@ export async function* streamUserInput(
     yield { type: 'error', message: (err as Error).message };
     return;
   }
+
+  if (!isTurnActive(session, signal)) return;
 
   // 3. Finalize + sanitize
   const result = extractor.finalize();
@@ -258,6 +284,8 @@ export async function* streamUserInput(
   yield { type: 'speech-end' };
   yield { type: 'actions', actions: finalCtx.actions, state_update: finalCtx.stateUpdate };
 
+  // A generator may be resumed after endSession while suspended at any yield above.
+  if (!isTurnActive(session, signal)) return;
   // 6. Commit memory + accounting + log
   commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency, inputBreakdown }, rawAsrText);
 
@@ -283,11 +311,13 @@ async function* respondWithoutLLM(
   userText: string,
   speech: string,
   asrResult: { latency: number; tokens: number } | undefined,
+  signal: AbortSignal,
 ): AsyncGenerator<StreamUserEvent> {
   yield { type: 'speech-delta', text: speech };
   yield { type: 'speech-end' };
   yield { type: 'actions', actions: [], state_update: {} };
 
+  if (!isTurnActive(session, signal)) return;
   // Accounting mirrors commitTurn minus the LLM cost (never called) and any memory/card
   // mutation (nothing was taught this turn — the LLM guard pipeline never ran). userText is
   // deliberately NOT added to session.memory.messages — there is no assistant reply to it in

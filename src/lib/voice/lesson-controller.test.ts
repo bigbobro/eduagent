@@ -8,7 +8,7 @@ const asrInstances = vi.hoisted(() => [] as Array<{
   finish: ReturnType<typeof vi.fn>;
   sendPcm: ReturnType<typeof vi.fn>;
 }>);
-const setAsrSessionContextMock = vi.hoisted(() => vi.fn());
+const asrContextMock = vi.hoisted(() => vi.fn());
 const asrOpenQueue = vi.hoisted(() => [] as Array<() => Promise<void>>);
 
 vi.mock('./asr-client', () => {
@@ -19,7 +19,8 @@ vi.mock('./asr-client', () => {
     finish = vi.fn();
     sendPcm = vi.fn();
 
-    constructor() {
+    constructor(context: unknown) {
+      asrContextMock(context);
       asrInstances.push(this);
     }
 
@@ -28,7 +29,7 @@ vi.mock('./asr-client', () => {
     }
   }
 
-  return { AsrClient, setAsrSessionContext: setAsrSessionContextMock };
+  return { AsrClient };
 });
 
 const ttsInstances = vi.hoisted(() => [] as Array<{
@@ -81,10 +82,13 @@ vi.mock('@/lib/audio/pcm-player', () => {
   return { PcmPlayer };
 });
 
+const recorderPrewarm = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@/lib/audio/recorder', () => ({
-  startRecorder: vi.fn(async () => ({ stop: vi.fn(async () => {}) })),
-  prewarmRecorder: vi.fn(async () => {}),
-  disposeRecorder: vi.fn(async () => {}),
+  LessonRecorder: class {
+    start = vi.fn(async () => ({ stop: vi.fn(async () => {}) }));
+    prewarm = recorderPrewarm;
+    dispose = vi.fn(async () => {});
+  },
 }));
 
 function sseResponse(): Response {
@@ -101,7 +105,7 @@ describe('LessonController', () => {
     asrInstances.length = 0;
     asrOpenQueue.length = 0;
     ttsInstances.length = 0;
-    setAsrSessionContextMock.mockClear();
+    asrContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
   });
 
@@ -138,7 +142,7 @@ describe('LessonController', () => {
     // cardId is dropped → asr-proxy falls back to the whole-course hot words instead of a single
     // frozen "princess" that biases recognition against the reinforcement sentence.
     expect((controller as any).currentAsrCardId).toBeNull();
-    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({ courseId: 'magic' });
+    expect(asrContextMock).toHaveBeenLastCalledWith({ courseId: 'magic' });
   });
 
   it('injects repeat-after-me sentence candidates and clears them on the next word round', async () => {
@@ -152,7 +156,7 @@ describe('LessonController', () => {
       asrSentenceTexts: ['I play tennis.', 'I like swimming.'],
     });
 
-    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({
+    expect(asrContextMock).toHaveBeenLastCalledWith({
       courseId: 'sports',
       sentenceTexts: ['I play tennis.', 'I like swimming.'],
     });
@@ -161,7 +165,7 @@ describe('LessonController', () => {
     (controller as any).setState('awaiting');
     await controller.startListening();
 
-    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({ courseId: 'sports' });
+    expect(asrContextMock).toHaveBeenLastCalledWith({ courseId: 'sports' });
   });
 
   it('routes regular ASR final utterances to chat', async () => {
@@ -271,7 +275,7 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
     asrInstances.length = 0;
     asrOpenQueue.length = 0;
     ttsInstances.length = 0;
-    setAsrSessionContextMock.mockClear();
+    asrContextMock.mockClear();
   });
 
   afterEach(() => {
@@ -357,7 +361,7 @@ describe('R1: actions buffered until TTS session-finished', () => {
     asrInstances.length = 0;
     asrOpenQueue.length = 0;
     ttsInstances.length = 0;
-    setAsrSessionContextMock.mockClear();
+    asrContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
   });
 
@@ -439,8 +443,10 @@ describe('R1: actions buffered until TTS session-finished', () => {
     (controller as any).sessionId = 'session-1';
     await expect(controller.sendCustomAction({ action: 'message', text: 'hello' })).resolves.toEqual({ ok: true });
     ttsInstances[0].emit('session-finished');
+    (controller as any).setState('awaiting');
+    await controller.startListening();
 
-    expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({
+    expect(asrContextMock).toHaveBeenLastCalledWith({
       courseId: 'animals',
       cardId: 'dog',
       clearedCardIds: ['cat'],
@@ -484,7 +490,7 @@ describe('§1 loop-reliability fixes', () => {
     asrInstances.length = 0;
     asrOpenQueue.length = 0;
     ttsInstances.length = 0;
-    setAsrSessionContextMock.mockClear();
+    asrContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
   });
 
@@ -624,7 +630,7 @@ describe('thinking wait behavior', () => {
     asrInstances.length = 0;
     asrOpenQueue.length = 0;
     ttsInstances.length = 0;
-    setAsrSessionContextMock.mockClear();
+    asrContextMock.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
   });
 
@@ -693,5 +699,99 @@ describe('command acknowledgements', () => {
     const controller = new LessonController();
     (controller as any).sessionId = 'session-1';
     await expect(controller.submitQuizAnswer('q1', 'apple', true)).resolves.toEqual({ ok: kind === 'success' });
+  });
+});
+
+
+describe('classroom run cancellation', () => {
+  beforeEach(() => { ttsInstances.length = 0; asrInstances.length = 0; recorderPrewarm.mockReset().mockResolvedValue(undefined); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each(['start', 'custom', 'message', 'quiz'])('ignores a late %s response after ending', async (operation) => {
+    let release!: (response: Response) => void;
+    const response = new Promise<Response>((resolve) => { release = resolve; });
+    let requestSignal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn((_url, options) => {
+      if (JSON.parse(options.body).action === 'end') return Promise.resolve(Response.json({ ok: true }));
+      requestSignal = options.signal;
+      return response; // Deliberately ignores abort: the result still needs an identity fence.
+    }));
+    const controller = new LessonController();
+    if (operation !== 'start') {
+      (controller as any).sessionId = 'old-session';
+      (controller as any).setState('awaiting');
+      (controller as any).bindTtsHandlers();
+    }
+    const pending = operation === 'start' ? controller.startLesson('food')
+      : operation === 'quiz' ? controller.submitQuizAnswer('q1', 'apple', true)
+      : operation === 'message' ? (controller as any).handleAsrFinal('apple')
+      : controller.sendCustomAction({ action: 'message', text: 'apple' });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    const ending = controller.endLesson();
+    expect(controller.endLesson()).toBe(ending);
+    await ending;
+    expect(requestSignal!.aborted).toBe(true);
+    const events = vi.fn();
+    controller.on('state', events);
+    release(operation === 'quiz' ? Response.json({ ok: true }) : new Response('event: speech-delta\ndata: {"text":"late"}\n\nevent: done\ndata: {}\n\n', { headers: { 'X-Session-Id': 'late-session' } }));
+    const result = await pending;
+    if (operation === 'start') expect(result).toBe(false);
+    if (operation === 'custom' || operation === 'quiz') expect(result.ok).toBe(false);
+    expect(events).not.toHaveBeenCalled();
+    expect(controller.getState()).toBe('idle');
+    expect(controller.getSessionId()).toBeNull();
+    expect(ttsInstances[0].sendText).not.toHaveBeenCalled();
+  });
+
+  it('cancels an SSE reader that is waiting for another frame', async () => {
+    const cancel = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => JSON.parse(options.body).action === 'end'
+      ? Response.json({ ok: true }) : new Response(new ReadableStream({ cancel }), { headers: { 'X-Session-Id': 'old-session' } })));
+    const controller = new LessonController();
+    const pending = controller.startLesson('food');
+    await vi.waitFor(() => expect(controller.getSessionId()).toBe('old-session'));
+    await controller.endLesson();
+    await expect(pending).resolves.toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(controller.getState()).toBe('idle');
+  });
+
+  it('allows a new run while old prewarm is unresolved without reviving the old startup', async () => {
+    let release!: () => void;
+    recorderPrewarm.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
+    const controller = new LessonController();
+    const first = controller.startLesson('food');
+    await controller.endLesson();
+    await expect(first).resolves.toBe(false);
+    await expect(controller.startLesson('animals')).resolves.toBe(true);
+    release();
+    await Promise.resolve();
+    expect(controller.getSessionId()).toBe('session-1');
+    expect(controller.getState()).toBe('greeting');
+    await controller.endLesson();
+  });
+
+  it('ignores old ASR handlers and TTS events after end', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
+    const controller = new LessonController();
+    await controller.startLesson('food');
+    (controller as any).setState('awaiting');
+    await controller.startListening();
+    const asr = asrInstances[0];
+    await controller.endLesson();
+    const error = vi.fn();
+    const subtitle = vi.fn();
+    controller.on('error', error);
+    controller.on('subtitle', subtitle);
+    asr.handlers.get('partial')?.('late');
+    asr.handlers.get('final')?.('late');
+    asr.handlers.get('error')?.({ message: 'late' });
+    ttsInstances[0].emit('subtitle', 'late');
+    ttsInstances[0].emit('session-finished');
+    ttsInstances[0].emit('error', { message: 'late' });
+    expect(error).not.toHaveBeenCalled();
+    expect(subtitle).not.toHaveBeenCalled();
+    expect(controller.getState()).toBe('idle');
   });
 });

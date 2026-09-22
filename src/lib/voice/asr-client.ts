@@ -16,19 +16,19 @@ interface AsrError { type: 'error'; code: string; message: string }
 
 type AsrServerMsg = AsrPartial | AsrFinal | AsrError;
 
-let sessionContext: AsrClientSessionContext = {};
-
-export function setAsrSessionContext(context: AsrClientSessionContext): void {
-  sessionContext = {
-    ...context,
-    targetWords: context.targetWords?.filter(Boolean),
-    clearedCardIds: context.clearedCardIds?.filter(Boolean),
-    sentenceTexts: context.sentenceTexts?.filter(Boolean),
-  };
-}
-
 export class AsrClient {
   private ws: WebSocket | null = null;
+  private rejectOpening: ((reason: Error) => void) | null = null;
+  private readonly context: AsrClientSessionContext;
+
+  constructor(context: AsrClientSessionContext = {}) {
+    this.context = {
+      ...context,
+      targetWords: context.targetWords?.filter(Boolean),
+      clearedCardIds: context.clearedCardIds?.filter(Boolean),
+      sentenceTexts: context.sentenceTexts?.filter(Boolean),
+    };
+  }
   private listeners: Map<AsrEventName, Set<Listener>> = new Map();
 
   on(event: AsrEventName, fn: Listener): void {
@@ -45,15 +45,29 @@ export class AsrClient {
   }
 
   async open(): Promise<void> {
-    const url = buildAsrUrl(sessionContext);
+    this.close();
+    const url = buildAsrUrl(this.context);
     return new Promise((resolve, reject) => {
       const ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
       this.ws = ws;
-      ws.onopen = () => { this.emit('open'); resolve(); };
-      ws.onmessage = (e) => this.handleMessage(e);
-      ws.onclose = () => { this.emit('close'); };
+      this.rejectOpening = reject;
+      ws.onopen = () => {
+        if (this.ws !== ws) return;
+        this.rejectOpening = null;
+        this.emit('open');
+        resolve();
+      };
+      ws.onmessage = (e) => { if (this.ws === ws) this.handleMessage(e); };
+      ws.onclose = () => {
+        if (this.ws !== ws) return;
+        this.ws = null;
+        this.rejectOpening = null;
+        reject(new Error('ASR closed before opening'));
+        this.emit('close');
+      };
       ws.onerror = (e) => {
+        if (this.ws !== ws) return;
         this.emit('error', { code: 'ws', message: 'WebSocket error' });
         reject(e);
       };
@@ -75,8 +89,11 @@ export class AsrClient {
   }
 
   close(): void {
-    try { this.ws?.close(); } catch {}
+    this.rejectOpening?.(new DOMException('ASR closed', 'AbortError'));
+    this.rejectOpening = null;
+    const ws = this.ws;
     this.ws = null;
+    try { ws?.close(); } catch {}
   }
 
   private handleMessage(e: MessageEvent): void {
