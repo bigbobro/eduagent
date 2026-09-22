@@ -2,28 +2,20 @@
 
 import { Course, PhaseName } from '@/types/course';
 import { ToolAction } from '@/types/tools';
-import { LessonController, type ResumeInfo } from './lesson-controller';
+import { LessonController } from './lesson-controller';
+import type { ResumeInfo, LessonProgressSnapshot } from '@/lib/lesson-protocol';
 
 export type { PhaseName } from '@/types/course';
 
 type EventName = 'phase-change' | 'intro-busy-change' | 'intro-active-card-change' | 'transition-retry-change';
 type Listener<T = any> = (data: T) => void;
 
-interface ProgressSnapshot {
-  clearedCardIds: string[];
-  totalAttempts: number;
-  currentPhase: PhaseName | null;
-  // F3 (2026-07-03): server-computed word-queue completion — cleared + parked-after-retry
-  // both count as done, so a parked (escape-valve) word never blocks the phase switch.
-  allWordsDone?: boolean;
-}
-
 export class PhasedLessonController {
   private listeners = new Map<EventName, Set<Listener>>();
   private generation = 0;
   private closed = false;
   private currentPhase: PhaseName = 'intro';
-  private lastSnapshot: ProgressSnapshot | null = null;
+  private lastSnapshot: LessonProgressSnapshot | null = null;
   private pendingTransition: PhaseName | null = null;
   private failedTransition: PhaseName | null = null;
   private starting = false;
@@ -124,7 +116,7 @@ export class PhasedLessonController {
     if (!resume?.resumed) return;
     this.resumeInfo = resume;
     this.clearIntroStartupUnlockTimer();
-    const resumedPhase = resume.phase as PhaseName;
+    const resumedPhase = resume.phase;
     this.currentPhase = resumedPhase;
     this.setIntroBusy(false);
     this.setIntroActiveCardId(null);
@@ -213,7 +205,7 @@ export class PhasedLessonController {
     }
   };
 
-  private onV2Progress = (snapshot: ProgressSnapshot) => {
+  private onV2Progress = (snapshot: LessonProgressSnapshot) => {
     if (this.closed) return;
     this.lastSnapshot = snapshot;
     this.maybeArmTransition();

@@ -5,23 +5,30 @@ import { streamUserInputToSSE } from '@/lib/agent/orchestrator';
 import { getCourseById } from '@/data/courses';
 import { getCourseProgress } from '@/lib/db/queries';
 import { ensureInitialized } from '@/lib/init';
-import { PhaseName } from '@/types/course';
+import { lessonRequestSchema, type LessonRequest, type ResumeInfo, type LessonAck } from '@/lib/lesson-protocol';
+import { InvalidCourseProgressError } from '@/lib/db/progress-snapshot';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   ensureInitialized();
-  const body = await req.json();
+  const parsed = lessonRequestSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: 'Invalid lesson action' }, { status: 400 });
+  const body = parsed.data;
   try {
     return await handleChatAction(body);
   } catch (error) {
+    if (error instanceof InvalidCourseProgressError) {
+      console.warn('[chat] invalid course progress', { courseId: error.courseId, fields: error.fields });
+      return NextResponse.json({ code: error.code, error: error.message }, { status: 409 });
+    }
     console.error('[chat] operation failed', { action: body.action, message: (error as Error).message });
     return NextResponse.json({ error: '课堂操作未保存，请重试。' }, { status: 500 });
   }
 }
 
-async function handleChatAction(body: any) {
-  console.log('[chat]', 'action=' + body.action, 'courseId=' + (body.courseId ?? '-'), 'sessionId=' + (body.sessionId ?? '-'));
+async function handleChatAction(body: LessonRequest) {
+  console.log('[chat]', 'action=' + body.action, 'courseId=' + ('courseId' in body ? body.courseId : '-'), 'sessionId=' + ('sessionId' in body ? body.sessionId : '-'));
 
   if (body.action === 'start') {
     const course = getCourseById(body.courseId);
@@ -58,7 +65,7 @@ async function handleChatAction(body: any) {
         clearedCardIds: session.memory.clearedCardIds,
         resumeCardId,
         passedQuizIds: session.memory.passedQuizIds,
-      });
+      } satisfies ResumeInfo);
     } else {
       session = createSession(course);
       console.log('[chat] fresh start', { courseId: course.id, hadProgress: !!progress, completed: progress?.completed ?? false });
@@ -105,10 +112,6 @@ async function handleChatAction(body: any) {
       console.warn('[chat] 404 session not found (phase-transition):', body.sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
-    const valid: PhaseName[] = ['intro', 'interactive', 'reinforcement', 'done'];
-    if (!valid.includes(body.to)) {
-      return NextResponse.json({ error: 'Invalid phase' }, { status: 400 });
-    }
     setSessionPhase(body.sessionId, body.to);
     // System turn → rawAsrText '' so the transition prompt never counts an R2 hit.
     // phaseOpening: transition opening speech legitimately mentions other words —
@@ -130,12 +133,12 @@ async function handleChatAction(body: any) {
       console.warn('[chat] 404 session not found (quiz-answer):', body.sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true } satisfies LessonAck);
   }
 
   if (body.action === 'end') {
     endSession(body.sessionId);
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true } satisfies LessonAck);
   }
 
   return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

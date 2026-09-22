@@ -2,6 +2,9 @@ import type { Database } from 'better-sqlite3';
 import { getDb } from './index';
 import { TokenUsage, InteractionLog, CourseProgressSnapshot } from '@/types/session';
 import { PhaseName } from '@/types/course';
+import type { CourseProgressRow } from '@/types/session';
+import { parseCourseProgressRow, InvalidCourseProgressError, type StoredCourseProgressRow } from './progress-snapshot';
+export type { CourseProgressRow } from '@/types/session';
 
 export function createLessonLog(id: string, courseId: string): void {
   const db = getDb();
@@ -113,30 +116,13 @@ export function upsertCourseProgress(
   `).run(courseId, JSON.stringify(snapshot), phase, completed ? 1 : 0, new Date().toISOString());
 }
 
-export interface CourseProgressRow {
-  courseId: string;
-  snapshot: CourseProgressSnapshot;
-  phase: PhaseName;
-  completed: boolean;
-  updatedAt: string;
-}
-
-// Malformed/legacy snapshot JSON is treated as "no usable breakpoint" (returns undefined)
-// rather than throwing — a corrupt row must not break the 'start' route; the caller falls
-// back to a fresh session, same as if no row existed.
+// Missing and invalid are different: callers must not overwrite a damaged breakpoint.
 export function getCourseProgress(courseId: string): CourseProgressRow | undefined {
   const db = getDb();
   const row = db.prepare(
     'SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress WHERE course_id = ?',
-  ).get(courseId) as { courseId: string; snapshot: string; phase: string; completed: number; updatedAt: string } | undefined;
-  if (!row) return undefined;
-  try {
-    const snapshot = JSON.parse(row.snapshot) as CourseProgressSnapshot;
-    return { courseId: row.courseId, snapshot, phase: row.phase as PhaseName, completed: row.completed === 1, updatedAt: row.updatedAt };
-  } catch (err) {
-    console.error('[db] course_progress snapshot JSON parse failed for', courseId, err);
-    return undefined;
-  }
+  ).get(courseId) as StoredCourseProgressRow | undefined;
+  return row ? parseCourseProgressRow(row) : undefined;
 }
 
 // ─── Reads ───────────────────────────────────────────────────────────────
@@ -159,28 +145,23 @@ export function getLessonCountByCourse(db: Database): Map<string, number> {
 // db-injectable read of every course_progress breakpoint, for the home progress aggregation.
 // Tolerant of a missing table (fresh checkout before the first /api/chat call, or a minimal
 // test DB) and of a corrupt snapshot row (skipped) — a bad breakpoint must never break the
-// home list. Mirrors getCourseProgress's per-row JSON-parse guard.
+// home list. Both paths share structural validation; invalid rows are never written here.
 export function getAllCourseProgress(db: Database): Map<string, CourseProgressRow> {
   const map = new Map<string, CourseProgressRow>();
-  let rows: Array<{ courseId: string; snapshot: string; phase: string; completed: number; updatedAt: string }>;
+  let rows: StoredCourseProgressRow[];
   try {
     rows = db
       .prepare('SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress')
-      .all() as Array<{ courseId: string; snapshot: string; phase: string; completed: number; updatedAt: string }>;
+      .all() as StoredCourseProgressRow[];
   } catch {
     return map; // table not created yet — treat as "no breakpoints"
   }
   for (const row of rows) {
     try {
-      map.set(row.courseId, {
-        courseId: row.courseId,
-        snapshot: JSON.parse(row.snapshot) as CourseProgressSnapshot,
-        phase: row.phase as PhaseName,
-        completed: row.completed === 1,
-        updatedAt: row.updatedAt,
-      });
+      map.set(row.courseId, parseCourseProgressRow(row));
     } catch (err) {
-      console.error('[db] course_progress snapshot JSON parse failed for', row.courseId, err);
+      if (!(err instanceof InvalidCourseProgressError)) throw err;
+      console.warn('[db] invalid course progress', { courseId: err.courseId, fields: err.fields });
     }
   }
   return map;

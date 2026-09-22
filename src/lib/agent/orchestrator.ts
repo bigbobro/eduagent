@@ -1,8 +1,5 @@
-import { streamUserInput, StreamUserEvent } from './session';
-
-function sseFrame(event: string, data: object): string {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-}
+import { streamUserInput } from './session';
+import { encodeLessonEvent } from '@/lib/lesson-protocol';
 
 export function streamUserInputToSSE(
   sessionId: string,
@@ -35,12 +32,12 @@ export function streamUserInputToSSE(
               }
             }
           }
-          const frame = mapEventToSSE(ev);
+          const frame = encodeLessonEvent(ev);
           controller.enqueue(encoder.encode(frame));
         }
       } catch (err) {
         if (!canceled) controller.enqueue(
-          encoder.encode(sseFrame('error', { message: (err as Error).message }))
+          encoder.encode(encodeLessonEvent({ type: 'error', message: (err as Error).message }))
         );
       } finally {
         if (!canceled) controller.close();
@@ -51,21 +48,4 @@ export function streamUserInputToSSE(
       ac.abort();
     },
   });
-}
-
-function mapEventToSSE(ev: StreamUserEvent): string {
-  switch (ev.type) {
-    case 'speech-delta': return sseFrame('speech-delta', { text: ev.text });
-    case 'speech-end':   return sseFrame('speech-end', {});
-    case 'actions':      return sseFrame('actions', { actions: ev.actions, state_update: ev.state_update });
-    case 'progress_snapshot':
-      return sseFrame('progress_snapshot', {
-        clearedCardIds: ev.clearedCardIds,
-        totalAttempts: ev.totalAttempts,
-        currentPhase: ev.currentPhase,
-        allWordsDone: ev.allWordsDone,
-      });
-    case 'done':         return sseFrame('done', {});
-    case 'error':        return sseFrame('error', { message: ev.message });
-  }
 }

@@ -150,12 +150,12 @@ describe('course_progress upsert/get (2026-07-20 session persistence)', () => {
     expect(db().prepare('SELECT COUNT(*) AS count FROM course_progress').get()).toEqual({ count: 1 });
   });
 
-  it('treats corrupt snapshot JSON as no breakpoint instead of throwing', () => {
+  it('distinguishes a corrupt snapshot from a missing breakpoint', () => {
     db().prepare(
       "INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('broken', '{not valid json', 'intro', 0, ?)",
     ).run(new Date().toISOString());
 
-    expect(getCourseProgress('broken')).toBeUndefined();
+    expect(() => getCourseProgress('broken')).toThrow('已保留原记录');
   });
 
   it('tracks separate breakpoints per course', () => {

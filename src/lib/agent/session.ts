@@ -1,7 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { Course, PhaseName } from '@/types/course';
 import { LessonMemory, PromptInputBreakdown, TokenUsage } from '@/types/session';
-import { AgentResponse, ToolAction } from '@/types/tools';
+import type { StreamUserEvent } from '@/lib/lesson-protocol';
+export type { StreamUserEvent } from '@/lib/lesson-protocol';
 import { sessionStore, type Session } from './session-store';
 import {
   createMemory,
@@ -174,16 +175,6 @@ function commitSessionUpdate(
 function requireRevision(session: Session, revision: number): void {
   if (session.revision !== revision) throw new Error('课堂状态已更新，请重试。');
 }
-
-export type StreamUserEvent =
-  | { type: 'speech-delta'; text: string }
-  | { type: 'speech-end' }
-  | { type: 'actions'; actions: ToolAction[]; state_update: AgentResponse['state_update'] }
-  // allWordsDone (F3 2026-07-03): cleared + parked-after-retry — drives the client's
-  // interactive→reinforcement transition even when a parked word never cleared.
-  | { type: 'progress_snapshot'; clearedCardIds: string[]; totalAttempts: number; currentPhase: PhaseName; allWordsDone: boolean }
-  | { type: 'done' }
-  | { type: 'error'; message: string };
 
 export async function* streamUserInput(
   sessionId: string,

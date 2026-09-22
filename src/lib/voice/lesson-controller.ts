@@ -1,5 +1,8 @@
 'use client';
 
+import { encodeLessonRequest, parseLessonEvent, parseResumeInfo, lessonAckSchema, invalidProgressMessage, type LessonCustomAction, type LessonCommandResult, type ResumeInfo, type StreamUserEvent, type LessonProgressSnapshot } from '@/lib/lesson-protocol';
+export type { LessonCommandResult, ResumeInfo } from '@/lib/lesson-protocol';
+
 import { v4 as uuidv4 } from 'uuid';
 import type { PhaseName } from '@/types/course';
 import { ToolAction } from '@/types/tools';
@@ -11,40 +14,6 @@ import { TurnTimeoutGuard } from './turn-timeout-guard';
 
 export type LessonStateName =
   | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending';
-
-// R1 (2026-07-20 session persistence, frontend delivery): parsed from the `X-Resume-Info`
-// response header that `/api/chat` action:'start' sends only when it resumed an incomplete
-// course_progress breakpoint (see src/app/api/chat/route.ts). Absent header → no resume.
-export interface LessonCommandResult {
-  ok: boolean;
-  acceptedPhase?: PhaseName;
-}
-
-export interface ResumeInfo {
-  resumed: true;
-  phase: string;
-  clearedCardIds: string[];
-  resumeCardId: string;
-  passedQuizIds: string[];
-}
-
-function parseResumeInfo(header: string | null): ResumeInfo | null {
-  if (!header) return null;
-  try {
-    const parsed = JSON.parse(header);
-    if (!parsed || parsed.resumed !== true) return null;
-    return {
-      resumed: true,
-      phase: typeof parsed.phase === 'string' ? parsed.phase : 'interactive',
-      clearedCardIds: Array.isArray(parsed.clearedCardIds) ? parsed.clearedCardIds : [],
-      resumeCardId: typeof parsed.resumeCardId === 'string' ? parsed.resumeCardId : '',
-      passedQuizIds: Array.isArray(parsed.passedQuizIds) ? parsed.passedQuizIds : [],
-    };
-  } catch (e) {
-    console.warn('[lesson] failed to parse X-Resume-Info header:', e);
-    return null;
-  }
-}
 
 type EventName =
   | 'state'
@@ -143,6 +112,7 @@ export class LessonController {
   }
 
   private async startRun(courseId: string): Promise<boolean> {
+    let failureMessage = '课堂暂时没准备好,再试一次吧';
     const run = new AbortController();
     this.run = run;
     if (this.ending) await this.ending;
@@ -177,7 +147,7 @@ export class LessonController {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'start', courseId }),
+        body: encodeLessonRequest({ action: 'start', courseId }),
         signal: run.signal,
       });
       if (!this.isCurrent(run)) {
@@ -185,6 +155,12 @@ export class LessonController {
         const lateSession = res.headers.get('X-Session-Id');
         if (lateSession) void this.endRemoteSession(lateSession);
         return false;
+      }
+      if (res.status === 409) {
+        const problem: unknown = await res.json();
+        if (problem && typeof problem === 'object' && 'code' in problem && problem.code === 'INVALID_COURSE_PROGRESS') {
+          failureMessage = invalidProgressMessage;
+        }
       }
       if (!res.ok || !res.body) throw new Error(`Start failed: ${res.status}`);
       this.sessionId = res.headers.get('X-Session-Id');
@@ -194,7 +170,7 @@ export class LessonController {
     } catch (error) {
       if (!this.isCurrent(run)) return false;
       console.warn('[lesson] start failed:', error);
-      this.emit('error', { message: '课堂暂时没准备好,再试一次吧' });
+      this.emit('error', { message: failureMessage });
       await this.endLesson();
       return false;
     }
@@ -243,7 +219,7 @@ export class LessonController {
     try {
       const response = await fetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'end', sessionId }),
+        body: encodeLessonRequest({ action: 'end', sessionId }),
         signal: AbortSignal.timeout(5000),
       });
       if (!response.ok) console.warn('[lesson] end request failed:', response.status);
@@ -266,7 +242,7 @@ export class LessonController {
   /**
    * Send a custom chat action and consume the returned SSE through the existing TTS/action path.
    */
-  async sendCustomAction(body: Record<string, unknown>): Promise<LessonCommandResult> {
+  async sendCustomAction(body: LessonCustomAction): Promise<LessonCommandResult> {
     const run = this.run;
     if (!this.isCurrent(run)) return { ok: false };
     let acceptedPhase: PhaseName | undefined;
@@ -275,7 +251,7 @@ export class LessonController {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, sessionId: this.sessionId }),
+        body: encodeLessonRequest({ ...body, sessionId: this.sessionId }),
         signal: run.signal,
       });
       if (!this.isCurrent(run)) { void res.body?.cancel().catch(() => {}); return { ok: false }; }
@@ -304,10 +280,10 @@ export class LessonController {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'quiz-answer', sessionId: this.sessionId, quizId, answer, correct }),
+        body: encodeLessonRequest({ action: 'quiz-answer', sessionId: this.sessionId, quizId, answer, correct }),
         signal: run.signal,
       });
-      if (!res.ok || (await res.json()).ok !== true) throw new Error(`Quiz acknowledgement failed: ${res.status}`);
+      if (!res.ok || !lessonAckSchema.safeParse(await res.json()).success) throw new Error(`Quiz acknowledgement failed: ${res.status}`);
       return { ok: this.isCurrent(run) };
     } catch (error) {
       if (!this.isCurrent(run)) return { ok: false };
@@ -570,7 +546,7 @@ export class LessonController {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: encodeLessonRequest({
           action: 'message',
           sessionId: this.sessionId,
           text,
@@ -705,14 +681,13 @@ export class LessonController {
             else if (line.startsWith('data: ')) data += line.slice(6);
           }
           if (!event) continue;
-          let payload: any = {};
-          try { payload = JSON.parse(data); } catch {}
-          if (event === 'error') throw new Error(payload.message || 'Lesson stream failed');
-          if (event === 'done') {
+          const parsed = parseLessonEvent(event, data);
+          if (parsed.type === 'error') throw new Error(parsed.message || 'Lesson stream failed');
+          if (parsed.type === 'done') {
             completed = true;
             this.sseCommitted = true;
           }
-          this.handleSseEvent(event, payload, ensureTtsSession, onFirstSpeech);
+          this.handleSseEvent(parsed, ensureTtsSession, onFirstSpeech);
           if (completed) return;
         }
       }
@@ -728,18 +703,17 @@ export class LessonController {
   }
 
   private handleSseEvent(
-    event: string,
-    payload: any,
+    event: StreamUserEvent,
     ensureTtsSession: () => void,
     onFirstSpeech: () => void
   ): void {
     // Any SSE event means the server is responding — the request is not hung.
     this.clearChatWatchdog();
-    switch (event) {
+    switch (event.type) {
       case 'speech-delta':
         ensureTtsSession();
         onFirstSpeech();
-        this.tts.sendText(payload.text);
+        this.tts.sendText(event.text);
         break;
       case 'speech-end':
         // 不在这里 finishSession,等 actions 也来,然后 done 再 finish
@@ -747,11 +721,13 @@ export class LessonController {
       case 'actions':
         // Buffer actions until TTS session-finished so the UI card change is
         // in sync with what the teacher is saying, not 2-3 seconds ahead.
-        this.pendingActions = payload.actions || [];
+        this.pendingActions = event.actions;
         break;
-      case 'progress_snapshot':
-        this.applyProgressSnapshot(payload);
+      case 'progress_snapshot': {
+        const { type: _type, ...snapshot } = event;
+        this.applyProgressSnapshot(snapshot);
         break;
+      }
       case 'done':
         this.tts.finishSession();
         this.armSpeechFinishFallback();
@@ -821,10 +797,8 @@ export class LessonController {
     }
   }
 
-  private applyProgressSnapshot(payload: any): void {
-    if (Array.isArray(payload.clearedCardIds)) {
-      this.clearedCardIds = payload.clearedCardIds.filter(Boolean);
-    }
+  private applyProgressSnapshot(payload: LessonProgressSnapshot): void {
+    this.clearedCardIds = [...payload.clearedCardIds];
     this.emit('progress', payload);
   }
 

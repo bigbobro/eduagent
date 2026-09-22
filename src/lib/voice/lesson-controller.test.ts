@@ -602,7 +602,7 @@ describe('§1 loop-reliability fixes', () => {
     (controller as any).armChatWatchdog();
     expect((controller as any).timers.has('chatWatchdog')).toBe(true);
 
-    (controller as any).handleSseEvent('progress_snapshot', { clearedCardIds: [] }, () => {}, () => {});
+    (controller as any).handleSseEvent({ type: 'progress_snapshot', clearedCardIds: [], totalAttempts: 0, currentPhase: 'interactive' }, () => {}, () => {});
 
     expect((controller as any).timers.has('chatWatchdog')).toBe(false);
   });
@@ -658,6 +658,27 @@ describe('command acknowledgements', () => {
   function stream(frames: string, headers: Record<string, string> = {}): Response {
     return new Response(frames, { headers: { 'X-Session-Id': 'failed-opening', ...headers } });
   }
+
+  it('shows a preserved-progress error without sending end for an uncreated session', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ code: 'INVALID_COURSE_PROGRESS' }, { status: 409 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new LessonController();
+    const error = vi.fn(); controller.on('error', error);
+    await expect(controller.startLesson('food')).resolves.toBe(false);
+    expect(error).toHaveBeenCalledWith({ message: '这门课的学习进度暂时无法读取，已保留原记录。' });
+    expect(controller.getSessionId()).toBeNull();
+    expect(controller.getState()).toBe('idle');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['{broken', 'null', '[]'])('does not acknowledge a malformed done payload: %s', async (payload) => {
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => JSON.parse(options.body).action === 'end'
+      ? Response.json({ ok: true }) : stream(`event: done\ndata: ${payload}\n\n`)));
+    const controller = new LessonController();
+    await expect(controller.startLesson('food')).resolves.toBe(false);
+    expect(controller.getSessionId()).toBeNull();
+    expect(controller.getState()).toBe('idle');
+  });
 
   it.each(['http', 'error', 'truncated', 'network'])('keeps opening retryable after %s failure', async (failure) => {
     let failed = false;

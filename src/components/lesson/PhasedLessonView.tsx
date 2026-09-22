@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Course, PhaseName } from '@/types/course';
+import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import { LessonController } from '@/lib/voice/lesson-controller';
 import { PhasedLessonController } from '@/lib/voice/phased-lesson-controller';
 import { DoneCelebrateFrame } from './DoneCelebrateFrame';
@@ -14,9 +15,6 @@ interface PhasedLessonViewProps {
   course: Course;
 }
 
-interface ProgressSnapshot {
-  clearedCardIds: string[];
-}
 
 export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const router = useRouter();
@@ -71,7 +69,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     const onTransitionRetry = (needed: boolean) => setTransitionRetry(needed);
     const onIntroBusyChange = (busy: boolean) => setIntroBusy(busy);
     const onIntroActiveCardChange = (cardId: string | null) => setIntroActiveCardId(cardId);
-    const onProgress = (next: ProgressSnapshot) => {
+    const onProgress = (next: LessonProgressSnapshot) => {
       setClearedWordCount(next.clearedCardIds.filter((cardId) => wordCardIds.has(cardId)).length);
     };
     const onError = (err: { message: string }) => {

@@ -1,6 +1,6 @@
 import { Course } from '@/types/course';
 import { CourseProgressSnapshot, LessonMemory } from '@/types/session';
-import type { CourseProgressRow } from '@/lib/db/queries';
+import type { CourseProgressRow } from '@/types/session';
 
 // Session persistence (2026-07-20 PRD/design) — see .trellis/tasks/07-20-session-persistence.
 // NOTE: named `course-progress.ts` rather than the design doc's `progress-snapshot.ts` to

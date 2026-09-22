@@ -1,3 +1,5 @@
+import { serializeProgress } from '@/lib/agent/course-progress';
+import { createMemory } from '@/lib/agent/memory';
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import { buildProgressSnapshot, masteryStarsFromRatio } from './progress';
@@ -109,7 +111,7 @@ describe('buildProgressSnapshot — session persistence (R2 home status)', () =>
     db.prepare(`INSERT INTO lesson_logs VALUES ('l2','food','2026-07-20T11:00:00Z',NULL,4,'{}')`).run();
     db.prepare(
       `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'interactive', 0, '2026-07-20T11:05:00Z')`,
-    ).run(JSON.stringify({ clearedCardIds: ['apple'], passedQuizIds: [] }));
+    ).run(JSON.stringify({ ...serializeProgress(createMemory()), clearedCardIds: ['apple'], passedQuizIds: [] }));
 
     const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
     expect(c.timesStarted).toBe(2);
@@ -122,7 +124,7 @@ describe('buildProgressSnapshot — session persistence (R2 home status)', () =>
     db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-07-20T10:00:00Z',NULL,9,'{}')`).run();
     db.prepare(
       `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'reinforcement', 1, '2026-07-20T10:30:00Z')`,
-    ).run(JSON.stringify({ clearedCardIds: ['apple', 'milk'], passedQuizIds: [] }));
+    ).run(JSON.stringify({ ...serializeProgress(createMemory()), clearedCardIds: ['apple', 'milk'], passedQuizIds: [] }));
 
     const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
     expect(c.timesStarted).toBe(1);
@@ -134,7 +136,7 @@ describe('buildProgressSnapshot — session persistence (R2 home status)', () =>
   it('empty intro-only breakpoint is not resumable (misplaced welcome-back guard)', () => {
     db.prepare(
       `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'intro', 0, '2026-07-20T10:00:00Z')`,
-    ).run(JSON.stringify({ clearedCardIds: [], passedQuizIds: [] }));
+    ).run(JSON.stringify({ ...serializeProgress(createMemory()), clearedCardIds: [], passedQuizIds: [] }));
 
     const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
     expect(c.hasResume).toBe(false);

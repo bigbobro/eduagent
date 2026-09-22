@@ -1,4 +1,5 @@
 import { ToolAction } from './tools';
+import type { PhaseName } from './course';
 
 export type LessonPhase = 'opening' | 'review' | 'learning' | 'quiz' | 'closing';
 
@@ -46,7 +47,7 @@ export interface LessonMemory {
   wordPerformance: Map<string, WordPerf>;
   totalInteractions: number;
   // R3 (2026-07-20 session persistence PRD): reinforcement quiz ids answered correctly at
-  // least once, this session. Accumulates via recordQuizAnswer; drives isCourseComplete()
+  // least once across course resumes. Accumulates via recordQuizAnswer; drives isCourseComplete()
   // and lets a resumed reinforcement phase skip already-passed quizzes.
   passedQuizIds: string[];
 }
@@ -79,6 +80,14 @@ export interface CourseProgressSnapshot {
   wordPerformance: Array<[string, SerializedWordPerf]>;
   totalInteractions: number;
   passedQuizIds: string[];
+}
+
+export interface CourseProgressRow {
+  courseId: string;
+  snapshot: CourseProgressSnapshot;
+  phase: PhaseName;
+  completed: boolean;
+  updatedAt: string;
 }
 
 export interface InteractionLog {
