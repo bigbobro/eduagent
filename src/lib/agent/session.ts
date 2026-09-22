@@ -48,6 +48,7 @@ export function createSession(course: Course): Session {
     course,
     memory: initializeCardProgress(createMemory(), course),
     tokenUsage: freshTokenUsage(),
+    lessonInteractionCount: 0,
     startTime: new Date(),
     currentPhase: 'intro',
   };
@@ -71,6 +72,7 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
     course,
     memory,
     tokenUsage: freshTokenUsage(),
+    lessonInteractionCount: 0,
     startTime: new Date(),
     currentPhase: progress.phase,
   };
@@ -95,7 +97,7 @@ export function endSession(sessionId: string): void {
   if (!session) return;
   session.lifetime.abort();
   sessionStore.delete(sessionId);
-  finishLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+  finishLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
   // R1 (2026-07-20 session persistence): final breakpoint flush on a graceful end, mirroring
   // finishLessonLog. Redundant with the last commitTurn/recordQuizAnswer write in practice
   // (memory does not change between the last turn and 'end'), but matches the design doc's
@@ -132,7 +134,8 @@ export function recordQuizAnswer(
       llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
     },
   });
-  touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+  session.lessonInteractionCount += 1;
+  touchLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
   persistCourseProgress(session);
   return true;
 }
@@ -338,7 +341,8 @@ async function* respondWithoutLLM(
       tts: { latency: 0, characters: speech.length },
     },
   });
-  touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+  session.lessonInteractionCount += 1;
+  touchLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
 
   let totalAttempts = 0;
   session.memory.wordPerformance.forEach((p) => { totalAttempts += p.attempts; });
@@ -423,7 +427,8 @@ function commitTurn(
   });
   // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time
   // AND a non-empty token_usage (R1 2026-07-04 — session.tokenUsage was already updated above).
-  touchLessonLog(session.id, session.memory.totalInteractions, session.tokenUsage);
+  session.lessonInteractionCount += 1;
+  touchLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
   // R1 (2026-07-20 session persistence): same incremental-finalization reasoning — the
   // resume breakpoint must survive a non-graceful exit, not just a clean endLesson.
   persistCourseProgress(session);

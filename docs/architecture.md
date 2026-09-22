@@ -616,3 +616,7 @@ masteryStarsFromRatio(correct, attempts):
 ### Reduced-motion 策略
 
 `prefers-reduced-motion: reduce` 时,全局动画/过渡降级为 0.01ms,并显式关闭 `.magic-sparkle` 闪烁动画。
+
+## P2 数据一致性：单次课堂统计（2026-09-22）
+
+`Session.lessonInteractionCount` 只计算当前 lesson 已写入的互动，创建或续课时均从 0 开始，普通 turn、quiz 与强化阶段固定回复统一递增；touch/finish lesson 汇总只取本次值。`LessonMemory.totalInteractions` 继续保存课程累计教学上下文并进入断点，不替代单次日志计数。历史日志不自动回填或重算。

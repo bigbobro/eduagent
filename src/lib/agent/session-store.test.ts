@@ -6,7 +6,9 @@ import { InMemorySessionStore, Session } from './session-store';
 function makeSession(id: string): Session {
   return {
     id,
-    lifetime: new AbortController(),    courseId: foodCourse.id,
+    lifetime: new AbortController(),
+    lessonInteractionCount: 0,
+    courseId: foodCourse.id,
     course: foodCourse,
     memory: initializeCardProgress(createMemory(), foodCourse),
     tokenUsage: {
