@@ -209,9 +209,9 @@ controller.endLesson:
 
 ASR 上下文按实例传入并复制集合，不再通过模块全局 setter 传递。ASR/TTS 的 socket handler 校验连接身份，close 会结清等待中的 open Promise；旧重连计时器/完成事件不能操作新连接。阶段控制器和 React 等待中的操作也校验是否仍属于当前课堂。
 
-服务端 `Session.lifetime` 持有取消能力。`endSession` 先 abort 并从 SessionStore 移除，再执行已有日志/断点结束写入。`streamUserInput` 合并请求和 session 信号传给 LLM，在发布事件和实际提交前检查会话对象仍存活；生成器暂停在 actions yield 后也要再检查。普通 LLM 与固定回复两条路径都覆盖。取消流后 orchestrator 不再 enqueue/close；mock provider 也遵守 signal。
+服务端 `Session.lifetime` 持有取消能力。`endSession` 先 abort，公开 lookup 隐藏已关闭课堂；事务保存结束日志/断点成功后从 SessionStore 移除，失败则仅保留供 end 重试。`streamUserInput` 合并请求和 session 信号传给 LLM，在发布事件和实际提交前检查会话对象仍存活；生成器暂停在 actions yield 后也要再检查。普通 LLM 与固定回复两条路径都覆盖。取消流后 orchestrator 不再 enqueue/close；mock provider 也遵守 signal。
 
-这些边界阻止 end 返回后的旧 turn 写入，不改变现有多表提交的事务语义。结束 HTTP 未送达或进程崩溃不在此保证内；客户端本地释放不依赖服务端响应成功。
+这些边界阻止 end 返回后的旧 turn 写入；P2 的同步事务同时保护本轮多表提交与内存发布。结束 HTTP 未送达或进程崩溃不在此保证内；客户端本地释放不依赖服务端响应成功。
 
 
 ---
@@ -620,3 +620,9 @@ masteryStarsFromRatio(correct, attempts):
 ## P2 数据一致性：单次课堂统计（2026-09-22）
 
 `Session.lessonInteractionCount` 只计算当前 lesson 已写入的互动，创建或续课时均从 0 开始，普通 turn、quiz 与强化阶段固定回复统一递增；touch/finish lesson 汇总只取本次值。`LessonMemory.totalInteractions` 继续保存课程累计教学上下文并进入断点，不替代单次日志计数。历史日志不自动回填或重算。
+
+### 原子提交（P2，2026-09-22）
+
+普通 turn 的用户消息、教学状态和 token 用量先在草稿中计算，quiz 与固定回复使用同一 `commitSessionUpdate` 入口。同步 SQLite transaction 包含词表现、互动、lesson 汇总及断点；事务成功后才发布 live memory/计数/用量。事务不跨任何 await。LLM 等待期间或预览 yield 期间若有另一笔提交/阶段接受，revision 检查拒绝旧草稿，客户端可重试。
+
+speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:true}` 只在落盘后发送；失败为 SSE error / HTTP 500。正常教学规则和播放顺序不变。创建先写 lesson log 再发布 session；结束立即取消，事务保存 finish/断点成功后删除。结束落盘失败时课堂保持关闭，仅允许再次 end 尝试保存，不重新开放教学。多次请求的 exactly-once 去重不在本次范围。

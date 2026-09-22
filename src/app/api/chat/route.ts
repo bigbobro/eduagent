@@ -12,6 +12,15 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
   ensureInitialized();
   const body = await req.json();
+  try {
+    return await handleChatAction(body);
+  } catch (error) {
+    console.error('[chat] operation failed', { action: body.action, message: (error as Error).message });
+    return NextResponse.json({ error: '课堂操作未保存，请重试。' }, { status: 500 });
+  }
+}
+
+async function handleChatAction(body: any) {
   console.log('[chat]', 'action=' + body.action, 'courseId=' + (body.courseId ?? '-'), 'sessionId=' + (body.sessionId ?? '-'));
 
   if (body.action === 'start') {

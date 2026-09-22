@@ -9,6 +9,7 @@ export interface Session {
   memory: LessonMemory;
   tokenUsage: TokenUsage;
   lessonInteractionCount: number;
+  revision: number;
   startTime: Date;
   currentPhase: PhaseName;
 }

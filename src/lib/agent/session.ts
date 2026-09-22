@@ -14,6 +14,7 @@ import {
 import { deserializeProgress, isCourseComplete, serializeProgress } from './course-progress';
 import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/llm';
+import { getDb } from '@/lib/db';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 import {
   createLessonLog,
@@ -49,11 +50,12 @@ export function createSession(course: Course): Session {
     memory: initializeCardProgress(createMemory(), course),
     tokenUsage: freshTokenUsage(),
     lessonInteractionCount: 0,
+    revision: 0,
     startTime: new Date(),
     currentPhase: 'intro',
   };
-  sessionStore.save(session);
   createLessonLog(id, course.id);
+  sessionStore.save(session);
   return session;
 }
 
@@ -73,11 +75,12 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
     memory,
     tokenUsage: freshTokenUsage(),
     lessonInteractionCount: 0,
+    revision: 0,
     startTime: new Date(),
     currentPhase: progress.phase,
   };
-  sessionStore.save(session);
   createLessonLog(id, course.id);
+  sessionStore.save(session);
   console.log('[session] resumed from breakpoint', {
     courseId: course.id,
     sessionId: id,
@@ -89,26 +92,28 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
 }
 
 export function getSession(id: string): Session | undefined {
-  return sessionStore.get(id);
+  const session = sessionStore.get(id);
+  return session?.lifetime.signal.aborted ? undefined : session;
 }
 
 export function endSession(sessionId: string): void {
   const session = sessionStore.get(sessionId);
   if (!session) return;
+  // Cancellation is irreversible even if the final disk write fails. Keep the closed
+  // object available only to endSession so its final transaction can be retried.
   session.lifetime.abort();
+  getDb().transaction(() => {
+    finishLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
+    persistCourseProgress(session);
+  })();
   sessionStore.delete(sessionId);
-  finishLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
-  // R1 (2026-07-20 session persistence): final breakpoint flush on a graceful end, mirroring
-  // finishLessonLog. Redundant with the last commitTurn/recordQuizAnswer write in practice
-  // (memory does not change between the last turn and 'end'), but matches the design doc's
-  // explicit "endSession upserts once more for the final value" and costs one extra write.
-  persistCourseProgress(session);
 }
 
 export function setSessionPhase(sessionId: string, phase: PhaseName): void {
   const session = sessionStore.get(sessionId);
-  if (!session) return;
+  if (!session || session.lifetime.signal.aborted) return;
   session.currentPhase = phase;
+  session.revision += 1;
 }
 
 export function recordQuizAnswer(
@@ -119,24 +124,20 @@ export function recordQuizAnswer(
 ): boolean {
   const session = sessionStore.get(sessionId);
   if (!session || session.lifetime.signal.aborted) return false;
-  session.memory.totalInteractions += 1;
-  // R3 (2026-07-20 session persistence PRD): accumulate passed quiz ids — a resumed
-  // reinforcement phase skips these. Cumulative/dedup, never removed on a wrong answer.
-  if (correct && !session.memory.passedQuizIds.includes(quizId)) {
-    session.memory.passedQuizIds = [...session.memory.passedQuizIds, quizId];
-  }
-  insertInteraction(session.id, {
-    timestamp: new Date(),
-    userInput: `[quiz:${quizId} ${correct ? 'correct' : 'wrong'}] ${answer}`,
-    aiResponse: '',
-    actions: [],
-    modelCalls: {
-      llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
-    },
+  const nextMemory = {
+    ...session.memory,
+    totalInteractions: session.memory.totalInteractions + 1,
+    passedQuizIds: correct && !session.memory.passedQuizIds.includes(quizId)
+      ? [...session.memory.passedQuizIds, quizId] : session.memory.passedQuizIds,
+  };
+  commitSessionUpdate(session, nextMemory, session.tokenUsage, () => {
+    insertInteraction(session.id, {
+      timestamp: new Date(),
+      userInput: `[quiz:${quizId} ${correct ? 'correct' : 'wrong'}] ${answer}`,
+      aiResponse: '', actions: [],
+      modelCalls: { llm: { latency: 0, inputTokens: 0, outputTokens: 0 } },
+    });
   });
-  session.lessonInteractionCount += 1;
-  touchLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
-  persistCourseProgress(session);
   return true;
 }
 
@@ -150,6 +151,28 @@ function persistCourseProgress(session: Session): void {
     session.currentPhase,
     isCourseComplete(session.course, session.memory),
   );
+}
+
+function commitSessionUpdate(
+  session: Session,
+  memory: LessonMemory,
+  tokenUsage: TokenUsage,
+  writeRecords: () => void,
+): void {
+  const lessonInteractionCount = session.lessonInteractionCount + 1;
+  getDb().transaction(() => {
+    writeRecords();
+    touchLessonLog(session.id, lessonInteractionCount, tokenUsage);
+    upsertCourseProgress(session.courseId, serializeProgress(memory), session.currentPhase, isCourseComplete(session.course, memory));
+  })();
+  session.memory = memory;
+  session.tokenUsage = tokenUsage;
+  session.lessonInteractionCount = lessonInteractionCount;
+  session.revision += 1;
+}
+
+function requireRevision(session: Session, revision: number): void {
+  if (session.revision !== revision) throw new Error('课堂状态已更新，请重试。');
 }
 
 export type StreamUserEvent =
@@ -222,7 +245,8 @@ async function* streamSessionInput(
     return;
   }
 
-  session.memory = addUserMessage(session.memory, userText);
+  const revision = session.revision;
+  const memory = addUserMessage(session.memory, userText);
 
   // 2. LLM stream consumption
   const extractor = new StreamingSpeechExtractor();
@@ -231,8 +255,8 @@ async function* streamSessionInput(
   let llmLatency = 0;
   let inputBreakdown: PromptInputBreakdown | undefined;
   try {
-    const messages = getMessagesForLLM(session.memory);
-    const promptInput = buildPromptInput(session.course, session.memory, session.currentPhase, messages);
+    const messages = getMessagesForLLM(memory);
+    const promptInput = buildPromptInput(session.course, memory, session.currentPhase, messages);
     inputBreakdown = promptInput.breakdown;
     for await (const ev of streamLLM(promptInput.systemPrompt, messages, signal)) {
       if (!isTurnActive(session, signal)) return;
@@ -242,7 +266,7 @@ async function* streamSessionInput(
         llmLatency = ev.latency;
         inputBreakdown = buildPromptInput(
           session.course,
-          session.memory,
+          memory,
           session.currentPhase,
           messages,
           inputTokens,
@@ -258,6 +282,8 @@ async function* streamSessionInput(
 
   if (!isTurnActive(session, signal)) return;
 
+  requireRevision(session, revision);
+
   // 3. Finalize + sanitize
   const result = extractor.finalize();
   result.speech = sanitizeSpeech(result.speech);
@@ -272,7 +298,7 @@ async function* streamSessionInput(
   // 4. Run guard pipeline (ORDER SENSITIVE — see guards/index.ts)
   const initialCtx: GuardContext = {
     speech: result.speech, actions: result.actions, stateUpdate: result.state_update,
-    memory: session.memory, course: session.course, asrText: rawAsrText, currentPhase: session.currentPhase,
+    memory, course: session.course, asrText: rawAsrText, currentPhase: session.currentPhase,
     phaseOpening: opts.phaseOpening,
   };
   const finalCtx = runPipeline(initialCtx, [
@@ -289,6 +315,7 @@ async function* streamSessionInput(
 
   // A generator may be resumed after endSession while suspended at any yield above.
   if (!isTurnActive(session, signal)) return;
+  requireRevision(session, revision);
   // 6. Commit memory + accounting + log
   commitTurn(session, finalCtx, userText, asrResult, { inputTokens, outputTokens, llmLatency, inputBreakdown }, rawAsrText);
 
@@ -316,33 +343,28 @@ async function* respondWithoutLLM(
   asrResult: { latency: number; tokens: number } | undefined,
   signal: AbortSignal,
 ): AsyncGenerator<StreamUserEvent> {
+  const revision = session.revision;
   yield { type: 'speech-delta', text: speech };
   yield { type: 'speech-end' };
   yield { type: 'actions', actions: [], state_update: {} };
 
   if (!isTurnActive(session, signal)) return;
-  // Accounting mirrors commitTurn minus the LLM cost (never called) and any memory/card
-  // mutation (nothing was taught this turn — the LLM guard pipeline never ran). userText is
-  // deliberately NOT added to session.memory.messages — there is no assistant reply to it in
-  // the conversation's sense, so it would otherwise leave a dangling, unanswered turn in the
-  // LLM message history.
-  session.memory.totalInteractions += 1;
-  if (asrResult) { session.tokenUsage.asr.requests += 1; session.tokenUsage.asr.tokens += asrResult.tokens; }
-  session.tokenUsage.tts.requests += 1;
-  session.tokenUsage.tts.characters += speech.length;
-  insertInteraction(session.id, {
-    timestamp: new Date(),
-    userInput: userText,
-    aiResponse: speech,
-    actions: [],
-    modelCalls: {
-      asr: asrResult,
-      llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
-      tts: { latency: 0, characters: speech.length },
-    },
+  requireRevision(session, revision);
+  const memory = { ...session.memory, totalInteractions: session.memory.totalInteractions + 1 };
+  const usage = structuredClone(session.tokenUsage);
+  if (asrResult) { usage.asr.requests += 1; usage.asr.tokens += asrResult.tokens; }
+  usage.tts.requests += 1;
+  usage.tts.characters += speech.length;
+  commitSessionUpdate(session, memory, usage, () => {
+    insertInteraction(session.id, {
+      timestamp: new Date(), userInput: userText, aiResponse: speech, actions: [],
+      modelCalls: {
+        asr: asrResult,
+        llm: { latency: 0, inputTokens: 0, outputTokens: 0 },
+        tts: { latency: 0, characters: speech.length },
+      },
+    });
   });
-  session.lessonInteractionCount += 1;
-  touchLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
 
   let totalAttempts = 0;
   session.memory.wordPerformance.forEach((p) => { totalAttempts += p.attempts; });
@@ -364,72 +386,68 @@ function commitTurn(
   llm: { inputTokens: number; outputTokens: number; llmLatency: number; inputBreakdown?: PromptInputBreakdown },
   rawAsrText: string,
 ): void {
-  const beforePerformance = new Map(session.memory.wordPerformance);
+  const beforePerformance = new Map(ctx.memory.wordPerformance);
   // R-C 权威账本落库(2026-07-03 方案 A):commit 前快照,commit 后按差异同步 rc_*。
-  const beforeRcCorrect = { ...session.memory.cardCorrectCount };
-  const beforeRcProgress = { ...session.memory.cardProgress };
-  const beforeRcStreak = { ...session.memory.cardAttemptStreak };
-  session.memory = commitAssistantStreamResult(
-    session.memory, session.course, ctx.speech, ctx.actions, ctx.stateUpdate, rawAsrText
+  const beforeRcCorrect = { ...ctx.memory.cardCorrectCount };
+  const beforeRcProgress = { ...ctx.memory.cardProgress };
+  const beforeRcStreak = { ...ctx.memory.cardAttemptStreak };
+  const memory = commitAssistantStreamResult(
+    ctx.memory, session.course, ctx.speech, ctx.actions, ctx.stateUpdate, rawAsrText
   );
-  const assessment = ctx.stateUpdate.attempt_assessment;
-  if (assessment && ctx.stateUpdate.current_word) {
-    const before = beforePerformance.get(ctx.stateUpdate.current_word);
-    const after = session.memory.wordPerformance.get(ctx.stateUpdate.current_word);
-    if (after && (!before || after.attempts > before.attempts)) {
-      upsertWordPerformance(session.id, ctx.stateUpdate.current_word, assessment.result === 'correct');
+  const usage = structuredClone(session.tokenUsage);
+  usage.llm.requests += 1;
+  usage.llm.inputTokens += llm.inputTokens;
+  usage.llm.outputTokens += llm.outputTokens;
+  if (asrResult) { usage.asr.requests += 1; usage.asr.tokens += asrResult.tokens; }
+  usage.tts.requests += 1;
+  usage.tts.characters += ctx.speech.length;
+  commitSessionUpdate(session, memory, usage, () => {
+    const assessment = ctx.stateUpdate.attempt_assessment;
+    if (assessment && ctx.stateUpdate.current_word) {
+      const before = beforePerformance.get(ctx.stateUpdate.current_word);
+      const after = memory.wordPerformance.get(ctx.stateUpdate.current_word);
+      if (after && (!before || after.attempts > before.attempts)) {
+        upsertWordPerformance(session.id, ctx.stateUpdate.current_word, assessment.result === 'correct');
+      }
     }
-  }
-  // 任何 R2 命中 / 清卡 / streak 变化(含首个 wrong,让报告可判"已追踪")当轮落库。
-  // 键用 card.english 与 word_performance.word(LLM current_word)对齐。
-  for (const card of session.course.cards) {
-    if (card.kind !== 'word') continue;
-    const changed = (session.memory.cardCorrectCount[card.id] || 0) !== (beforeRcCorrect[card.id] || 0)
-      || session.memory.cardProgress[card.id] !== beforeRcProgress[card.id]
-      || (session.memory.cardAttemptStreak[card.id] || 0) !== (beforeRcStreak[card.id] || 0);
-    if (!changed) continue;
-    upsertWordRcState(
-      session.id,
-      card.english,
-      session.memory.cardCorrectCount[card.id] || 0,
-      session.memory.cardProgress[card.id] === 'cleared',
-    );
-  }
-  session.tokenUsage.llm.requests += 1;
-  session.tokenUsage.llm.inputTokens += llm.inputTokens;
-  session.tokenUsage.llm.outputTokens += llm.outputTokens;
-  if (asrResult) { session.tokenUsage.asr.requests += 1; session.tokenUsage.asr.tokens += asrResult.tokens; }
-  session.tokenUsage.tts.requests += 1;
-  session.tokenUsage.tts.characters += ctx.speech.length;
-  // R6 observability: persist per-turn guard activity (R-C rejects / suppressions /
-  // speech rewrites) into model_calls JSON so lesson reports can aggregate it.
-  const guards = {
-    ...(ctx.rcRejectedCardIds?.length ? { rcRejected: ctx.rcRejectedCardIds } : {}),
-    ...(ctx.rcSuppressedCardIds?.length ? { rcSuppressed: ctx.rcSuppressedCardIds } : {}),
-    ...(ctx.speechRewrite ? { speechRewrite: ctx.speechRewrite } : {}),
-  };
-  insertInteraction(session.id, {
-    timestamp: new Date(),
-    userInput: userText,
-    aiResponse: ctx.speech,
-    actions: ctx.actions,
-    modelCalls: {
-      asr: asrResult,
-      llm: {
-        latency: llm.llmLatency,
-        inputTokens: llm.inputTokens,
-        outputTokens: llm.outputTokens,
-        ...(llm.inputBreakdown ? { inputBreakdown: llm.inputBreakdown } : {}),
+    // 任何 R2 命中 / 清卡 / streak 变化(含首个 wrong,让报告可判"已追踪")当轮落库。
+    // 键用 card.english 与 word_performance.word(LLM current_word)对齐。
+    for (const card of session.course.cards) {
+      if (card.kind !== 'word') continue;
+      const changed = (memory.cardCorrectCount[card.id] || 0) !== (beforeRcCorrect[card.id] || 0)
+        || memory.cardProgress[card.id] !== beforeRcProgress[card.id]
+        || (memory.cardAttemptStreak[card.id] || 0) !== (beforeRcStreak[card.id] || 0);
+      if (!changed) continue;
+      upsertWordRcState(
+        session.id,
+        card.english,
+        memory.cardCorrectCount[card.id] || 0,
+        memory.cardProgress[card.id] === 'cleared',
+      );
+    }
+    // R6 observability: persist per-turn guard activity (R-C rejects / suppressions /
+    // speech rewrites) into model_calls JSON so lesson reports can aggregate it.
+    const guards = {
+      ...(ctx.rcRejectedCardIds?.length ? { rcRejected: ctx.rcRejectedCardIds } : {}),
+      ...(ctx.rcSuppressedCardIds?.length ? { rcSuppressed: ctx.rcSuppressedCardIds } : {}),
+      ...(ctx.speechRewrite ? { speechRewrite: ctx.speechRewrite } : {}),
+    };
+    insertInteraction(session.id, {
+      timestamp: new Date(),
+      userInput: userText,
+      aiResponse: ctx.speech,
+      actions: ctx.actions,
+      modelCalls: {
+        asr: asrResult,
+        llm: {
+          latency: llm.llmLatency,
+          inputTokens: llm.inputTokens,
+          outputTokens: llm.outputTokens,
+          ...(llm.inputBreakdown ? { inputBreakdown: llm.inputBreakdown } : {}),
+        },
+        tts: { latency: 0, characters: ctx.speech.length },
+        ...(Object.keys(guards).length ? { guards } : {}),
       },
-      tts: { latency: 0, characters: ctx.speech.length },
-      ...(Object.keys(guards).length ? { guards } : {}),
-    },
+    });
   });
-  // Incremental finalization so a tab-close/refresh/crash still leaves a non-NULL end_time
-  // AND a non-empty token_usage (R1 2026-07-04 — session.tokenUsage was already updated above).
-  session.lessonInteractionCount += 1;
-  touchLessonLog(session.id, session.lessonInteractionCount, session.tokenUsage);
-  // R1 (2026-07-20 session persistence): same incremental-finalization reasoning — the
-  // resume breakpoint must survive a non-graceful exit, not just a clean endLesson.
-  persistCourseProgress(session);
 }
