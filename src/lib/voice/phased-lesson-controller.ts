@@ -6,7 +6,7 @@ import { LessonController, type ResumeInfo } from './lesson-controller';
 
 export type { PhaseName } from '@/types/course';
 
-type EventName = 'phase-change' | 'intro-busy-change' | 'intro-active-card-change';
+type EventName = 'phase-change' | 'intro-busy-change' | 'intro-active-card-change' | 'transition-retry-change';
 type Listener<T = any> = (data: T) => void;
 
 interface ProgressSnapshot {
@@ -23,6 +23,8 @@ export class PhasedLessonController {
   private currentPhase: PhaseName = 'intro';
   private lastSnapshot: ProgressSnapshot | null = null;
   private pendingTransition: PhaseName | null = null;
+  private failedTransition: PhaseName | null = null;
+  private starting = false;
   private transitionInFlight: Promise<void> | null = null;
   private introStartupUnlockTimer: ReturnType<typeof setTimeout> | null = null;
   private introBusy = false;
@@ -73,6 +75,7 @@ export class PhasedLessonController {
   }
 
   async startLesson(): Promise<boolean> {
+    this.starting = true;
     this.setIntroBusy(true);
     this.armIntroStartupUnlockTimer();
     try {
@@ -83,11 +86,15 @@ export class PhasedLessonController {
         return false;
       }
       this.applyResumeInfo(this.v2.getResumeInfo());
+      this.starting = false;
+      if (this.v2.getState() === 'awaiting') this.onV2State('awaiting');
       return true;
     } catch {
       this.clearIntroStartupUnlockTimer();
       if (this.currentPhase === 'intro') this.setIntroBusy(false);
       return false;
+    } finally {
+      this.starting = false;
     }
   }
 
@@ -144,16 +151,16 @@ export class PhasedLessonController {
     this.setIntroBusy(true);
     this.setIntroActiveCardId(cardId);
     try {
-      await this.v2.sendCustomAction({
+      const result = await this.v2.sendCustomAction({
         action: 'message',
         text: `(请介绍 ${cardId})`,
       });
+      return result.ok;
     } finally {
       if (this.currentPhase === 'intro' && this.v2.getState() === 'awaiting') {
         this.setIntroBusy(false);
       }
     }
-    return true;
   }
 
   private emit(event: EventName, data: any): void {
@@ -184,7 +191,7 @@ export class PhasedLessonController {
   private onV2Progress = (snapshot: ProgressSnapshot) => {
     this.lastSnapshot = snapshot;
     this.maybeArmTransition();
-    if (this.pendingTransition && this.v2.getState() === 'awaiting') {
+    if (!this.starting && !this.transitionInFlight && !this.failedTransition && this.pendingTransition && this.v2.getState() === 'awaiting') {
       const target = this.pendingTransition;
       this.pendingTransition = null;
       void this.performTransition(target);
@@ -196,7 +203,7 @@ export class PhasedLessonController {
       this.setIntroBusy(state !== 'awaiting');
     }
 
-    if (state !== 'awaiting') {
+    if (this.starting || this.transitionInFlight || this.failedTransition || state !== 'awaiting') {
       return;
     }
     this.clearIntroStartupUnlockTimer();
@@ -246,37 +253,32 @@ export class PhasedLessonController {
     }
   }
 
-  private async performTransition(to: PhaseName): Promise<void> {
-    // Atomic check-and-set to prevent race condition from double transition calls
-    const existingTransition = this.transitionInFlight;
-    if (existingTransition) {
-      await existingTransition.catch(() => {});
-      if (to === this.currentPhase) return;
-      // After waiting, check again if another transition started
-      if (this.transitionInFlight && this.transitionInFlight !== existingTransition) return;
-    }
+  async retryTransition(): Promise<void> {
+    if (!this.failedTransition || this.transitionInFlight) return;
+    await this.performTransition(this.failedTransition);
+  }
 
-    const run = this.performTransitionNow(to);
+  private async performTransition(to: PhaseName): Promise<void> {
+    if (this.transitionInFlight) return this.transitionInFlight;
+    // Publish the in-flight guard before sending: synchronous state callbacks must not retry.
+    const run = Promise.resolve().then(() => this.performTransitionNow(to));
     this.transitionInFlight = run;
     try {
       await run;
     } finally {
-      if (this.transitionInFlight === run) {
-        this.transitionInFlight = null;
-      }
+      if (this.transitionInFlight === run) this.transitionInFlight = null;
     }
   }
 
   private async performTransitionNow(to: PhaseName): Promise<void> {
-    this.currentPhase = to;
-    this.setIntroBusy(false);
-    this.setIntroActiveCardId(null);
-    if (to === 'reinforcement') {
-      await this.v2.sendCustomAction({ action: 'phase-transition', to });
-      this.emit('phase-change', to);
-      return;
+    const result = await this.v2.sendCustomAction({ action: 'phase-transition', to });
+    this.failedTransition = result.ok ? null : to;
+    this.emit('transition-retry-change', this.failedTransition !== null);
+    if (result.acceptedPhase) {
+      this.currentPhase = result.acceptedPhase;
+      this.setIntroBusy(false);
+      this.setIntroActiveCardId(null);
+      this.emit('phase-change', this.currentPhase);
     }
-    this.emit('phase-change', to);
-    await this.v2.sendCustomAction({ action: 'phase-transition', to });
   }
 }

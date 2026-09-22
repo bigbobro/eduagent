@@ -25,6 +25,8 @@ describe('POST /api/chat action=phase-transition', () => {
 
     expect(getSession(session.id)?.currentPhase).toBe('interactive');
     expect(res.headers.get('Content-Type')).toContain('event-stream');
+    expect(res.headers.get('X-Lesson-Phase')).toBe('interactive');
+    expect(await res.text()).toContain('event: done');
     endSession(session.id);
   });
 

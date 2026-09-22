@@ -8,13 +8,15 @@ import { toPictureCardData } from '@/components/magic/cardData';
 import { useStaticPromptSpeech } from './useStaticPromptSpeech';
 
 interface QuizPickWordFrameProps {
+  disabled?: boolean;
+  attempt?: number;
   quiz: Extract<Quiz, { type: 'pick-word' }>;
   course: Course;
   controller: LessonController;
   onAnswer: (result: { correct: boolean; picked: string }) => void;
 }
 
-export function QuizPickWordFrame({ quiz, course, controller, onAnswer }: QuizPickWordFrameProps) {
+export function QuizPickWordFrame({ quiz, course, controller, onAnswer, disabled = false, attempt = 0 }: QuizPickWordFrameProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Synchronous guard: a fast double-click fires two onClicks before selectedId re-renders,
   // so gate on a ref to ensure onAnswer fires at most once per quiz.
@@ -23,12 +25,12 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer }: QuizPi
   const options = useMemo(() => buildOptions(wordCards, quiz), [wordCards, quiz]);
   const promptText = useMemo(() => buildPickWordPromptText(quiz, course), [course, quiz]);
   const { state, promptPlaying } = useStaticPromptSpeech(controller, promptText, quiz.id);
-  const locked = promptPlaying || state === 'quiz-speaking';
+  const locked = disabled || promptPlaying || state === 'quiz-speaking';
 
   useEffect(() => {
     setSelectedId(null);
     answeredRef.current = false;
-  }, [quiz.id]);
+  }, [quiz.id, attempt]);
 
   return (
     <div className="grid h-full w-full grid-cols-[1fr_320px] gap-7 bg-paperDeep px-8 py-8 text-ink">

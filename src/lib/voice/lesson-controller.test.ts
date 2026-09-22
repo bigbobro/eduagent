@@ -38,6 +38,7 @@ const ttsInstances = vi.hoisted(() => [] as Array<{
   startSession: ReturnType<typeof vi.fn>;
   sendText: ReturnType<typeof vi.fn>;
   finishSession: ReturnType<typeof vi.fn>;
+  cancelSession: ReturnType<typeof vi.fn>;
   emit: (event: string, payload?: any) => void;
 }>);
 
@@ -49,6 +50,7 @@ vi.mock('./tts-client', () => {
     startSession = vi.fn();
     sendText = vi.fn();
     finishSession = vi.fn();
+    cancelSession = vi.fn();
 
     constructor() {
       ttsInstances.push(this);
@@ -88,9 +90,10 @@ vi.mock('@/lib/audio/recorder', () => ({
 function sseResponse(): Response {
   return new Response(new ReadableStream<Uint8Array>({
     start(controller) {
+      controller.enqueue(new TextEncoder().encode('event: done\ndata: {}\n\n'));
       controller.close();
     },
-  }), { status: 200 });
+  }), { status: 200, headers: { 'X-Session-Id': 'session-1' } });
 }
 
 describe('LessonController', () => {
@@ -187,7 +190,7 @@ describe('LessonController', () => {
 
     await expect(controller.startLesson('food')).resolves.toBe(false);
 
-    expect(errors).toContain('Failed to start lesson');
+    expect(errors).toContain('课堂暂时没准备好,再试一次吧');
     expect(states).toContain('greeting');
     expect(states).toContain('idle');
     expect(controller.getState()).toBe('idle');
@@ -278,6 +281,7 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
   function resumeSseResponse(resumeInfo: Record<string, unknown> | null): Response {
     return new Response(new ReadableStream<Uint8Array>({
       start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: done\ndata: {}\n\n'));
         controller.close();
       },
     }), {
@@ -321,7 +325,7 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
 
   it('degrades to null on a malformed X-Resume-Info header instead of throwing', async () => {
     const res = new Response(new ReadableStream<Uint8Array>({
-      start(c) { c.close(); },
+      start(c) { c.enqueue(new TextEncoder().encode('event: done\ndata: {}\n\n')); c.close(); },
     }), { status: 200, headers: { 'X-Session-Id': 'test-session', 'X-Resume-Info': '{not json' } });
     vi.stubGlobal('fetch', vi.fn(async () => res));
     const controller = new LessonController();
@@ -385,10 +389,9 @@ describe('R1: actions buffered until TTS session-finished', () => {
     const actionsReceived: any[] = [];
     controller.on('actions', (a) => actionsReceived.push(a));
 
-    // Simulate startLesson consuming SSE
-    // We'll call consumeSSE directly via the chat fetch path
-    const res = await fetch('/api/chat', { method: 'POST', body: '{}' });
-    await (controller as any).consumeSSE((res as any).body, () => {});
+    // Exercise the public command path with a complete acknowledged SSE turn.
+    (controller as any).sessionId = 'session-1';
+    await expect(controller.sendCustomAction({ action: 'message', text: 'hello' })).resolves.toEqual({ ok: true });
 
     // Actions should be buffered — not yet emitted because session-finished hasn't fired
     expect(actionsReceived).toHaveLength(0);
@@ -408,8 +411,8 @@ describe('R1: actions buffered until TTS session-finished', () => {
     const actionsReceived: any[] = [];
     controller.on('actions', (a) => actionsReceived.push(a));
 
-    const res = await fetch('/api/chat', { method: 'POST', body: '{}' });
-    await (controller as any).consumeSSE((res as any).body, () => {});
+    (controller as any).sessionId = 'session-1';
+    await expect(controller.sendCustomAction({ action: 'message', text: 'hello' })).resolves.toEqual({ ok: true });
 
     // Still buffered
     expect(actionsReceived).toHaveLength(0);
@@ -433,8 +436,8 @@ describe('R1: actions buffered until TTS session-finished', () => {
     (controller as any).bindTtsHandlers();
     (controller as any).courseId = 'animals';
 
-    const res = await fetch('/api/chat', { method: 'POST', body: '{}' });
-    await (controller as any).consumeSSE((res as any).body, () => {});
+    (controller as any).sessionId = 'session-1';
+    await expect(controller.sendCustomAction({ action: 'message', text: 'hello' })).resolves.toEqual({ ok: true });
     ttsInstances[0].emit('session-finished');
 
     expect(setAsrSessionContextMock).toHaveBeenLastCalledWith({
@@ -464,6 +467,7 @@ describe('R1: actions buffered until TTS session-finished', () => {
     (controller as any).bindTtsHandlers();
     (controller as any).sessionId = 'test-session';
     (controller as any).pendingActions = [{ tool: 'show_card', params: { card_id: 'milk' } }];
+    (controller as any).sseCommitted = true;
 
     const actionsReceived: any[] = [];
     controller.on('actions', (a) => actionsReceived.push(a));
@@ -529,6 +533,7 @@ describe('§1 loop-reliability fixes', () => {
       (controller as any).courseId = 'animals';
       (controller as any).setState('speaking');
       (controller as any).pendingActions = [{ tool: 'show_card', params: { card_id: 'dog' } }];
+      (controller as any).sseCommitted = true;
       const actionsReceived: any[] = [];
       controller.on('actions', (a) => actionsReceived.push(a));
 
@@ -606,11 +611,11 @@ describe('§1 loop-reliability fixes', () => {
     const errors: string[] = [];
     controller.on('error', (err) => errors.push(err.message));
 
-    const res = await fetch('/api/chat', { method: 'POST', body: '{}' });
-    await (controller as any).consumeSSE((res as any).body, () => {});
+    (controller as any).sessionId = 'session-1';
+    await expect(controller.sendCustomAction({ action: 'message', text: 'hello' })).resolves.toEqual({ ok: false });
 
     expect(controller.getState()).toBe('awaiting');
-    expect(errors).toContain('我有点没反应过来…我们再聊一句?');
+    expect(errors).toContain('我有点没反应过来…再试一次吧');
   });
 });
 
@@ -636,5 +641,57 @@ describe('thinking wait behavior', () => {
     await (controller as any).handleAsrFinal('cat');
 
     expect((controller as any).player.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('command acknowledgements', () => {
+  beforeEach(() => { ttsInstances.length = 0; });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  function stream(frames: string, headers: Record<string, string> = {}): Response {
+    return new Response(frames, { headers: { 'X-Session-Id': 'failed-opening', ...headers } });
+  }
+
+  it.each(['http', 'error', 'truncated', 'network'])('keeps opening retryable after %s failure', async (failure) => {
+    let failed = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => {
+      if (JSON.parse(options.body).action === 'end') return Response.json({ ok: true });
+      if (failed) return stream('event: done\ndata: {}\n\n');
+      failed = true;
+      if (failure === 'network') throw new TypeError('network');
+      if (failure === 'http') return new Response('', { status: 500 });
+      return stream(failure === 'error' ? 'event: error\ndata: {"message":"unavailable"}\n\n' : 'event: speech-delta\ndata: {"text":"Hi"}\n\n');
+    }));
+    const controller = new LessonController();
+    await expect(controller.startLesson('food')).resolves.toBe(false);
+    expect(controller.getState()).toBe('idle');
+    expect(controller.getSessionId()).toBeNull();
+    await expect(controller.startLesson('food')).resolves.toBe(true);
+    await controller.endLesson();
+  });
+
+  it('retains the accepted phase when its opening SSE fails and drops unconfirmed actions', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => stream('event: actions\ndata: {"actions":[{"tool":"show_card","params":{"card_id":"milk"}}]}\n\nevent: error\ndata: {"message":"failed"}\n\n', { 'X-Lesson-Phase': 'interactive' })));
+    const controller = new LessonController();
+    (controller as any).sessionId = 'session-1';
+    (controller as any).bindTtsHandlers();
+    const actions = vi.fn();
+    controller.on('actions', actions);
+    await expect(controller.sendCustomAction({ action: 'phase-transition', to: 'interactive' })).resolves.toEqual({ ok: false, acceptedPhase: 'interactive' });
+    ttsInstances[0].emit('session-finished');
+    expect(actions).not.toHaveBeenCalled();
+    expect(controller.getState()).toBe('awaiting');
+  });
+
+  it.each(['http', 'network', 'invalid', 'success'])('checks quiz %s acknowledgement', async (kind) => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      if (kind === 'network') throw new TypeError('network');
+      if (kind === 'http') return new Response('', { status: 500 });
+      return Response.json({ ok: kind === 'success' });
+    }));
+    const controller = new LessonController();
+    (controller as any).sessionId = 'session-1';
+    await expect(controller.submitQuizAnswer('q1', 'apple', true)).resolves.toEqual({ ok: kind === 'success' });
   });
 });

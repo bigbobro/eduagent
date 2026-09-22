@@ -15,6 +15,7 @@ export function streamUserInputToSSE(
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const ac = new AbortController();
+  let canceled = false;
 
   const sidTag = sessionId.slice(0, 8);
 
@@ -22,6 +23,7 @@ export function streamUserInputToSSE(
     async start(controller) {
       try {
         for await (const ev of streamUserInput(sessionId, userText, asrResult, ac.signal, rawAsrText, opts)) {
+          if (canceled) break;
           if (ev.type === 'speech-delta') {
             // session yields the whole speech as a single delta; log it directly.
             const s = ev.text.replace(/\s+/g, ' ').trim();
@@ -37,14 +39,15 @@ export function streamUserInputToSSE(
           controller.enqueue(encoder.encode(frame));
         }
       } catch (err) {
-        controller.enqueue(
+        if (!canceled) controller.enqueue(
           encoder.encode(sseFrame('error', { message: (err as Error).message }))
         );
       } finally {
-        controller.close();
+        if (!canceled) controller.close();
       }
     },
     cancel() {
+      canceled = true;
       ac.abort();
     },
   });

@@ -23,6 +23,8 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const v2Ref = useRef<LessonController | null>(null);
   const phasedRef = useRef<PhasedLessonController | null>(null);
   const [phase, setPhase] = useState<PhaseName>('intro');
+  const [transitionRetry, setTransitionRetry] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [started, setStarted] = useState(false);
   const [introBusy, setIntroBusy] = useState(false);
   const [introActiveCardId, setIntroActiveCardId] = useState<string | null>(null);
@@ -66,6 +68,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
         }
       }
     };
+    const onTransitionRetry = (needed: boolean) => setTransitionRetry(needed);
     const onIntroBusyChange = (busy: boolean) => setIntroBusy(busy);
     const onIntroActiveCardChange = (cardId: string | null) => setIntroActiveCardId(cardId);
     const onProgress = (next: ProgressSnapshot) => {
@@ -82,6 +85,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     v2.on('progress', onProgress);
     v2.on('error', onError);
     phased.on('phase-change', onPhaseChange);
+    phased.on('transition-retry-change', onTransitionRetry);
     phased.on('intro-busy-change', onIntroBusyChange);
     phased.on('intro-active-card-change', onIntroActiveCardChange);
     return () => {
@@ -89,6 +93,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
       v2.off('error', onError);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       phased.off('phase-change', onPhaseChange);
+      phased.off('transition-retry-change', onTransitionRetry);
       phased.off('intro-busy-change', onIntroBusyChange);
       phased.off('intro-active-card-change', onIntroActiveCardChange);
       phased.endLesson().catch(() => {});
@@ -115,6 +120,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
 
   const handleLeave = () => router.push('/');
   const handleRestart = () => {
+    setTransitionRetry(false);
     setStarted(false);
     setPhase('intro');
     setIntroBusy(false);
@@ -127,7 +133,6 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
     setLessonRun((run) => run + 1);
   };
   const v2 = v2Ref.current;
-  const sessionId = v2?.getSessionId() || '';
 
   return (
     <main className="w-screen h-screen relative">
@@ -154,6 +159,17 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
       )}
 
       <div className="absolute inset-0 top-14">
+        {transitionRetry && (
+          <div role="alert" className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-paper text-ink">
+            <p>老师还没准备好下一步,再试一次吧</p>
+            <button type="button" disabled={retrying} className="rounded-paper-md border-2 border-ink bg-butter px-5 py-3 focus-visible:outline" onClick={async () => {
+              setRetrying(true);
+              try { await phasedRef.current?.retryTransition(); } finally { setRetrying(false); }
+            }}>
+              {retrying ? '准备中…' : '再试一次'}
+            </button>
+          </div>
+        )}
         {!started && (
           <IntroFrame
             course={course}
@@ -163,7 +179,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
             onStart={handleStart}
           />
         )}
-        {started && phase === 'intro' && (
+        {started && !transitionRetry && phase === 'intro' && (
           <IntroFrame
             course={course}
             locked={introBusy}
@@ -172,7 +188,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
             started
           />
         )}
-        {started && phase === 'interactive' && v2 && (
+        {started && !transitionRetry && phase === 'interactive' && v2 && (
           <LessonMandalaV2
             course={course}
             controller={v2}
@@ -180,16 +196,15 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
             initialClearedCardIds={resumeClearedCardIds}
           />
         )}
-        {started && phase === 'reinforcement' && v2 && (
+        {started && !transitionRetry && phase === 'reinforcement' && v2 && (
           <ReinforcementFlow
             course={course}
             controller={v2}
-            sessionId={sessionId}
             passedQuizIds={resumePassedQuizIds}
             onAllDone={() => phasedRef.current?.completeReinforcement()}
           />
         )}
-        {started && phase === 'done' && (
+        {started && !transitionRetry && phase === 'done' && (
           <DoneCelebrateFrame
             starsEarned={Math.min(5, clearedWordCount)}
             totalStars={5}

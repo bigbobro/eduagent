@@ -119,6 +119,7 @@ vi.mock('@/lib/voice/phased-lesson-controller', () => {
     }
 
     async endLesson() {}
+    async retryTransition() { this.emit('transition-retry-change', false); }
     async requestIntroCard() { return true; }
 
     async completeReinforcement() {
@@ -156,6 +157,16 @@ describe('PhasedLessonView', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /按住 Space 跟我读/ })).toBeTruthy();
     });
+  });
+
+  it('offers a working retry control when the phase controller reports a failed transition', async () => {
+    render(<PhasedLessonView course={foodCourse} />);
+    fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
+    await screen.findByRole('button', { name: /按住 Space 跟我读/ });
+    act(() => phasedInstances[0].emit('transition-retry-change', true));
+    expect(screen.queryByRole('button', { name: /按住 Space 跟我读/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '再试一次' }));
+    expect(await screen.findByRole('button', { name: /按住 Space 跟我读/ })).toBeTruthy();
   });
 
   it('returns to the start screen when lesson startup fails', async () => {

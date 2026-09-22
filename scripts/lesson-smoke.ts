@@ -127,13 +127,14 @@ function smokeSse(actions: Array<{ tool: string; params: Record<string, string> 
 
 async function installBrowserMocks(page: Page): Promise<void> {
   await page.route('**/api/chat', async (route) => {
-    const body = JSON.parse(route.request().postData() || '{}') as { action?: string };
+    const body = JSON.parse(route.request().postData() || '{}') as { action?: string; to?: PhaseName };
     await route.fulfill({
       status: 200,
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'X-Session-Id': 'smoke-ui-session',
+        ...(body.action === 'phase-transition' && body.to ? { 'X-Lesson-Phase': body.to } : {}),
       },
       body: smokeSse(body.action === 'start' ? [{ tool: 'show_card', params: { card_id: 'cat' } }] : []),
     });

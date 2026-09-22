@@ -1,6 +1,7 @@
 'use client';
 
 import { v4 as uuidv4 } from 'uuid';
+import type { PhaseName } from '@/types/course';
 import { ToolAction } from '@/types/tools';
 import { AsrClient, setAsrSessionContext } from './asr-client';
 import { TtsClient } from './tts-client';
@@ -14,6 +15,11 @@ export type LessonStateName =
 // R1 (2026-07-20 session persistence, frontend delivery): parsed from the `X-Resume-Info`
 // response header that `/api/chat` action:'start' sends only when it resumed an incomplete
 // course_progress breakpoint (see src/app/api/chat/route.ts). Absent header → no resume.
+export interface LessonCommandResult {
+  ok: boolean;
+  acceptedPhase?: PhaseName;
+}
+
 export interface ResumeInfo {
   resumed: true;
   phase: string;
@@ -78,6 +84,7 @@ export class LessonController {
   private speechStreamFinished = false;
   private routeCurrentAsrToChat = true;
   private pendingActions: ToolAction[] | null = null;
+  private sseCommitted = false;
   private listenStartup: { stopRequestedAt: number | null } | null = null;
   private courseId: string | null = null;
   private currentAsrCardId: string | null = null;
@@ -145,24 +152,23 @@ export class LessonController {
     ]);
     this.bindTtsHandlers();
 
-    // 2) 调 /api/chat?action=start,跑开场白
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'start', courseId }),
-    });
-    if (!res.ok || !res.body) {
-      this.emit('error', { message: 'Failed to start lesson' });
-      this.setState('idle');
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start', courseId }),
+      });
+      if (!res.ok || !res.body) throw new Error(`Start failed: ${res.status}`);
+      this.sessionId = res.headers.get('X-Session-Id');
+      this.resumeInfo = parseResumeInfo(res.headers.get('X-Resume-Info'));
+      await this.consumeSSE(res.body, () => {});
+      return true;
+    } catch (error) {
+      console.warn('[lesson] start failed:', error);
+      this.emit('error', { message: '课堂暂时没准备好,再试一次吧' });
+      await this.endLesson();
       return false;
     }
-    this.sessionId = res.headers.get('X-Session-Id');
-    this.resumeInfo = parseResumeInfo(res.headers.get('X-Resume-Info'));
-
-    await this.consumeSSE(res.body, /* afterDone= */ () => {
-      // greeting 不立刻切到 awaiting,等 TTS session-finished 来了再切
-    });
-    return true;
   }
 
   async endLesson(): Promise<void> {
@@ -203,18 +209,58 @@ export class LessonController {
   /**
    * Send a custom chat action and consume the returned SSE through the existing TTS/action path.
    */
-  async sendCustomAction(body: Record<string, any>): Promise<void> {
-    if (!this.sessionId) throw new Error('Session not started');
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, sessionId: this.sessionId }),
-    });
-    if (!res.ok || !res.body) {
-      this.emit('error', { message: `Action ${body.action} failed: ${res.status}` });
-      return;
+  async sendCustomAction(body: Record<string, unknown>): Promise<LessonCommandResult> {
+    let acceptedPhase: PhaseName | undefined;
+    try {
+      if (!this.sessionId) throw new Error('Session not started');
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, sessionId: this.sessionId }),
+      });
+      if (!res.ok || !res.body) throw new Error(`Action ${body.action} failed: ${res.status}`);
+      const phase = res.headers.get('X-Lesson-Phase');
+      if (phase === 'intro' || phase === 'interactive' || phase === 'reinforcement' || phase === 'done') {
+        acceptedPhase = phase;
+      }
+      if (body.action === 'phase-transition' && acceptedPhase !== body.to) {
+        throw new Error('Phase acknowledgement missing or mismatched');
+      }
+      await this.consumeSSE(res.body, () => {});
+      return { ok: true, acceptedPhase };
+    } catch (error) {
+      await this.recoverCommand(error);
+      return { ok: false, acceptedPhase };
     }
-    await this.consumeSSE(res.body, () => {});
+  }
+
+  async submitQuizAnswer(quizId: string, answer: string, correct: boolean): Promise<LessonCommandResult> {
+    try {
+      if (!this.sessionId) throw new Error('Session not started');
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'quiz-answer', sessionId: this.sessionId, quizId, answer, correct }),
+      });
+      if (!res.ok || (await res.json()).ok !== true) throw new Error(`Quiz acknowledgement failed: ${res.status}`);
+      return { ok: true };
+    } catch (error) {
+      console.warn('[lesson] quiz save failed:', error);
+      return { ok: false };
+    }
+  }
+
+  private async recoverCommand(error: unknown): Promise<void> {
+    console.warn('[lesson] command failed:', error);
+    this.pendingActions = null;
+    this.sseCommitted = false;
+    this.speechStreamFinished = false;
+    this.timers.clear('speechFinish');
+    this.tts.cancelSession();
+    await this.player.stop();
+    this.routeCurrentAsrToChat = true;
+    this.emit('error', { message: '我有点没反应过来…再试一次吧' });
+    this.setState('awaiting');
   }
 
   getSessionId(): string | null {
@@ -464,9 +510,7 @@ export class LessonController {
       });
     } catch (e) {
       if ((e as any).name !== 'AbortError') {
-        this.pendingActions = null;
-        this.emit('error', { message: '我有点没反应过来…我们再聊一句?' });
-        this.setState('awaiting');
+        await this.recoverCommand(e);
       }
     } finally {
       this.clearChatWatchdog();
@@ -524,6 +568,8 @@ export class LessonController {
     let buf = '';
     let ttsStarted = false;
     let firstSpeech = true;
+    let completed = false;
+    this.sseCommitted = false;
 
     const ensureTtsSession = () => {
       if (!ttsStarted) {
@@ -563,15 +609,23 @@ export class LessonController {
           if (!event) continue;
           let payload: any = {};
           try { payload = JSON.parse(data); } catch {}
+          if (event === 'error') throw new Error(payload.message || 'Lesson stream failed');
+          if (event === 'done') {
+            completed = true;
+            this.sseCommitted = true;
+          }
           this.handleSseEvent(event, payload, ensureTtsSession, onFirstSpeech);
+          if (completed) return;
         }
       }
     } finally {
       // Always release the reader lock, even if read() throws or the stream is aborted —
       // otherwise the lock leaks and afterDone's continuation is silently skipped.
+      if (completed) afterDone();
+      void reader.cancel().catch(() => {});
       reader.releaseLock();
     }
-    afterDone();
+    throw new Error('Lesson stream ended without done');
   }
 
   private handleSseEvent(
@@ -603,17 +657,7 @@ export class LessonController {
         this.tts.finishSession();
         this.armSpeechFinishFallback();
         break;
-      case 'error':
-        // Server-side failure (LLM timeout, session lost, ...). Log the raw reason for debugging
-        // but show the child a gentle nudge, and recover if we were still waiting on the response.
-        console.warn('[lesson] sse error:', payload.message);
-        this.emit('error', { message: '我有点没反应过来…我们再聊一句?' });
-        if (this.state === 'thinking' || this.state === 'speaking') {
-          this.pendingActions = null;
-          this.routeCurrentAsrToChat = true;
-          this.setState('awaiting');
-        }
-        break;
+
     }
   }
 
@@ -630,7 +674,7 @@ export class LessonController {
   // path that ends a TTS speech turn (session-finished / error / session-lost / fallback timer)
   // so the on-screen card never desyncs from what the teacher just said.
   private flushPendingActions(): void {
-    if (!this.pendingActions) return;
+    if (!this.pendingActions || !this.sseCommitted) return;
     this.syncAsrSessionContextFromActions(this.pendingActions);
     this.emit('actions', this.pendingActions);
     this.pendingActions = null;

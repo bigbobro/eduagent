@@ -108,6 +108,7 @@ export async function POST(req: NextRequest) {
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
+        'X-Lesson-Phase': session.currentPhase,
         'Cache-Control': 'no-cache, no-transform',
         'Connection': 'keep-alive',
       },

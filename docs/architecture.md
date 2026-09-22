@@ -104,6 +104,14 @@ PhasedLessonView mount → new LessonController → new PhasedLessonController
   │                   ◀── SessionFinished (event=152) → state→awaiting
 ```
 
+### 3.1a 课堂操作确认（2026-09-22）
+
+`LessonController.startLesson()` 只有收到 SSE `done` 才返回 true；HTTP 错误、SSE `error`、缺少 `done` 的 EOF 和网络拒绝均清理失败开场并返回 false，页面恢复开课按钮。`sendCustomAction()` 返回 `{ ok, acceptedPhase? }`，失败释放忙态并丢弃未确认 actions。卡片动作必须同时满足 SSE 已确认与原有 TTS 释放条件。
+
+转场 route 在更新 `Session.currentPhase` 后返回 `X-Lesson-Phase`。这个头确认阶段已在服务端接受，不代表开场语音成功或断点已经持久化。`PhasedLessonController` 不再提前改阶段；未确认失败保留原阶段，已接受但语音失败则保留服务端阶段。页面显示“再试一次”，由用户触发单次重试，避免 awaiting 事件自动循环重发。
+
+强化答题统一调用 `LessonController.submitQuizAnswer(quizId, answer, correct)`，HTTP 成功且 JSON `{ok:true}` 才推进题号/错答次数/完成。保存中及保存失败时锁住新的作答，失败保留原答案并提供“重试保存”；保存失败不算答错。网络响应丢失时服务端是否已写入不确定，本实现不自动重发，也不承诺跨断网的持久化 exactly-once。
+
 ### 3.1b 断点续课恢复(2026-07-20)
 
 `POST /api/chat?action=start` 每门课查 `course_progress`:
@@ -168,7 +176,7 @@ ASR final 到达 client
             done → tts.finishSession (event=102) + armSpeechFinishFallback(1.5s)
               ◀── SessionFinished (event=152) → flushPendingActions + setState('awaiting')
               (若 finish 帧丢失:1.5s 兜底也 flushPendingActions + 回 awaiting,避免卡/词错位)
-            error → console.warn 原因 + 对孩子显示友好提示 + thinking/speaking 自救回 awaiting
+            error / 无 done 截断 → 命令失败，丢弃未确认 actions、停止失败语音、恢复操作入口
 ```
 
 强化巩固里的 `repeat-after-me` 复用同一套 ASR 录音管线,但调用
@@ -481,6 +489,8 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 ---
 
 ## 10. 文件演进历史(粗粒度)
+
+- 2026-09-22 — P1 第一批：课堂操作明确确认成功，转场区分阶段接受与开场语音完成，quiz 保存失败可重试且不推进；SSE reader 取消后 orchestrator 不再写已关闭的流。
 
 - 2026-05-01 — 初版语音管线实施 + sync 文档(README/TODO/benchmarks)
 - 2026-05-01 — **E2E 验收期间多处集成 bug 修复**(架构定型的关键改动)

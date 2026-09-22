@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
-import type { ResumeInfo } from './lesson-controller';
+import type { LessonCommandResult, ResumeInfo } from './lesson-controller';
 import { PhasedLessonController, PhaseName } from './phased-lesson-controller';
 
 function mockV2(resumeInfo: ResumeInfo | null = null) {
@@ -22,7 +22,7 @@ function mockV2(resumeInfo: ResumeInfo | null = null) {
     endLesson: vi.fn(async () => {}),
     startListening: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
-    sendCustomAction: vi.fn(async () => {}),
+    sendCustomAction: vi.fn(async (body: { to?: PhaseName }): Promise<LessonCommandResult> => ({ ok: true, acceptedPhase: body.to })),
     getSessionId: vi.fn(() => 'mock-session'),
     getState: vi.fn(() => state),
     // R1 (2026-07-20 session persistence): defaults to "no resume" so existing tests keep
@@ -38,6 +38,31 @@ describe('PhasedLessonController phase transitions', () => {
   beforeEach(() => {
     v2 = mockV2();
     ctrl = new PhasedLessonController(v2 as any, foodCourse);
+  });
+
+  it('keeps a rejected transition on the original phase and retries once on request', async () => {
+    await ctrl.startLesson();
+    v2.sendCustomAction.mockResolvedValueOnce({ ok: false });
+    v2.emit('state', 'awaiting');
+    await vi.waitFor(() => expect(v2.sendCustomAction).toHaveBeenCalledTimes(1));
+    expect(ctrl.getCurrentPhase()).toBe('intro');
+    v2.emit('state', 'awaiting');
+    expect(v2.sendCustomAction).toHaveBeenCalledTimes(1);
+    await ctrl.retryTransition();
+    expect(ctrl.getCurrentPhase()).toBe('interactive');
+    expect(v2.sendCustomAction).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the server-accepted phase if only the opening speech fails', async () => {
+    await ctrl.startLesson();
+    const retry = vi.fn();
+    ctrl.on('transition-retry-change', retry);
+    v2.sendCustomAction.mockResolvedValueOnce({ ok: false, acceptedPhase: 'interactive' });
+    v2.emit('state', 'awaiting');
+    await vi.waitFor(() => expect(ctrl.getCurrentPhase()).toBe('interactive'));
+    expect(retry).toHaveBeenLastCalledWith(true);
+    await ctrl.retryTransition();
+    expect(retry).toHaveBeenLastCalledWith(false);
   });
 
   it('starts at phase=intro', async () => {
@@ -149,8 +174,8 @@ describe('PhasedLessonController phase transitions', () => {
   it('waits for reinforcement transition speech before showing reinforcement UI', async () => {
     await ctrl.startLesson();
     (ctrl as any).currentPhase = 'interactive';
-    let resolveTransition!: () => void;
-    v2.sendCustomAction.mockImplementationOnce(() => new Promise<void>((resolve) => {
+    let resolveTransition!: (result: LessonCommandResult) => void;
+    v2.sendCustomAction.mockImplementationOnce(() => new Promise<LessonCommandResult>((resolve) => {
       resolveTransition = resolve;
     }));
     const phaseChanges: PhaseName[] = [];
@@ -167,7 +192,7 @@ describe('PhasedLessonController phase transitions', () => {
 
     expect(phaseChanges).not.toContain('reinforcement');
 
-    resolveTransition();
+    resolveTransition({ ok: true, acceptedPhase: 'reinforcement' });
     await vi.waitFor(() => expect(phaseChanges).toContain('reinforcement'));
   });
 });

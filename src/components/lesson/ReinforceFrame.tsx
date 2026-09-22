@@ -11,6 +11,7 @@ import { useStaticPromptSpeech } from './useStaticPromptSpeech';
 type RepeatAfterMeQuiz = Extract<Quiz, { type: 'repeat-after-me' }>;
 
 interface ReinforceFrameProps {
+  disabled?: boolean;
   quiz: RepeatAfterMeQuiz;
   course: Course;
   controller: LessonController;
@@ -22,7 +23,7 @@ interface RepeatAfterMeScoring {
   coreWords: string[];
 }
 
-export function ReinforceFrame({ quiz, course, controller, onAnswer }: ReinforceFrameProps) {
+export function ReinforceFrame({ quiz, course, controller, onAnswer, disabled = false }: ReinforceFrameProps) {
   const [listening, setListening] = useState(false);
   const [heardSentence, setHeardSentence] = useState(false);
   const spokenPrompt = useMemo(() => buildRepeatAfterMePrompt(quiz.targetText), [quiz.targetText]);
@@ -38,7 +39,7 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer }: Reinforce
       .filter((text) => text !== quiz.targetText);
     return [quiz.targetText, ...siblings];
   }, [course, quiz.targetText]);
-  const canHold = (state === 'awaiting' || state === 'listening') && hasHeardPrompt && !promptPlaying;
+  const canHold = !disabled && (state === 'awaiting' || state === 'listening') && hasHeardPrompt && !promptPlaying;
   const catMood = promptPlaying || state === 'quiz-speaking' ? 'speaking' : heardSentence ? 'cheer' : 'happy';
 
   // Keep the asr-final subscription tied to `controller` only. The parent passes a fresh
