@@ -6,24 +6,14 @@ course materials, word cards, sentence cards, or course artwork, read
 Record that file in the task PRD technical notes and follow its ImageGen batch
 workflow, including the no-base64 / no-bulk-image-payload chat rule.
 
-<!-- TRELLIS:START -->
-# Trellis Instructions
+## Project Specs
 
-These instructions are for AI assistants working in this project.
-
-This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
-
-- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
-- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
-- `.trellis/workspace/` — per-developer journals and session traces
-- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
-
-If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
-
-If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
-- `.agents/skills/` — reusable Trellis skills
-- `.codex/agents/` — optional custom subagents
-
-Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
-
-<!-- TRELLIS:END -->
+Engineering conventions, interface contracts, and known pitfalls live in
+`docs/specs/` (entry: `docs/specs/index.md`). Read only the specs relevant to
+the change before implementing. Before committing, record any reusable
+convention, contract, or pitfall in the matching spec, or create one and list
+it in the index. `docs/specs/` and `docs/features/` are local-only and
+gitignored because this repository is public: never commit them or suggest
+committing them. `docs/architecture.md` remains the authoritative description
+of the current system; when it and a spec disagree, check the code and fix the
+wrong one.

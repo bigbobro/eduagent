@@ -45,6 +45,10 @@ tmp/imagegen/
 .trellis/
 docs/superpowers/
 
+# local-only agent docs (public repo): engineering specs and feature PRDs/tickets
+docs/specs/
+docs/features/
+
 # local Trellis platform adapters
 .agents/skills/trellis-*/
 .claude/agents/trellis-*.md

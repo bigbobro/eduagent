@@ -31,10 +31,18 @@
 - [ ] 改了协议?同步进 `docs/DOUBAO Protocol/` 的踩坑提示(若是新踩坑)
 - [ ] 改了延迟相关?跑测后追加 `docs/voice-benchmarks.md`(若有变化)
 - [ ] 完成了 TODO 里的项?把它划掉/标 done
+- [ ] 产生了下次还用得上的约定、契约或坑?写进 `docs/specs/` 对应文件(见下方「工程约定」)
 
 ### 不能把"以后补文档"当 backlog
 
 文档同步是 commit 的一部分,不是后置 task。"我下次再补"≈ 永远不补。代码 review 看见文档没动,直接拒。
+
+## 工程约定(docs/specs)
+
+- `docs/specs/` 记录本项目的工程约定、接口契约和踩坑结论,入口是 `docs/specs/index.md`。动手前只读和本次改动相关的几篇。
+- 任务收尾、commit 前自查:这次有没有产生下次还用得上的约定、契约或坑?有就写进对应 spec(没有合适的就新建,并登记到 index);没有就不写。
+- `docs/specs/` 只在本地保存,已加入 `.gitignore`。本仓库是公开仓库,不要提交它,也不要建议提交。`docs/features/`(`to-spec` / `to-tickets` 的产出)同理。
+- 分工:`docs/architecture.md` 是系统现状的权威文档;`docs/specs/` 记约定、契约和坑。两边冲突时以代码为准,修正写错的那一份。
 
 ## 协议层踩坑前查文档
 
