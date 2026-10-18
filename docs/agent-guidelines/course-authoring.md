@@ -46,7 +46,7 @@ Each regular 3-6 year old theme course must define:
 - `teachingHints`: opening, review/new ids, quiz prompts, closing.
 - `phases.introduction`: `sceneCaption` and `narrationHint`.
 - `phases.interactive`: keep `{}` unless the lesson runtime contract changes.
-- `phases.reinforcement.quizzes`: at least 4 `pick-word` and 4
+- `phases.reinforcement.quizzes`: at least 4 `pick-word` and exactly 4
   `repeat-after-me` items. The 4 `repeat-after-me.targetText` values should
   correspond to the 4 short sentences in `objectives.sentences`, and each
   `repeat-after-me.cardId` must reference the matching `sentence` card.
@@ -128,25 +128,40 @@ Avoid: no English text, no Chinese text, no letters, no watermark, no realistic 
 | Generated source remains after project save | Delete the scratch source file |
 | Quiz references unknown card id | Fix data; do not hide with type assertions |
 | Home only shows a subset of courses | Update home UI/tests so registry courses are visible |
-| ASR often transcribes the English target as a homophone or transliteration | Add a narrow `asrAliases` entry and a regression test |
+| ASR often transcribes the English target as a homophone or transliteration | Add a narrow `asrAliases` entry and record the MISS in `asr-confusables.ts` (see below) |
 | ASR alias is just the Chinese meaning | Do not add it unless it is also the expected ASR form for the English sound |
 
 ## Tests Required
 
-- `src/data/courses/course-data.test.ts`: every registered course has valid
-  card ids, non-empty `drillParts`, PNG images, phase text, and valid quizzes.
-- Generic registry tests must assert each regular course has exactly 12 word
-  cards, exactly 4 sentence cards, exactly 4 target sentences, and every target
-  sentence contains at least one word from the course cards. Sentence cards must
-  reuse that target word card's image URL.
-- Course-specific tests are optional for a large batch when the generic registry
-  test covers the invariant; add targeted tests for unusual lesson structures.
+- Structural rules are not duplicated in prose or in per-course tests. The
+  source of truth is `src/data/courses/course-validator.ts`: `validateCourse()`
+  checks card counts, ids, `drillParts`, `asrAliases`, image extensions, quiz
+  linkage, and `objectives.sentences`; `validateCourseAssets()` checks that every
+  card image exists on disk. `src/data/courses/course-data.test.ts` runs both
+  over every entry in `allCourses`.
+- `course-data.test.ts` also pins a few things the validator deliberately does
+  not: the catalog id list (add the new course id there), the absence of the
+  legacy `introduction.sceneImage` field, and the `CONTENT_SPOT_CHECKS` entries
+  for courses whose exact tone, caption, or sentences must not drift.
 - `tests/api/courses.test.ts`: `/api/courses` returns the visible registry in
   the intended order.
-- Home/UI tests should prove all registry courses are reachable when the course
-  catalog grows.
+- Home/UI reachability is covered by `tests/a11y.test.tsx`: `HomeStudy` renders
+  every course in `allCourses`, so a new registry entry fails the test if the
+  home UI cannot show it.
+- ASR confusables: when a target word can be mis-recognized, probe it with
+  `pnpm tsx scripts/asr-word-scan.ts --only <courseId>` (TTS standard
+  pronunciation -> ASR, connects straight to Doubao, needs `.env.local`
+  credentials). For every MISS, add the text ASR actually returned (English
+  homophone, letter, or Chinese only if the correct English sound itself comes
+  back as Chinese) to that card's `asrAliases`, and record the MISS in
+  `src/data/courses/asr-confusables.ts`. `asr-confusables.test.ts` asserts that
+  every recorded MISS is accepted by production R2 matching across all courses.
+  Chinese aliases are risky because they let a child pass by speaking Chinese,
+  so add one only for the "correct English heard as Chinese" case. The probe
+  covers standard pronunciation only; child pronunciation still needs a real
+  lesson.
 - Run `pnpm test src/data/courses tests/api/courses.test.ts` for course-only
-  work, then `pnpm exec tsc --noEmit`; run smoke if route visibility changes.
+  work, then `pnpm typecheck`; run smoke if route visibility changes.
 
 ## Wrong vs Correct
 

@@ -82,6 +82,10 @@ PCM Player ─────── WS ──────────────�
 - `better-sqlite3`：本地课堂日志
 - Vitest、jsdom、Testing Library：测试
 
+Node 版本必须与 `.nvmrc` 一致（23），且满足 `package.json` 的
+`engines.node`（`>=23 <24`）。`better-sqlite3` 是原生模块，Node 大版本变化会
+换 ABI，装错版本会在启动时直接报 binding 错误。
+
 ### 环境变量
 
 复制 `.env.example` 为 `.env.local`，再填入真实凭据：
@@ -102,6 +106,8 @@ cp .env.example .env.local
 
 可选：
 
+- `LLM_MODEL`：LLM 模型名，缺省 `deepseek-ai/DeepSeek-V4-Flash`。
+- `DATABASE_PATH`：SQLite 文件路径，缺省 `./db/eduagent.db`。
 - `VOICE_MOCK=true`：本地无网络或无真实 provider 凭据时，用 mock 跑通主要流程。
 
 密钥必须只保存在服务端环境变量中。不要把任何真实密钥写入源码、README、issue、
@@ -123,7 +129,7 @@ WebSocket upgrade 处理。
 
 ```bash
 pnpm lint
-pnpm exec tsc --noEmit
+pnpm typecheck
 pnpm test
 pnpm run smoke
 ```
@@ -210,10 +216,18 @@ Required variables:
 
 Optional:
 
+- `LLM_MODEL`: LLM model name, defaults to `deepseek-ai/DeepSeek-V4-Flash`.
+- `DATABASE_PATH`: SQLite file path, defaults to `./db/eduagent.db`.
 - `VOICE_MOCK=true`: run the main local flow with mock LLM/ASR/TTS behavior.
 
 Keep all real credentials server-side. Do not paste real secrets into source
 files, docs, issues, logs, commit messages, or pull request descriptions.
+
+### Node Version
+
+Use the Node version pinned in `.nvmrc` (23) and `package.json` `engines.node`
+(`>=23 <24`). `better-sqlite3` is a native module, so a Node major-version
+change swaps the ABI and fails at startup with a binding error.
 
 ### Run Locally
 
@@ -228,7 +242,7 @@ Open <http://localhost:3000>.
 
 ```bash
 pnpm lint
-pnpm exec tsc --noEmit
+pnpm typecheck
 pnpm test
 pnpm run smoke
 ```

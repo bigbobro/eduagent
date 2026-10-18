@@ -1,9 +1,11 @@
 # EduAgent TODO
 
-> 2026-05-30 更新版。05-26 已补 Prompt input quantification 和 Eval v1;05-27/28 已完成 Prompt Slimming v1;05-28 已把 `pnpm lint` 配成非交互式质量门。下一步不再凭感觉排工程项,先跑真实课 + Eval,再决定继续压 prompt/延迟、上 Hybrid、还是补 session/autonomy。
+> 2026-05-30 更新版(**以下状态已过时,保留作历史快照**)。05-26 已补 Prompt input quantification 和 Eval v1;05-27/28 已完成 Prompt Slimming v1;05-28 已把 `pnpm lint` 配成非交互式质量门。下一步不再凭感觉排工程项,先跑真实课 + Eval,再决定继续压 prompt/延迟、上 Hybrid、还是补 session/autonomy。
 > 历史完成项参考 `docs/architecture.md` §9「文件演进历史」,本文件不复述。
 
-## 下一步:真实课 + Eval 决策
+## 下一步:真实课 + Eval 决策(2026-05-30 状态,已过时)
+
+> 下列检查清单与决策树是 2026-05-30 时点的记录,之后 session persistence(2026-07-20)、CI 门禁、模型切换等都已落地,不要按它排当前优先级。现行进度见下方 backlog 与「已完成记录」。
 
 最新代码已通过自动 smoke / prompt slimming / Eval 数据门,但还需要再跑 1 节真实课确认人工路径:
 - 课后跑 `pnpm tsx scripts/lesson-report-data.ts <session-id>`,先看 `eval.sessionHealth` 和 `eval.agentBehavior`,再看 `eval.teachingLoop` / `eval.costContext`
@@ -50,8 +52,11 @@
 4. ✅ **关闭页面课堂不结算**(2026-06-25) — [session.ts:47](../src/lib/agent/session.ts#L47) · low — `finishLessonLog` 只在 `action:'end'` 触发,关 tab/刷新/崩溃 → `end_time` 永远 NULL、时长统计为 0。**已修**:新增 `touchLessonLog()`,在 `commitTurn`(消息轮)+ `recordQuizAnswer`(quiz 轮)每轮增量写 `end_time`+`interaction_count`,纯服务端兜住崩溃/断网。**刻意砍掉 sendBeacon**——增量 UPDATE 后 end_time 已正确,sendBeacon 只多挽回"最后一轮到关页"的几十秒空档却引入浏览器卸载脆弱性,不值。+3 单测(queries.test.ts),330 测过,smoke 12/12。
 5. ✅ **测试盲区补强**(2026-06-25) — asr-proxy `bridge()` 时序测试本轮 overnight 已做(`asr-proxy.test.ts`);本次补齐剩余:`tts-client.test.ts`(重连退避序列 500/1000/2000、重试上限、成功后 reset、session-lost)+ `llm.test.ts`(caller signal abort 预先/飞行中、非 ok 响应抛 sanitized 错误且不泄露 body)。+8 单测。timeout 路径因 `AbortSignal.timeout` 与 fake timer 交互脆弱,未测(诚实标注)。
 6. ✅ **CI workflow**(2026-07-20) — [.github/workflows/ci.yml](../.github/workflows/ci.yml) · low — push / PR 触发 `VOICE_MOCK=true` 门禁:`pnpm typecheck` → `lint` → `test` → `build`,任一失败即红。`typecheck` script 跑两个 tsconfig(`tsconfig.json` + `tsconfig.server.json`),覆盖默认被排除的 `server.ts`(负向用例实证:注入类型错 exit 2)。**前置修了 flaky**:`src/lib/db/index.ts` 原先在模块加载期把 `DATABASE_PATH` 读进顶层 const,vitest 并发下 `fresh-db-init` 偶挂;改为 `getDb()` 调用时解析路径、路径变则 close+reopen,并导出 `closeDb()` 供测试隔离(生产语义不变,仍是进程内单连接)。`pnpm test` ×5 全绿(65 文件 / 386 用例)。
-7. **logger 迁移收尾 + 降噪** — [logger.ts](../src/lib/logger.ts) · medium — 结构化 logger 13 模块只 1 个用;[memory.ts:202](../src/lib/agent/memory.ts#L202) 每轮无条件 warn 级打诊断快照(违反"验收后删打点")。二选一并 gate 热路径日志。
-8. **chat route 加固 + DB 生命周期** · low — [route.ts](../src/app/api/chat/route.ts) `req.json()` 无 zod 校验;无 graceful shutdown(WAL 不 checkpoint);in-memory session 无淘汰;DB word-performance 与内存 R2 真相分叉([session.ts:176](../src/lib/agent/session.ts#L176))。
+7. **logger 迁移收尾 + 降噪** — [logger.ts](../src/lib/logger.ts) · medium — 结构化 logger 只有 `server.ts` 和 `src/lib/llm.ts` 两个调用方;**`memory.ts` 的 `normalizeAssistantActions` 每轮无条件 `console.log('[normalize] snapshot', ...)` 打诊断快照**(原记的 `memory.ts:202` 行号已漂移,按内容定位),违反"验收后删打点"。二选一并 gate 热路径日志。
+8. **chat route 加固 + DB 生命周期** · low — 拆分:
+   - ✅ **输入校验已做**:[route.ts](../src/app/api/chat/route.ts) 用 `lessonRequestSchema.safeParse` 校验 body(非法输入 400,commit `fa73c7f`)。
+   - ✅ **DB 账本分叉已收敛**(2026-07-03):`commitTurn` 每轮把 R-C 的 `cardCorrectCount` / `cardProgress` 同步进 `word_performance.rc_*`(`upsertWordRcState`),报告读 rc 优先。
+   - ⬜ **仍开**:无 graceful shutdown(`server.ts` 没有 SIGTERM/SIGINT handler,WAL 不 checkpoint);in-memory session 无淘汰。
 9. **Next.js 15 升级** · **🅿️ park(2026-07-20)** — [package.json:22](../package.json#L22) · medium — 14.2.35 是 14.x 冻结末端,5 个 high CVE(含 WS-upgrade SSRF,命中自定义 server)只在 15.x 修。**2026-07-20 评估:单用户纯本地不公开,CVE 无外部可达面,收益低 → park;恢复条件=对外发布/多用户。** 届时当独立任务做(custom server + framer-motion transpile)。
 10. ✅ **文档漂移**(2026-06-25,部分) — 课程数已修:README(中英两处)+ architecture.md(:354/:546 当前态)改成"以 `index.ts`(`allCourses`)为准"的防漂写法,不再写死数字;历史 changelog 条目按"只读快照"未动。**logger.ts "已删但活着" 留给 #7**(logger 迁移收尾时一并把它纳入模块表),本任务不越界。
 11. ✅ **前端交互打磨**(2026-06-25) — ① Quiz 双击双答:`QuizPickWordFrame` 加 `answeredRef` 同步守卫,每题 `onAnswer` 至多一次;② `ReinforceFrame` 用 ref 持有最新 `onAnswer`/`targetWords`,asr-final 监听器 effect 只依赖 `[controller]`,不再每渲染重挂;③ push-to-talk 按钮加 `aria-pressed`。locked 卡片已是原生 `<button disabled>`(本就不可聚焦),无需改。
@@ -62,12 +67,12 @@
 
 - ⭐ **Agent 护栏机制(LLM 输出 + 行为)** · **优先级提升(2026-06-25 用户定为重点)· design-first 复杂任务** — 比"内容安全过滤"更大:安全只是其中一格。完整护栏至少三层 ——(1)**内容安全**:[orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,目前零审核;(2)**交互逻辑/控制权**:孩子说"跳过这个词""我想学别的"时,Agent 该不该听他的(准许 vs 不准许的策略),现状已无任何'跳过当前词'通道(dev `debugSkipCurrentWord` 已于 2026-06-30 移除),只有 R2 字面两次命中才切卡,没有面向孩子、被策略管控的"请求"通道;(3)**行为准则**:不只约束 LLM 说什么,还约束 Agent 接下来做什么(切卡/推进/改节奏)。**核心交付是先把"机制长什么样"设计清楚(prd + design),再动代码**——决策点:事前(prompt rules)管什么 vs 事后(`src/lib/agent/guards/` pipeline)拦什么;孩子意图请求走哪条路、按什么策略准许;准则怎么写得下、可回归。启动时先写 PRD + design。
 - **孩子语音转写永久明文留存** · P2 · **🅿️ park(2026-07-20)** — [session.ts:189](../src/lib/agent/session.ts#L189) 每轮写 ASR 原文进 SQLite,全仓库无删除/TTL/清理。加保留策略 + "清除历史"入口。(park 理由同下:纯本地无外部读取路径。)
-- **家长门禁是纯客户端摆设(= API 服务端鉴权)** · P2 · **🅿️ park(2026-07-20)** — `pin.ts` 硬编码 salt + localStorage;`/api/stats`、`/api/sessions` 服务端零鉴权。**2026-07-20 评估:纯本地不公开 = 无外部攻击面,唯一残留威胁(局域网/curl)概率≈0、数据低敏感(学习进度),做鉴权是过度设计 → 整批 park(含转写 TTL + Next15);恢复条件=对外发布/多用户。** Trellis 任务 `07-08-eng-security-debt` 及子任务已 archive(可 `task.py list-archive` 找回)。
+- **家长门禁是纯客户端摆设(= API 服务端鉴权)** · P2 · **🅿️ park(2026-07-20)** — `pin.ts` 硬编码 salt + localStorage;`/api/stats`、`/api/sessions` 服务端零鉴权。**2026-07-20 评估:纯本地不公开 = 无外部攻击面,唯一残留威胁(局域网/curl)概率≈0、数据低敏感(学习进度),做鉴权是过度设计 → 整批 park(含转写 TTL + Next15);恢复条件=对外发布/多用户。**
 - **其它** · P3 — 无 CSP/Permissions-Policy;麦克风权限被拒无面向孩子 UI([recorder.ts:58](../src/lib/audio/recorder.ts#L58) 只 console.warn);SQLite 无备份/损坏恢复;错误只进 console 无遥测(=总得手动贴日志的根因);~~无 `.nvmrc`/engines(better-sqlite3 跨 Node 版本会崩)~~ ✅ 2026-07-20 已加 `.nvmrc`(23)+ `engines.node`(`>=23 <24`)+ `packageManager`(pnpm@10.33.2),与本地一致、CI 读同一份;`/api/chat` 无 rate-limit。
 
 ### P3 / 维护性(顺手做,单用户阶段低优先)
 
-手写 emitter ×4、`safeParse` ×2、`markWordCorrect/Incorrect` 重复、死 `resetConfig`、assistant-history-as-prose、`PcmPlayer.dispose` 不 await stop、死 `cancelSession`/无 barge-in、`buildPromptInput` 每轮算两次、未文档化的 `NEXT_PUBLIC_DOUBAO_TTS_DEFAULT_SPEAKER`。只在为高优项改到那个文件时顺手清。
+手写 emitter ×4、`safeParse` ×2、`markWordCorrect/Incorrect` 重复、`resetConfig` 仅测试在用(`config.test.ts`,不是死代码)、assistant-history-as-prose、`PcmPlayer.dispose` 不 await stop、死 `cancelSession`/无 barge-in、`buildPromptInput` 每轮算两次、未文档化的 `NEXT_PUBLIC_DOUBAO_TTS_DEFAULT_SPEAKER`。只在为高优项改到那个文件时顺手清。
 
 ---
 
@@ -178,6 +183,7 @@ bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingA
 - 2026-05-22 — **Teacher Agent UX P0 四项修复(R1-R4)**:actions/TTS 时序、ASR 字面 verify、normalize 放宽(允许跳卡)、closing guard 始终注入 + 服务端 speech 扫描替换
 - 2026-05-23 — **Lesson voice regression stabilization + 轻量诊断闭环**:push-to-talk ASR 建连/关闭竞态、pointer/Space hold、speech/show_card 出口一致性、dev 强切 reinforcement 解锁、smoke UI 跟读与 speech/card 一致性断言;原"日志整理"长期项关闭
 - 2026-05-24 — **代码库清扫 A+B+C**:删 6 项死代码(logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage / getNextWordCardId);mockStreamLLM 修正为合法 show_card shape;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content)
+  > **补注(2026-10-18)**:`logger.ts` 当时确实删了(`c366627`),2026-06-13 在 `7c82cbc`(system-wide architecture optimization)重新加回;现在被 `server.ts` 与 `src/lib/llm.ts` import,是活代码。原始记录保留如上。
 - 2026-05-24 — **Guard pipeline 重构(D)**:`src/lib/agent/guards/` 拆出 closing / premature-closing / normalize / speech-card-align pipeline,`streamUserInput` 收窄,行为不变
 - 2026-05-25 — **R-C canonical matching + explicit ASR aliases**:修复 `ice cream` / `icecream` 类 ASR 命中问题,课程可显式声明 `asrAliases`
 - 2026-05-26 — **Prompt input quantification + Eval v1**:LLM prompt bucket 持久化,lesson-report 输出 session health / cost-context / teaching-loop / agent behavior / next-iteration signals

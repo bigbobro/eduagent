@@ -29,7 +29,8 @@
 │  + PictureCard      │         │  (长连复用 + cancel)  │         │  Tina老师2.0     │
 └─────────────────────┘         └──────────────────────┘         └─────────────────┘
                                        ↓
-                                 SQLite (lessons/turns/word_performance)
+                                 SQLite (lesson_logs / interaction_logs /
+                                 word_performance / course_progress)
 ```
 
 **为什么自定义 Next.js server**:Next.js App Router 不支持 WebSocket `upgrade` 事件。`server.ts` 接管 HTTP server,把 `/api/voice/asr` 与 `/api/voice/tts` 的 upgrade 请求转给对应 proxy 模块,其它请求让 Next.js 处理。upgrade 前先按 `isAllowedWsOrigin`(loopback + 配置端口白名单,`src/lib/voice/ws-origin.ts`)校验 `Origin`,拒绝跨站 WS 劫持(CSWSH,会盗用服务端豆包凭据);缺失 `Origin` 的非浏览器客户端放行。
@@ -393,7 +394,11 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 ---
 
-## 7. 性能基线
+## 7. 性能基线(历史:MiMo 时代)
+
+> **本节表格是 MiMo 时代的历史基线,不是当前系统的性能。** 当前 LLM 为
+> SiliconFlow DeepSeek-V4-Flash,现役数字以 `docs/voice-benchmarks.md` 为准;
+> 下面只保留作对比与回溯用,不要拿它当验收标准。
 
 详见 `docs/voice-benchmarks.md`(2026-05-01 18 轮人工实测,14 轮成功)。
 
@@ -413,7 +418,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 ## 8. 已知不足(指向 TODO.md 详情)
 
-- **课程 Session resume**:活动 session 已有 `SessionStore` 边界,但默认实现仍是进程内 `InMemorySessionStore`;server 重启 / 刷新 / 断网后客户端旧 sessionId 仍会失效。客户端 fetch `/api/chat?action=message` 收 404 时仅提示"课程已过期,回首页重新进入"。完整 resume 仍需 SQLite-backed store + client resume 流程。
+- **课程 Session resume**:活动 session 仍是进程内 `InMemorySessionStore`,server 重启 / 刷新 / 断网后客户端旧 sessionId 依然失效,`/api/chat?action=message` 收 404 时只提示"课程已过期,回首页重新进入"(跨重启的活动 session 接管未做)。**但课堂进度自 2026-07-20 起已持久化并支持续课**:每轮 upsert `course_progress` 断点,`action=start` 从有效断点 `createSessionFromSnapshot` 恢复(`X-Resume-Info`),重进课程即回到上次阶段,见 §3.1b。
 - ~~**actions 与 TTS 时序**~~ — **已修复(R1)**:`pendingActions` 缓冲机制,`show_card` emit 推迟到 `tts.session-finished`
 - **LLM first-token 延迟**:首音频延迟主要瓶颈,前端无法优化(MiMo 时代实测 4 秒;现 SiliconFlow DeepSeek-V4-Flash,短 prompt 探针首 token 中位 ~2.7s,真实课堂整步中位 ~5.4s、尾部 ~14s)
 - **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。当前由教学循环 v1.1 的 LLM `attempt_assessment` 基于 raw ASR + currentCardId + drillParts 做课堂内容错判定,真实儿童语音效果等下一节课实测

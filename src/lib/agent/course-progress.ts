@@ -2,7 +2,8 @@ import { Course } from '@/types/course';
 import { CourseProgressSnapshot, LessonMemory } from '@/types/session';
 import type { CourseProgressRow } from '@/types/session';
 
-// Session persistence (2026-07-20 PRD/design) — see .trellis/tasks/07-20-session-persistence.
+// Session persistence (2026-07-20): serialize lesson progress into `course_progress` so a
+// lesson can resume after leaving; see docs/architecture.md §3.1b for the resume contract.
 // NOTE: named `course-progress.ts` rather than the design doc's `progress-snapshot.ts` to
 // avoid colliding with the pre-existing src/lib/agent/progress-snapshot.test.ts, which tests
 // the unrelated SSE `progress_snapshot` event emitted by streamUserInput.
