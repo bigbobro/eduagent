@@ -82,8 +82,8 @@ PCM Player ─────── WS ──────────────�
 - `better-sqlite3`：本地课堂日志
 - Vitest、jsdom、Testing Library：测试
 
-Node 版本必须与 `.nvmrc` 一致（23），且满足 `package.json` 的
-`engines.node`（`>=23 <24`）。`better-sqlite3` 是原生模块，Node 大版本变化会
+Node 版本必须与 `.nvmrc` 一致（26），且满足 `package.json` 的
+`engines.node`（`>=26 <27`）。`better-sqlite3` 是原生模块，Node 大版本变化会
 换 ABI，装错版本会在启动时直接报 binding 错误。
 
 ### 环境变量
@@ -225,8 +225,8 @@ files, docs, issues, logs, commit messages, or pull request descriptions.
 
 ### Node Version
 
-Use the Node version pinned in `.nvmrc` (23) and `package.json` `engines.node`
-(`>=23 <24`). `better-sqlite3` is a native module, so a Node major-version
+Use the Node version pinned in `.nvmrc` (26) and `package.json` `engines.node`
+(`>=26 <27`). `better-sqlite3` is a native module, so a Node major-version
 change swaps the ABI and fails at startup with a binding error.
 
 ### Run Locally
