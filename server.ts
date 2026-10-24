@@ -5,6 +5,11 @@ import { config as loadEnv } from 'dotenv';
 import { resolve } from 'path';
 import { readFileSync } from 'fs';
 
+// ws 的可选依赖 bufferutil 经 Next 的 require hook 会解析到没有 mask 的占位模块,
+// Next 路由里(如 /api/settings/test 的 ASR 探测)发 >=48 字节帧就抛 `bufferUtil.mask is not a function`。
+// 开发与打包都走纯 JS 实现;打包产物另在 esbuild banner 里提前设置(打包后 ws 先于本文件求值)。
+process.env.WS_NO_BUFFER_UTIL ??= '1';
+
 // 在加载任何依赖 process.env 的模块之前加载 .env.local。
 // 桌面 App(EDUAGENT_APP=1)的配置全部由 Electron main 注入 env,不读 .env.local。
 if (process.env.EDUAGENT_APP !== '1') {

@@ -663,4 +663,4 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 **退出码 75 重启约定**:server 保存设置后以 75 退出;`desktop/main.js` 的 utilityProcess `exit` 回调见 75 就用同样的 env 重启子进程,端口就绪后 `loadURL` 重新加载窗口。其他非 0 退出码仍显示错误页(日志路径)。`desktop/main.js` 的 `setWindowOpenHandler` / `will-navigate` 把站外 http(s) 链接交给系统浏览器,其余导航一律拦截。
 
-**打包坑**:`desktop/scripts/stage.mjs` 的 esbuild 产物开头设 `process.env.WS_NO_BUFFER_UTIL='1'`。否则打包版里 `ws` 的可选依赖 `bufferutil` 会被 Next 的 require hook 解析到没有 `mask` 的占位模块,ws 发送 >=48 字节的帧(ASR 请求帧/音频帧)时抛 `t.mask is not a function`;Phase 0 的 mock 模式不经过 ws 客户端,所以没暴露。
+**ws / bufferutil 坑**:`server.ts` 顶部设 `process.env.WS_NO_BUFFER_UTIL ??= '1'`(开发模式下 Next 路由里的 ws 客户端同样会踩,真实 key 实测 `/api/settings/test` 的 ASR 探测报错),打包时 `desktop/scripts/stage.mjs` 的 esbuild 产物开头也设一次(打包后 ws 先于 server 主体求值)。否则打包版里 `ws` 的可选依赖 `bufferutil` 会被 Next 的 require hook 解析到没有 `mask` 的占位模块,ws 发送 >=48 字节的帧(ASR 请求帧/音频帧)时抛 `t.mask is not a function`;Phase 0 的 mock 模式不经过 ws 客户端,所以没暴露。
