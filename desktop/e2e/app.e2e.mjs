@@ -49,11 +49,11 @@ try {
     timeout: 60000,
   });
   const page = await app.firstWindow();
-  page.on('request', (r) => r.url().includes('/api/') && console.log('[req]', r.method(), r.url().replace(/.*38417/, ''), (r.postData() || '').slice(0, 80)));
+  page.on('request', (r) => r.url().includes('/api/') && console.log('[req]', r.method(), r.url().replace(/.*127\.0\.0\.1:\d+/, ''), (r.postData() || '').slice(0, 80)));
   page.on('console', (m) => m.type() === 'error' && console.log('[renderer error]', m.text()));
 
-  // 1. 首页
-  await page.waitForURL(/127\.0\.0\.1:38417\/$/, { timeout: 60000 });
+  // 1. 首页(默认端口可能已被本机另一个 EduAgent 占用,app 会换端口,这里不写死)
+  await page.waitForURL(/127\.0\.0\.1:\d+\/$/, { timeout: 60000 });
   await page.getByRole('heading', { name: '建第一个孩子档案', exact: true }).waitFor();
   await createFirstLearner(page, '桌面测试孩子');
   check('home page loads with course list', true, page.url());
