@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3';
+import type { Database } from './sqlite';
 import { getDb } from './index';
 import { TokenUsage, InteractionLog, CourseProgressSnapshot } from '@/types/session';
 import { PhaseName } from '@/types/course';

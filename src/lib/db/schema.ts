@@ -1,10 +1,10 @@
-import Database from 'better-sqlite3';
+import Database from './sqlite';
 import { getDb } from './index';
 
 interface Migration {
   version: number;
   name: string;
-  up(db: Database.Database): void;
+  up(db: Database): void;
 }
 
 const CREATE_SCHEMA_MIGRATIONS_TABLE = `
@@ -108,7 +108,7 @@ const MIGRATIONS: Migration[] = [
   },
 ];
 
-export function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Database): void {
   db.exec(CREATE_SCHEMA_MIGRATIONS_TABLE);
 
   const appliedVersions = new Set(
@@ -131,7 +131,7 @@ export function runMigrations(db: Database.Database): void {
   }
 }
 
-export function getSchemaVersion(db: Database.Database): number {
+export function getSchemaVersion(db: Database): number {
   const row = db.prepare(
     'SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations',
   ).get() as { version: number };

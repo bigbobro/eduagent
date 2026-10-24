@@ -37,6 +37,8 @@
 
 ---
 
+> 2026-10 spike:SQLite 驱动由 `better-sqlite3` 换成 Node 内置 `node:sqlite`,统一经 `src/lib/db/sqlite.ts` 封装(保留 `prepare/exec/pragma/transaction/close`,嵌套 transaction 用 SAVEPOINT)。无原生模块,`pnpm.onlyBuiltDependencies` 已移除。上文历史条目中的 better-sqlite3 描述以此为准。
+
 ## 2. 模块清单与职责
 
 | 文件 | 职责(一句话) |

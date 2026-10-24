@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
+import Database from '../../src/lib/db/sqlite';
 
 const memDb = new Database(':memory:');
 memDb.exec(`

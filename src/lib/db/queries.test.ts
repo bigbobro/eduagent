@@ -3,9 +3,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 // touchLessonLog/createLessonLog go through getDb() (the DB_PATH singleton), so point it at a
 // throwaway in-memory database. path.resolve mangles the literal ':memory:' through DATABASE_PATH,
 // so mock the module instead of setting the env var.
-const holder = vi.hoisted(() => ({ db: null as import('better-sqlite3').Database | null }));
+const holder = vi.hoisted(() => ({ db: null as import('./sqlite').Database | null }));
 vi.mock('./index', async () => {
-  const Database = (await import('better-sqlite3')).default;
+  const Database = (await import('./sqlite')).default;
   holder.db = new Database(':memory:');
   return { getDb: () => holder.db };
 });

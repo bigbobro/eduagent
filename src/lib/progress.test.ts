@@ -1,7 +1,7 @@
 import { serializeProgress } from '@/lib/agent/course-progress';
 import { createMemory } from '@/lib/agent/memory';
 import { describe, it, expect, beforeEach } from 'vitest';
-import Database from 'better-sqlite3';
+import Database from './db/sqlite';
 import { buildProgressSnapshot, masteryStarsFromRatio } from './progress';
 import type { Course } from '@/types/course';
 
@@ -51,7 +51,7 @@ describe('masteryStarsFromRatio', () => {
 });
 
 describe('buildProgressSnapshot', () => {
-  let db: Database.Database;
+  let db: Database;
   beforeEach(() => {
     db = makeDb();
   });
@@ -92,7 +92,7 @@ describe('buildProgressSnapshot', () => {
 });
 
 describe('buildProgressSnapshot — session persistence (R2 home status)', () => {
-  let db: Database.Database;
+  let db: Database;
   beforeEach(() => {
     db = makeDb();
   });

@@ -13,7 +13,7 @@
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
+import Database from '../src/lib/db/sqlite';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { getCourseById } from '../src/data/courses';
 import type { WordCard } from '../src/types/course';

@@ -79,12 +79,12 @@ PCM Player ─────── WS ──────────────�
 - Next.js 14、React 18、TypeScript、Tailwind CSS、Framer Motion
 - `ws`：自定义 server 的 WebSocket 支持
 - `tsx`：本地 dev/start runner
-- `better-sqlite3`：本地课堂日志
+- Node 内置 `node:sqlite`：本地课堂日志（经 `src/lib/db/sqlite.ts` 薄封装，无原生模块）
 - Vitest、jsdom、Testing Library：测试
 
 Node 版本必须与 `.nvmrc` 一致（26），且满足 `package.json` 的
-`engines.node`（`>=26 <27`）。`better-sqlite3` 是原生模块，Node 大版本变化会
-换 ABI，装错版本会在启动时直接报 binding 错误。
+`engines.node`（`>=26 <27`）。SQLite 用 Node 内置的 `node:sqlite`，没有原生模块，
+不存在 ABI 问题。
 
 ### 环境变量
 
@@ -226,8 +226,8 @@ files, docs, issues, logs, commit messages, or pull request descriptions.
 ### Node Version
 
 Use the Node version pinned in `.nvmrc` (26) and `package.json` `engines.node`
-(`>=26 <27`). `better-sqlite3` is a native module, so a Node major-version
-change swaps the ABI and fails at startup with a binding error.
+(`>=26 <27`). SQLite uses Node's built-in `node:sqlite` (via the thin wrapper in
+`src/lib/db/sqlite.ts`), so there is no native module and no ABI mismatch.
 
 ### Run Locally
 

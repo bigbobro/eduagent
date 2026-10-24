@@ -1,11 +1,11 @@
-import Database from 'better-sqlite3';
+import Database from './sqlite';
 import fs from 'fs';
 import path from 'path';
 
-let db: Database.Database | null = null;
+let db: Database | null = null;
 let openedPath: string | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): Database {
   const dbPath = path.resolve(process.cwd(), process.env.DATABASE_PATH || './db/eduagent.db');
   if (db && openedPath !== dbPath) {
     db.close();
@@ -13,7 +13,7 @@ export function getDb(): Database.Database {
     openedPath = null;
   }
   if (!db) {
-    // better-sqlite3 creates the file but not its parent directory. `db/` is not
+    // node:sqlite creates the file but not its parent directory. `db/` is not
     // in git, so a fresh checkout (CI, new machine) has no such directory.
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     db = new Database(dbPath);

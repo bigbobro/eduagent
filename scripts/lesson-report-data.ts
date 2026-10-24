@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import path from 'path';
 import fs from 'fs';
-import type { Database } from 'better-sqlite3';
+import type { Database } from '../src/lib/db/sqlite';
 import { getCourseById } from '../src/data/courses';
 import type { WordCard } from '../src/types/course';
 
@@ -924,7 +924,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const Database = (await import('better-sqlite3')).default;
+  const Database = (await import('../src/lib/db/sqlite')).default;
   const db = new Database(dbPath, { readonly: true });
   try {
     const data = await buildReport(db, sessionId, defaultCourseLoader);

@@ -1,8 +1,8 @@
-import Database from 'better-sqlite3';
+import Database from '../src/lib/db/sqlite';
 import { describe, it, expect } from 'vitest';
 import { buildReport, defaultCourseLoader, type CourseLoader } from './lesson-report-data';
 
-function createMemDb(): Database.Database {
+function createMemDb(): Database {
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE lesson_logs (
@@ -45,7 +45,7 @@ interface SeedSession {
   interactions?: Array<{ user: string; ai: string; actions?: unknown[]; ts?: string; modelCalls?: object }>;
 }
 
-function seedSession(db: Database.Database, s: SeedSession): void {
+function seedSession(db: Database, s: SeedSession): void {
   db.prepare(
     'INSERT INTO lesson_logs (id, course_id, start_time, end_time, interaction_count, token_usage, ended_gracefully) VALUES (?, ?, ?, ?, ?, ?, ?)'
   ).run(
@@ -72,7 +72,7 @@ function seedSession(db: Database.Database, s: SeedSession): void {
 }
 
 function seedWordPerformance(
-  db: Database.Database,
+  db: Database,
   lessonId: string,
   rows: Array<{ word: string; attempts: number; correct: number; needsReview?: number }>,
 ): void {
@@ -620,7 +620,7 @@ describe('buildReport — edge cases', () => {
 // 真实事故:2026-07-03 sports 课运行时 12 词全部 R-C 过关,但 word_performance 的
 // LLM 判定账本每词只有 correct=1,报告按 correct>=2 判 cleared → clearRate=0 假报警。
 describe('buildReport — R-C authoritative clear state (rc_correct / rc_cleared)', () => {
-  function migrateRcColumns(db: Database.Database): void {
+  function migrateRcColumns(db: Database): void {
     db.exec(`
       ALTER TABLE word_performance ADD COLUMN rc_correct INTEGER;
       ALTER TABLE word_performance ADD COLUMN rc_cleared INTEGER;

@@ -1,15 +1,15 @@
-import Database from 'better-sqlite3';
+import Database from './sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getSchemaVersion, runMigrations } from './schema';
 
-function tableNames(db: Database.Database): string[] {
+function tableNames(db: Database): string[] {
   return db.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
   ).all().map((row) => (row as { name: string }).name);
 }
 
 describe('runMigrations', () => {
-  let db: Database.Database;
+  let db: Database;
 
   beforeEach(() => {
     db = new Database(':memory:');

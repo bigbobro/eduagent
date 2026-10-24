@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import Database from 'better-sqlite3';
+import Database from './db/sqlite';
 import { buildStatsSnapshot, buildSessionList } from './stats';
 import { allCourses } from '@/data/courses';
 
