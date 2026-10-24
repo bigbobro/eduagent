@@ -74,6 +74,8 @@ pnpm app:verify-images
 `app:release` 一次完成 standalone 构建、staging 图片转换、Electron 打包、自签名校验和 dmg 生成。
 `app:pack` 是兼容入口。版本取根目录 `package.json`，Apple 芯片产物为
 `desktop/dist/EduAgent-<version>-arm64.dmg`，应用位于 `desktop/dist/mac-arm64/EduAgent.app`。
+App 图标:`desktop/build-resources/icon-source.png` 是 1024 方形水彩原画(Codex `image_gen` 绘制),改图后运行 `pnpm app:icon` 重新生成带 macOS 圆角和投影的 `icon.icns`,electron-builder 会自动使用。
+
 签名证书、专用钥匙串和私钥保护步骤见 [Mac 签名与打包说明](docs/mac-signing.md)。不进行 Apple 公证或自动发布。
 
 仓库 PNG 和课程的 `imageUrl` 保持不变。仅 App staging 使用 `cwebp -q 82` 转成 WebP，

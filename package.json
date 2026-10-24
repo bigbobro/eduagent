@@ -25,7 +25,8 @@
     "app:release": "node desktop/scripts/release.mjs",
     "app:verify-images": "tsx scripts/verify-app-images.ts",
     "app:e2e": "node desktop/e2e/app.e2e.mjs",
-    "app:dev": "node desktop/scripts/dev.mjs"
+    "app:dev": "node desktop/scripts/dev.mjs",
+    "app:icon": "node desktop/scripts/make-icon.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
