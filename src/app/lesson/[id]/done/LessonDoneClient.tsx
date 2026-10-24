@@ -23,6 +23,7 @@ export function LessonDoneClient({ courseId }: Props) {
       .catch(() => {
         setSnap({ courses: [], totalWordsMastered: 0, generatedAt: '' });
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载(或换课)时加载一次;router 只用于无孩子时跳回首页,不应触发重新加载
   }, [courseId]);
 
   useEffect(() => {

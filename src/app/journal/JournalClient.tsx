@@ -23,6 +23,7 @@ export function JournalClient() {
       .then(setSnap)
       .catch(() => setError(true));
   };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载(或换课)时加载一次;router 只用于无孩子时跳回首页,不应触发重新加载
   useEffect(load, []);
 
   return (
