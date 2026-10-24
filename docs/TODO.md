@@ -78,6 +78,15 @@
 
 ## 当前 backlog
 
+### Mac 桌面版后续(2026-10-24)
+
+- **Windows 版**：后续单独验证打包、权限、签名和安装流程，目前只交付 Mac arm64。
+- **自动更新**：当前由家长手动下载覆盖安装，更新服务和校验机制未实现。
+- **课程包独立下载**：当前课程和图片随 App 发布，后续再评估按需下载与版本管理。
+- **设置页申请指引 URL 待核实**：核实火山引擎豆包语音、SiliconFlow 当前控制台入口和开通步骤，再补真实截图。
+- **Intel 版：按需再做**。用户决定当前只提供 Apple 芯片 arm64；将来在 x64 环境重新 next build，验证 SWC/esbuild 依赖、打包 App 冒烟和 Intel Mac 安装流程。
+- **真机安装与截图**：另一台 Mac 下载后验证 Gatekeeper 放行、首次麦克风授权、真实 Key 上课，以及覆盖安装后的数据和授权保留。README 已标注真实截图待补位置，自动化截图不替代系统弹窗证据。
+
 ### 1. Prompt / latency optimization v2 — 真实 Eval 继续指向成本/延迟时再启动
 
 *2026-05-23/25 真实报告曾触发 highAvgInput:约 2300-2935 input tokens / round。05-26 已做 input breakdown,05-27/28 已完成 Prompt Slimming v1。现在不要再凭旧 TODO 直接继续压 prompt,先等下一节真实课 Eval 证明它仍是主瓶颈。*

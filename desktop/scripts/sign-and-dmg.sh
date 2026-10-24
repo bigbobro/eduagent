@@ -5,7 +5,11 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 APP="desktop/dist/mac-arm64/EduAgent.app"
+VERSION="$(node -p 'require("./package.json").version')"
 KC="$HOME/Library/Keychains/eduagent-signing.keychain-db"
+[ -f "$KC" ] && [ -f "$HOME/Library/Keychains/eduagent-signing.pass" ] || {
+  echo "Signing keychain missing; run desktop/scripts/create-signing-cert.sh first." >&2; exit 1;
+}
 PASS="$(cat "$HOME/Library/Keychains/eduagent-signing.pass")"
 ENT="desktop/build-resources/entitlements.mac.plist"
 CN="EduAgent Self-Signed"
@@ -20,5 +24,5 @@ codesign --verify --deep --strict -vv "$APP"
 codesign -dvv --entitlements - "$APP" 2>&1 | grep -E "Identifier|Authority|flags|audio-input|TeamIdentifier" || true
 
 pnpm exec electron-builder --config desktop/electron-builder.yml \
-  --prepackaged "$APP" --mac dmg --arm64 -c.mac.identity=null
+  --prepackaged "$APP" --mac dmg --arm64 -c.mac.identity=null "-c.extraMetadata.version=$VERSION"
 ls -lh desktop/dist/*.dmg

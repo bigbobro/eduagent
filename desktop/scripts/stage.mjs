@@ -4,20 +4,38 @@
 //   3. esbuild 把 server.ts 打成单个 eduagent-server.js(next 保持 external)
 //   4. 手动补 public/ 与 .next/static(standalone 不会带)
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve, relative, basename } from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const out = join(root, 'desktop/build/server');
+const require = createRequire(import.meta.url);
+
+try {
+  execFileSync('cwebp', ['-version'], { stdio: 'pipe' });
+} catch {
+  throw new Error('[stage] cwebp not found or not runnable. Install WebP tools (brew install webp), then retry pnpm app:release.');
+}
 
 if (process.env.SKIP_NEXT_BUILD !== '1') {
-  execFileSync('pnpm', ['exec', 'next', 'build'], {
+  execFileSync(process.execPath, [require.resolve('next/dist/bin/next'), 'build'], {
     cwd: root,
     stdio: 'inherit',
     env: { ...process.env, EDUAGENT_STANDALONE: '1' },
   });
+}
+
+const routesPath = join(root, '.next/routes-manifest.json');
+if (!existsSync(routesPath)) {
+  throw new Error('[stage] App build missing. Run pnpm app:stage without SKIP_NEXT_BUILD.');
+}
+const routes = JSON.parse(readFileSync(routesPath, 'utf8'));
+const rewrites = Array.isArray(routes.rewrites) ? routes.rewrites : routes.rewrites.afterFiles;
+if (!rewrites.some((r) => r.source === '/images/:path*.png' && r.destination === '/images-webp/:path*.webp')) {
+  throw new Error('[stage] App WebP rewrite missing. Run pnpm app:stage without SKIP_NEXT_BUILD.');
 }
 
 rmSync(join(root, 'desktop/build'), { recursive: true, force: true });
@@ -27,7 +45,10 @@ const standalone = join(root, '.next/standalone');
 // 除 node_modules 外原样复制(.next/server 等)
 for (const name of readdirSync(standalone)) {
   if (name === 'node_modules' || name === 'server.js' || name === 'package.json') continue;
-  cpSync(join(standalone, name), join(out, name), { recursive: true });
+  cpSync(join(standalone, name), join(out, name), {
+    recursive: true,
+    filter: (src) => !basename(src).startsWith('.env'),
+  });
 }
 
 // 摊平 node_modules/.pnpm/*/node_modules/* -> node_modules/*
@@ -69,7 +90,30 @@ await build({
   logLevel: 'info',
 });
 
-cpSync(join(root, 'public'), join(out, 'public'), { recursive: true });
+// Only the staging copy changes. PNGs under public/images are omitted from the app.
+const images = join(root, 'public/images');
+cpSync(join(root, 'public'), join(out, 'public'), {
+  recursive: true,
+  filter: (src) => !(src.startsWith(images + '/') && src.endsWith('.png')),
+});
+function pngs(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    return entry.isDirectory() ? pngs(path) : path.endsWith('.png') ? [path] : [];
+  });
+}
+let pngBytes = 0;
+let webpBytes = 0;
+const sources = pngs(images);
+for (const src of sources) {
+  const dest = join(out, 'public/images-webp', relative(images, src).replace(/\.png$/, '.webp'));
+  mkdirSync(dirname(dest), { recursive: true });
+  execFileSync('cwebp', ['-quiet', '-q', '82', src, '-o', dest], { stdio: 'inherit' });
+  pngBytes += statSync(src).size;
+  webpBytes += statSync(dest).size;
+}
+writeFileSync(join(root, 'desktop/build/webp-metrics.json'), JSON.stringify({ quality: 82, images: sources.length, pngBytes, webpBytes }, null, 2) + '\n');
+console.log(`[stage] WebP q82: ${sources.length} PNGs, ${pngBytes} -> ${webpBytes} bytes`);
 cpSync(join(root, '.next/static'), join(out, '.next/static'), { recursive: true });
 
 const size = execFileSync('du', ['-sh', out]).toString().split('\t')[0];

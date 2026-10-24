@@ -675,7 +675,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 **ws / bufferutil 坑**:`server.ts` 顶部设 `process.env.WS_NO_BUFFER_UTIL ??= '1'`(开发模式下 Next 路由里的 ws 客户端同样会踩,真实 key 实测 `/api/settings/test` 的 ASR 探测报错),打包时 `desktop/scripts/stage.mjs` 的 esbuild 产物开头也设一次(打包后 ws 先于 server 主体求值)。否则打包版里 `ws` 的可选依赖 `bufferutil` 会被 Next 的 require hook 解析到没有 `mask` 的占位模块,ws 发送 >=48 字节的帧(ASR 请求帧/音频帧)时抛 `t.mask is not a function`;Phase 0 的 mock 模式不经过 ws 客户端,所以没暴露。
 
 
-## 桌面版(Electron Phase 3)
+## 桌面版(Electron Phase 3/4)
 
 2026-10-24:Phase 0/1 壳完善为以下生命周期与授权流程;保留既有 standalone + esbuild、自签名、退出码 75 契约。
 
@@ -691,6 +691,12 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 **数据与日志**:`app.getPath('userData')`(通常 `~/Library/Application Support/EduAgent/`)下保存 `settings.json`、`eduagent.db` 和 `logs/server.log`;日志启动时超过 5 MiB 轮转为 `server.log.1`,保留一份。关于区块与 App 菜单均可经 `shell.openPath` 打开日志目录。Key 仍由 server 从 settings 文件映射到 env,见上方 Phase 1 节。
 
-**开发与打包**:`pnpm app:dev` 启动本机 `pnpm dev`(优先 3000,占用则改空闲端口),Electron 通过 `EDUAGENT_DEV_URL` 指向该 dev server,不依赖 staged server 或安装包。启动脚本负责清理其 dev 进程组,普通 `pnpm dev` 行为不变。`pnpm app:pack` 仍经独立专用钥匙串签名并生成 arm64 dmg,保留 `EnableNodeCliInspectArguments` fuse 以支持 Playwright。`pnpm app:e2e` 在临时 userData + VOICE_MOCK 或本地 fake server 下执行;只有 `EDUAGENT_TEST=1` 时 `EDUAGENT_TEST_MIC_STATUS=granted|denied|not-determined` 才覆盖 native 状态,未询问时点允许会在该测试进程内变为 granted。
+**开发与打包**:`pnpm app:dev` 启动本机 `pnpm dev`(优先 3000,占用则改空闲端口),Electron 通过 `EDUAGENT_DEV_URL` 指向该 dev server,不依赖 staged server 或安装包。启动脚本负责清理其 dev 进程组,普通 `pnpm dev` 行为不变。`pnpm app:release`(兼容入口 `pnpm app:pack`)经 `desktop/scripts/release.mjs` 完成 stage → electron-builder dir → 专用钥匙串自签名与 codesign 校验 → dmg。版本从根 `package.json` 注入打包 metadata,文件名为 `EduAgent-<version>-<arch>.dmg`;保留 `EnableNodeCliInspectArguments` fuse 以支持 Playwright。证书步骤见 [mac-signing.md](mac-signing.md)。`pnpm app:e2e` 在临时 userData + VOICE_MOCK 或本地 fake server 下执行;只有 `EDUAGENT_TEST=1` 时 `EDUAGENT_TEST_MIC_STATUS=granted|denied|not-determined` 才覆盖 native 状态,未询问时点允许会在该测试进程内变为 granted。
+
+**App 图片 staging(2026-10-24 Phase 4)**:`stage.mjs` 在构建前确认本机 `cwebp` 可执行,仅把 `public/images/**/*.png` 转成 q82 WebP 放入 `desktop/build/server/public/images-webp/`,不复制这批 PNG 到 staging,不改仓库原图、课程数据或组件。`next.config.mjs` 仅在 `EDUAGENT_STANDALONE=1` 时开启 standalone 和 rewrite:`/images/:path*.png` → `/images-webp/:path*.webp`;普通 dev/build 没有 rewrite。App 的生产配置从 required-server-files 注入,路由从构建 manifest 读取。`SKIP_NEXT_BUILD=1` 只可复用已有 App 构建,stage 会检查 rewrite 存在,防止误用普通 Web 构建。转换统计保存在 `desktop/build/webp-metrics.json`。standalone 复制排除 `.env*`,发布物不带开发配置、用户数据库或签名文件。
+
+`pnpm app:verify-images` 从 `allCourses` 递归收集全部 `imageUrl`,启动真实打包 App,使用原 PNG URL 逐个检查 200、`image/webp`、RIFF/WEBP 文件头和 Chromium 实际解码。JSON 证据位于 `desktop/dist/evidence/webp-verification.json`;`python3 desktop/scripts/compare-webp.py`(需 Pillow)据此每门课抽一张生成左右对比图,保留原生 512px,供画质目检。采用 Next 原生 [rewrite](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites) 与官方 [cwebp](https://developers.google.com/speed/webp/docs/cwebp),没有新增运行时图片处理依赖。
+
+**架构产物**:2026-10-24 用户决定只交付 Apple 芯片 arm64 版,Intel 版按需再做,不生成 universal 包。SQLite 无 ABI 重编译需求,但 Next 构建工具依赖宿主架构的 SWC。Phase 0 曾认为 standalone 会携带该 SWC;本轮实际 staging 未发现 `@next/swc-*` 或 `.node` 二进制,因此不把旧推断当作本轮包内容事实。将来制作 x64 时需要在 x64 环境重新 `next build`,确认 SWC/esbuild 构建依赖可用,再完成 x64 App 冒烟和 Intel Mac 真机验收。当前 release 只接受 arm64 Node,且始终重新构建,不接受 `SKIP_NEXT_BUILD` 跳过。
 
 实现依据:采用 Electron 原生 [systemPreferences](https://www.electronjs.org/docs/latest/api/system-preferences) 和固定方法的 [contextBridge / IPC](https://www.electronjs.org/docs/latest/tutorial/ipc),不新增原生依赖或自制授权协议。真实 TCC 弹窗、系统设置页跳转、覆盖安装后授权保留及实体麦克风音质仍需真机验证。

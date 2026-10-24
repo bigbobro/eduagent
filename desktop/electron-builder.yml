@@ -1,5 +1,6 @@
 appId: com.eduagent.desktop
 productName: EduAgent
+artifactName: '${productName}-${version}-${arch}.${ext}'
 directories:
   app: desktop
   output: desktop/dist

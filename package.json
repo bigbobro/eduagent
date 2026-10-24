@@ -21,7 +21,9 @@
     "smoke:lesson": "tsx scripts/lesson-smoke.ts",
     "screenshots": "tsx scripts/capture-screenshots.ts",
     "app:stage": "node desktop/scripts/stage.mjs",
-    "app:pack": "pnpm app:stage && electron-builder --config desktop/electron-builder.yml --mac dir --arm64 && desktop/scripts/sign-and-dmg.sh",
+    "app:pack": "pnpm app:release",
+    "app:release": "node desktop/scripts/release.mjs",
+    "app:verify-images": "tsx scripts/verify-app-images.ts",
     "app:e2e": "node desktop/e2e/app.e2e.mjs",
     "app:dev": "node desktop/scripts/dev.mjs"
   },
