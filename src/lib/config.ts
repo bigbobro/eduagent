@@ -58,7 +58,7 @@ export function getConfig(): AppConfig {
       : (process.env.LLM_BASE_URL ?? 'https://api.siliconflow.cn/v1'),
     llmModel: useLegacyLlm
       ? (process.env.MIMO_MODEL ?? 'mimo-v2.5-pro')
-      : (process.env.LLM_MODEL ?? 'deepseek-ai/DeepSeek-V4-Flash'),
+      : (process.env.LLM_MODEL ?? 'deepseek-ai/DeepSeek-V3.2'),
 
     doubaoAppId: process.env.DOUBAO_APP_ID,
     doubaoAccessKey: process.env.DOUBAO_ACCESS_KEY,

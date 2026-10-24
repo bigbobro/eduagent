@@ -24,7 +24,7 @@ export const SECRET_FIELDS: readonly SettingsField[] = ['llmApiKey', 'doubaoAppI
 export const SETTINGS_DEFAULTS: SettingsValues = {
   llmApiKey: '',
   llmBaseUrl: 'https://api.siliconflow.cn/v1',
-  llmModel: 'deepseek-ai/DeepSeek-V4-Flash',
+  llmModel: 'deepseek-ai/DeepSeek-V3.2',
   doubaoAppId: '',
   doubaoAccessKey: '',
   doubaoAsrResourceId: 'volc.seedasr.sauc.duration',

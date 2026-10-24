@@ -20,7 +20,7 @@ const SECRET: FieldKey[] = ['llmApiKey', 'doubaoAppId', 'doubaoAccessKey'];
 // 与服务端 SETTINGS_DEFAULTS 一致(服务端回传的值为空时,表单里显示这些默认值)
 const DEFAULTS: Partial<Values> = {
   llmBaseUrl: 'https://api.siliconflow.cn/v1',
-  llmModel: 'deepseek-ai/DeepSeek-V4-Flash',
+  llmModel: 'deepseek-ai/DeepSeek-V3.2',
   doubaoAsrResourceId: 'volc.seedasr.sauc.duration',
   doubaoTtsResourceId: 'seed-tts-2.0',
 };

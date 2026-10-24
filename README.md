@@ -158,7 +158,7 @@ cp .env.example .env.local
 
 可选：
 
-- `LLM_MODEL`：LLM 模型名，缺省 `deepseek-ai/DeepSeek-V4-Flash`。
+- `LLM_MODEL`：LLM 模型名，缺省 `deepseek-ai/DeepSeek-V3.2`。
 - `DATABASE_PATH`：SQLite 文件路径，缺省 `./db/eduagent.db`。
 - `VOICE_MOCK=true`：本地无网络或无真实 provider 凭据时，用 mock 跑通主要流程。
 
@@ -268,7 +268,7 @@ Required variables:
 
 Optional:
 
-- `LLM_MODEL`: LLM model name, defaults to `deepseek-ai/DeepSeek-V4-Flash`.
+- `LLM_MODEL`: LLM model name, defaults to `deepseek-ai/DeepSeek-V3.2`.
 - `DATABASE_PATH`: SQLite file path, defaults to `./db/eduagent.db`.
 - `VOICE_MOCK=true`: run the main local flow with mock LLM/ASR/TTS behavior.
 

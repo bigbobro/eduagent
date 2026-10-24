@@ -410,7 +410,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 ## 7. 性能基线(历史:MiMo 时代)
 
 > **本节表格是 MiMo 时代的历史基线,不是当前系统的性能。** 当前 LLM 为
-> SiliconFlow DeepSeek-V4-Flash,现役数字以 `docs/voice-benchmarks.md` 为准;
+> SiliconFlow DeepSeek-V3.2(2026-10-24 起默认,此前为 DeepSeek-V4-Flash),现役数字以 `docs/voice-benchmarks.md` 为准(其中 2026-07 的数字测于 V4-Flash,V3.2 未重测);
 > 下面只保留作对比与回溯用,不要拿它当验收标准。
 
 详见 `docs/voice-benchmarks.md`(2026-05-01 18 轮人工实测,14 轮成功)。
