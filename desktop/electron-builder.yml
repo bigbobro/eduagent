@@ -7,6 +7,8 @@ directories:
 # app 目录只放壳(main.js + package.json);server 作为 extraResources 原样拷贝,不进 asar。
 files:
   - main.js
+  - preload.js
+  - restarting.html
   - package.json
   - '!**/node_modules/**'
 extraResources:
@@ -18,6 +20,8 @@ extraResources:
 asar: true
 afterPack: desktop/scripts/after-pack.cjs
 electronVersion: 45.0.0
+electronFuses:
+  enableNodeCliInspectArguments: true # Playwright launches the signed app with --inspect
 mac:
   target:
     - target: dir

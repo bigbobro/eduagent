@@ -1,4 +1,6 @@
 'use client';
+import { MicOnboarding, MIC_SETUP_COMPLETE } from './microphone/MicOnboarding';
+import { getMicStatus } from '@/lib/audio/microphone';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { HomeStudy, type CourseCardStatus } from '@/components/home/HomeStudy';
@@ -12,6 +14,7 @@ export default function HomePage() {
   const [learners, setLearners] = useState<LearnerProfile[] | null>(null);
   const [learner, setLearner] = useState<LearnerProfile | null>(null);
   const [profileError, setProfileError] = useState(false);
+  const [needsMic, setNeedsMic] = useState<boolean | null>(null);
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [progress, setProgress] = useState<Record<string, CourseCardStatus>>({});
   const [error, setError] = useState(false);
@@ -66,9 +69,20 @@ export default function HomePage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((s) => {
         if (s && s.configured === false) router.replace('/settings');
+        else if (s?.configured) {
+          void getMicStatus().then((status) => {
+            let completed = false;
+            try { completed = Boolean(localStorage.getItem(MIC_SETUP_COMPLETE)); } catch {}
+            setNeedsMic(status === 'not-determined' && !completed);
+          }).catch(() => setNeedsMic(false));
+        } else setNeedsMic(false);
       })
-      .catch(() => {});
+      .catch(() => setNeedsMic(false));
   }, [router]);
+
+  if (needsMic !== false) return needsMic ? <MicOnboarding onDone={() => setNeedsMic(false)} /> : (
+    <PaperBg tone="paper" className="h-screen w-screen"><main role="status" className="grid h-full place-items-center font-zh text-ink">正在准备…</main></PaperBg>
+  );
 
   if (!learner) return (
     <PaperBg tone="paper" className="h-screen w-screen">
@@ -79,6 +93,7 @@ export default function HomePage() {
       </main>
     </PaperBg>
   );
+
 
   return (
     <>

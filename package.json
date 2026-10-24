@@ -22,7 +22,8 @@
     "screenshots": "tsx scripts/capture-screenshots.ts",
     "app:stage": "node desktop/scripts/stage.mjs",
     "app:pack": "pnpm app:stage && electron-builder --config desktop/electron-builder.yml --mac dir --arm64 && desktop/scripts/sign-and-dmg.sh",
-    "app:e2e": "node desktop/e2e/app.e2e.mjs"
+    "app:e2e": "node desktop/e2e/app.e2e.mjs",
+    "app:dev": "node desktop/scripts/dev.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

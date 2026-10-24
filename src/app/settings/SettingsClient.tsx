@@ -1,4 +1,7 @@
 'use client';
+
+import { MicSection } from '@/components/settings/MicSection';
+import { AboutSection } from '@/components/settings/AboutSection';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LearnersSection } from '@/components/settings/LearnersSection';
@@ -184,7 +187,9 @@ export function SettingsClient() {
               <Result label="语音识别(ASR)" result={report?.asr} />
             </Group>
 
+            <MicSection />
             <LearnersSection />
+            <AboutSection />
 
             {error && <p role="alert" className="font-zh text-sm text-ember">{error}</p>}
             {phase === 'restarting' && <p role="status" className="font-zh text-sm text-inkSoft">正在重启…保存成功,窗口马上刷新。</p>}
