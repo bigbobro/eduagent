@@ -1,6 +1,6 @@
 // Electron e2e(Phase 0):启动打包后的 .app,临时 userData + VOICE_MOCK,Chromium 假麦克风。
 // 用法:node desktop/e2e/app.e2e.mjs [path-to-EduAgent.app]
-import { mkdtempSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -11,18 +11,30 @@ const appPath = resolve(process.argv[2] || 'desktop/dist/mac-arm64/EduAgent.app'
 const exe = join(appPath, 'Contents/MacOS/EduAgent');
 const userData = mkdtempSync(join(tmpdir(), 'eduagent-e2e-'));
 const userData2 = mkdtempSync(join(tmpdir(), 'eduagent-e2e-settings-'));
+const evidenceDir = resolve('desktop/dist/evidence');
+mkdirSync(evidenceDir, { recursive: true });
 const results = [];
 const check = (name, ok, detail = '') => {
   results.push({ name, ok });
   console.log(`[e2e] ${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` - ${detail}` : ''}`);
 };
 
+async function snapshot(page, name) {
+  // The route template fades in for 300ms; capture the settled screen.
+  await page.waitForFunction(() => {
+    let node = document.querySelector('main');
+    while (node) { if (Number(getComputedStyle(node).opacity) < 0.99) return false; node = node.parentElement; }
+    return true;
+  });
+  await page.screenshot({ path: join(evidenceDir, name) });
+}
+
 let app;
 let exitCode = 0;
 try {
   app = await electron.launch({
     executablePath: exe,
-    env: { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_USER_DATA: userData, VOICE_MOCK: 'true' },
+    env: { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_TEST_MIC_STATUS: 'granted', EDUAGENT_USER_DATA: userData, VOICE_MOCK: 'true' },
     timeout: 60000,
   });
   const page = await app.firstWindow();
@@ -147,7 +159,7 @@ function nodeRequest(path, { method = 'GET', headers = {}, body } = {}) {
 
 let appB;
 try {
-  const envB = { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_USER_DATA: userData2, EDUAGENT_PORT: String(B_PORT),
+  const envB = { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_TEST_MIC_STATUS: 'granted', EDUAGENT_USER_DATA: userData2, EDUAGENT_PORT: String(B_PORT),
     DOUBAO_TTS_WS_URL: `ws://127.0.0.1:${ttsServer.address().port}`, DOUBAO_ASR_WS_URL: `ws://127.0.0.1:${asrServer.address().port}` };
   delete envB.VOICE_MOCK;
   appB = await electron.launch({ executablePath: exe, env: envB, timeout: 60000 });
@@ -182,6 +194,8 @@ try {
   check('external guide link opens in system browser, window stays on settings', opened.length === 1 && opened[0].startsWith('https://console.volcengine.com/') && /\/settings$/.test(page.url()), JSON.stringify(opened));
 
   // B4. 保存 -> server 重启 -> 窗口 reload -> configured=true
+  const restartNavigations = [];
+  page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) restartNavigations.push(frame.url()); });
   await page.getByRole('button', { name: '保存' }).click();
   await page.getByRole('status').waitFor({ timeout: 10000 });
   await page.getByText('动物 Animals').first().waitFor({ timeout: 60000 });
@@ -190,6 +204,8 @@ try {
   const log2 = readFileSync(logPath2, 'utf8');
   const restarts = (log2.match(/server requested restart/g) || []).length;
   check('save: server restarted once, window reloaded to home, configured=true', info.configured === true && info.mode === 'app' && restarts === 1 && /127\.0\.0\.1:38427\/$/.test(page.url()), `restarts=${restarts} url=${page.url()}`);
+
+  check('saving settings displays the local restarting page before returning home', restartNavigations.some((u) => u.endsWith('/restarting.html')));
 
   // B5. 文件权限、无完整 key
   const settingsPath = join(userData2, 'settings.json');
@@ -216,6 +232,122 @@ try {
   asrServer.close();
   rmSync(userData2, { recursive: true, force: true });
 }
+// ───────────────────────── 场景 C:权限、端口、进程生命周期(Phase 3)───────────────────
+const micSettingsUrl = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
+const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const spawnedPids = (dir) => [...readFileSync(join(dir, 'logs/server.log'), 'utf8').matchAll(/server spawned pid=(\d+)/g)].map((m) => Number(m[1]));
+const closeAndCheck = async (instance, dir) => {
+  const pids = spawnedPids(dir);
+  await instance.close();
+  await new Promise((r) => setTimeout(r, 300));
+  check('quit leaves no server child process', pids.length > 0 && pids.every((pid) => !isAlive(pid)), pids.join(','));
+};
+for (const status of ['granted', 'denied', 'not-determined']) {
+  const dir = mkdtempSync(join(tmpdir(), `eduagent-e2e-mic-${status}-`));
+  let instance;
+  try {
+    instance = await electron.launch({ executablePath: exe, env: { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_TEST_MIC_STATUS: status, EDUAGENT_USER_DATA: dir, VOICE_MOCK: 'true' }, timeout: 60000 });
+    const page = await instance.firstWindow();
+    await page.waitForURL(/127\.0\.0\.1:\d+\/$/, { timeout: 60000 });
+    if (status === 'not-determined') {
+      await page.getByTestId('mic-onboarding').waitFor({ timeout: 15000 });
+      check('first-run microphone step appears when not-determined', true);
+      await snapshot(page, 'mic-onboarding.png');
+      await page.getByRole('button', { name: '稍后设置' }).click();
+      await page.reload();
+      await page.getByText('动物 Animals').first().waitFor();
+      // Query the bridge as well, so this asserts skip did not grant access.
+      check('skipping onboarding persists and never requests permission', await page.evaluate(() => window.eduagentDesktop.getMicStatus()) === 'not-determined' && !readFileSync(join(dir, 'logs/server.log'), 'utf8').includes('askForMediaAccess'));
+    } else {
+      await page.getByText('动物 Animals').first().waitFor();
+      check(`no first-run microphone step for ${status}`, await page.getByTestId('mic-onboarding').count() === 0);
+    }
+    check(`startup never asks for microphone (${status})`, !readFileSync(join(dir, 'logs/server.log'), 'utf8').includes('askForMediaAccess'));
+    const base = new URL(page.url()).origin;
+    await page.goto(`${base}/settings`);
+    const label = { granted: '已允许', denied: '已拒绝', 'not-determined': '未询问' }[status];
+    await page.getByTestId('mic-status').filter({ hasText: label }).waitFor();
+    check(`settings microphone state: ${status}`, true);
+    await page.getByTestId('mic-status').scrollIntoViewIfNeeded();
+    await snapshot(page, `mic-${status}.png`);
+    const version = await instance.evaluate(({ app }) => app.getVersion());
+    await page.getByTestId('app-version').filter({ hasText: version }).waitFor();
+    check('About shows packaged application version', true, version);
+    const bridgeKeys = await page.evaluate(() => Object.keys(window.eduagentDesktop).sort().join(','));
+    check('preload exposes exactly the five native methods', bridgeKeys === 'getAppInfo,getMicStatus,openLogsFolder,openMicSettings,requestMic');
+    await instance.evaluate(({ shell }) => {
+      globalThis.__opened = []; globalThis.__paths = [];
+      shell.openExternal = async (url) => { globalThis.__opened.push(url); };
+      shell.openPath = async (path) => { globalThis.__paths.push(path); return ''; };
+    });
+    await page.getByRole('button', { name: '打开日志文件夹' }).click();
+    await page.waitForTimeout(100);
+    check('open logs uses the current userData logs folder', await instance.evaluate((_e, expected) => globalThis.__paths.includes(expected), join(dir, 'logs')));
+    if (status === 'denied') {
+      await page.getByRole('button', { name: '打开系统设置' }).click();
+      await page.waitForTimeout(100);
+      check('denied: opens the exact macOS microphone settings URL', await instance.evaluate((_e, expected) => globalThis.__opened.includes(expected), micSettingsUrl));
+      await page.addInitScript(() => {
+        window.__micCalls = 0;
+        navigator.mediaDevices.getUserMedia = async () => { window.__micCalls++; throw new Error('Unexpected microphone capture'); };
+      });
+      let chatCalls = 0;
+      page.on('request', (req) => { if (req.url().endsWith('/api/chat') && req.method() === 'POST') chatCalls++; });
+      await page.goto(`${base}/lesson/animals`);
+      await page.getByRole('link', { name: '去设置' }).waitFor();
+      check('denied: lesson prompts settings without recording or starting a session', chatCalls === 0 && await page.evaluate(() => window.__micCalls) === 0);
+    } else if (status === 'not-determined') {
+      await page.getByRole('button', { name: '允许使用麦克风' }).click();
+      await page.getByTestId('mic-status').filter({ hasText: '已允许' }).waitFor();
+      check('only the explicit Allow button requests microphone access', readFileSync(join(dir, 'logs/server.log'), 'utf8').includes('askForMediaAccess requested by microphone UI'));
+    } else {
+      await page.getByRole('button', { name: '试录一下' }).click();
+      await page.getByRole('meter', { name: '麦克风音量' }).waitFor();
+      await page.waitForFunction(() => Number(document.querySelector('[role="meter"]').getAttribute('aria-valuenow')) > 0);
+      check('test recording receives PCM and updates the volume meter', true);
+      await page.getByRole('button', { name: '停止试录' }).click();
+      await page.getByRole('meter').waitFor({ state: 'detached' });
+    }
+    await closeAndCheck(instance, dir); instance = null;
+  } catch (err) { console.log(`[e2e] ERROR (microphone ${status})`, err); exitCode = 1; }
+  finally { if (instance) await instance.close().catch(() => {}); rmSync(dir, { recursive: true, force: true }); }
+}
+
+const collisionDir = mkdtempSync(join(tmpdir(), 'eduagent-e2e-port-crash-'));
+const blocker = http.createServer((_req, res) => res.writeHead(503).end('occupied'));
+await new Promise((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+let collisionApp;
+try {
+  const preferred = blocker.address().port;
+  collisionApp = await electron.launch({ executablePath: exe, env: { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_TEST_MIC_STATUS: 'granted', EDUAGENT_USER_DATA: collisionDir, EDUAGENT_PORT: String(preferred), VOICE_MOCK: 'true' }, timeout: 60000 });
+  const page = await collisionApp.firstWindow();
+  await page.getByText('动物 Animals').first().waitFor({ timeout: 60000 });
+  const base = new URL(page.url()).origin;
+  check('occupied preferred port: app selects a free loopback port and logs it', Number(new URL(base).port) !== preferred && readFileSync(join(collisionDir, 'logs/server.log'), 'utf8').includes(`preferred port ${preferred} occupied`));
+  const originCheck = await page.evaluate(async () => (await fetch('/api/settings/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status);
+  check('HTTP Origin whitelist follows the selected port', originCheck !== 403, String(originCheck));
+  const wsOk = await page.evaluate(() => new Promise((resolve) => {
+    const ws = new WebSocket(location.origin.replace('http:', 'ws:') + '/api/voice/tts');
+    const timer = setTimeout(() => { ws.close(); resolve(false); }, 5000);
+    ws.onopen = () => { clearTimeout(timer); ws.close(); resolve(true); };
+    ws.onerror = () => { clearTimeout(timer); resolve(false); };
+  }));
+  check('WebSocket Origin whitelist follows the selected port', wsOk);
+  const firstPid = spawnedPids(collisionDir).at(-1);
+  process.kill(firstPid, 'SIGKILL');
+  await page.waitForURL(/restarting\.html$/, { timeout: 15000 });
+  check('crash recovery shows a local restarting page', (await page.getByRole('status').innerText()).includes('正在重启'));
+  await page.waitForURL(`${base}/`, { timeout: 60000 });
+  await page.getByText('动物 Animals').first().waitFor();
+  const secondPid = spawnedPids(collisionDir).at(-1);
+  check('one server crash automatically recovers', firstPid !== secondPid && readFileSync(join(collisionDir, 'logs/server.log'), 'utf8').includes('automatic restart 1/1'));
+  process.kill(secondPid, 'SIGKILL');
+  await page.getByRole('heading', { name: 'EduAgent 启动失败' }).waitFor({ timeout: 15000 });
+  await snapshot(page, 'server-error.png');
+  check('second server crash shows an error page with log path', (await page.locator('body').innerText()).includes(join(collisionDir, 'logs/server.log')) && spawnedPids(collisionDir).length === 2);
+  await closeAndCheck(collisionApp, collisionDir); collisionApp = null;
+} catch (err) { console.log('[e2e] ERROR (port/crash)', err); exitCode = 1; }
+finally { if (collisionApp) await collisionApp.close().catch(() => {}); blocker.close(); rmSync(collisionDir, { recursive: true, force: true }); }
 if (results.some((r) => !r.ok)) exitCode = 1;
 console.log(`[e2e] ${exitCode === 0 ? 'ALL PASS' : 'FAILED'} (${results.filter((r) => r.ok).length}/${results.length})`);
 process.exit(exitCode);
