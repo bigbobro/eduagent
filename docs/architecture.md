@@ -39,6 +39,8 @@
 
 > 2026-10 spike:SQLite 驱动由 `better-sqlite3` 换成 Node 内置 `node:sqlite`,统一经 `src/lib/db/sqlite.ts` 封装(保留 `prepare/exec/pragma/transaction/close`,嵌套 transaction 用 SAVEPOINT)。无原生模块,`pnpm.onlyBuiltDependencies` 已移除。上文历史条目中的 better-sqlite3 描述以此为准。
 
+> 2026-10 桌面版 spike(`desktop/`,未合并):Electron main 用 `utilityProcess` 拉起打包后的 server(`EDUAGENT_APP=1`、`HOST=127.0.0.1`、`DATABASE_PATH=<userData>/eduagent.db`、固定端口 38417),等端口就绪再开窗口。`EDUAGENT_APP=1` 时 `server.ts` 不读 `.env.local`,Next 配置取自 `.next/required-server-files.json`(经 `__NEXT_PRIVATE_STANDALONE_CONFIG`),`HOST` 缺省仍监听所有网卡(开发行为不变)。server 打包:`EDUAGENT_STANDALONE=1 next build`(`output: 'standalone'`)+ esbuild 打 `server.ts` + 手动补 `public/`、`.next/static`,见 `desktop/scripts/stage.mjs`。
+
 ## 2. 模块清单与职责
 
 | 文件 | 职责(一句话) |

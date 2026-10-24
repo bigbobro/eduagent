@@ -19,7 +19,10 @@
     "voice:asr-hotwords": "tsx scripts/asr-hotwords-regression.ts",
     "smoke": "tsx scripts/smoke-pages.ts",
     "smoke:lesson": "tsx scripts/lesson-smoke.ts",
-    "screenshots": "tsx scripts/capture-screenshots.ts"
+    "screenshots": "tsx scripts/capture-screenshots.ts",
+    "app:stage": "node desktop/scripts/stage.mjs",
+    "app:pack": "pnpm app:stage && electron-builder --config desktop/electron-builder.yml --mac dir --arm64 && desktop/scripts/sign-and-dmg.sh",
+    "app:e2e": "node desktop/e2e/app.e2e.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
@@ -39,6 +42,9 @@
     "@types/uuid": "^11.0.0",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.1",
+    "electron": "45.0.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.35",
     "jsdom": "^29.1.0",

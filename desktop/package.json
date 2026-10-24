@@ -1,0 +1,9 @@
+{
+  "name": "eduagent-desktop",
+  "productName": "EduAgent",
+  "version": "0.0.1",
+  "description": "EduAgent desktop shell (spike)",
+  "author": "EduAgent",
+  "main": "main.js",
+  "private": true
+}

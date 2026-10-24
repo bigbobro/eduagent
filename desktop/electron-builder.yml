@@ -1,0 +1,31 @@
+appId: com.eduagent.desktop
+productName: EduAgent
+directories:
+  app: desktop
+  output: desktop/dist
+  buildResources: desktop/build-resources
+# app 目录只放壳(main.js + package.json);server 作为 extraResources 原样拷贝,不进 asar。
+files:
+  - main.js
+  - package.json
+  - '!**/node_modules/**'
+extraResources:
+  - from: desktop/build/server
+    to: server
+    filter:
+      - '**/*'
+      - '.next/**'
+asar: true
+afterPack: desktop/scripts/after-pack.cjs
+electronVersion: 45.0.0
+mac:
+  target:
+    - target: dir
+      arch: arm64
+  electronLanguages: [en, zh_CN]
+  category: public.app-category.education
+  identity: null # 由 desktop/scripts/sign-and-dmg.sh 用专用钥匙串手动签名
+  extendInfo:
+    NSMicrophoneUsageDescription: EduAgent 需要使用麦克风,让孩子跟老师对话、练习英语发音。
+dmg:
+  title: EduAgent
