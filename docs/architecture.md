@@ -126,6 +126,14 @@ PhasedLessonView mount → new LessonController → new PhasedLessonController
 
 每轮 `commitTurn` / `recordQuizAnswer` 用 `serializeProgress` upsert 断点(`isCourseComplete` 判 `completed`)。**完成 = 全 word cleared + 全 quiz passed**(quiz 答对累积 `passedQuizIds`)。**不过期**(PRD R4)——断点一直有效到该课完成;完成后行仍保留但不再恢复(下次是复习式全新开始)。「空 intro 断点」判据(`isResumableProgress`)专门挡住"进课只听开场白就退→误判续课、老师错误地说欢迎回来"。
 
+### 3.1c 模型服务失败提示(2026-10-24)
+
+`llm-errors.ts` 的纯函数 `classifyLlmFailure({ status?, body?, error? })` 供 `streamLLM` 与设置页 LLM 探测共用。稳定错误码为 `LLM_INSUFFICIENT_BALANCE`(402 或余额不足文字)、`LLM_AUTH_FAILED`(401/403 或鉴权文字)、`LLM_MODEL_UNAVAILABLE`(404 或模型错误文字)、`LLM_RATE_LIMITED`(429)、`LLM_TIMEOUT`、`LLM_NETWORK_ERROR`、`LLM_OTHER`。明确 HTTP 状态优先于 body 中可能有歧义的文字,例如 429 的 insufficient quota 仍归限流。超时覆盖连接与流读取;调用方主动取消保持原取消语义。
+
+服务端抛出只含安全信息的 `LlmServiceError`;session 与 orchestrator 保留分类,开课、对话及转场经现有 SSE `error` 发送 `{ code, message }`,不发送上游 body。`LessonController` 保留已知 code 与中文 message,也支持相同结构的 HTTP 错误响应,沿用失败开场清理及对话恢复 awaiting 的流程。未知/无 code 错误保持原位置的通用文案。`PhasedLessonView` 在原提示位置显示具体原因,余额不足、鉴权失败、模型不存在额外显示 `/settings` 的「去设置」链接,这些提示持续保留到开课/转场重试、后续轮次成功提交或离开,其他提示仍在 4 秒后消失。
+
+课堂调用与 LLM 探测失败日志只记录分类 `code`、`status`(无 HTTP 响应时为 null)、安全的 `providerCode`(数字或已知符号码,不可用时为 null),不记录原始错误 body、Key 或任意上游错误文本。
+
 ### 3.2 一轮对话
 
 ```
@@ -667,7 +675,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 **Settings API**(`src/app/api/settings/`)
 - `GET /api/settings` -> `{ mode: 'app'|'web', configured, mock, values }`;`llmApiKey / doubaoAppId / doubaoAccessKey` 打码(末 4 位,长度 ≤8 只给 `••••`),其余原样。
 - `POST /api/settings`:仅 App 模式(web 模式 403 `WEB_MODE_READONLY`)。zod 校验,凭据字段提交打码值或空串 = 保留原值;同目录临时文件(0600)写完 rename,再 chmod 0600。返回 200 后 400ms 以**退出码 75** 退出。
-- `POST /api/settings/test`:用表单值(打码字段回退已保存值)并行测 LLM(`/chat/completions`,`max_tokens: 5`,10s 超时)、豆包 TTS(用 `tts-proxy` 同样的头发 StartConnection,等 ConnectionStarted)、豆包 ASR(同 `asr-proxy` 的头与 full client request,首个非错误帧或握手后 3s 无错即通过)。每项 `{ ok, reason }`,reason 是中文原因 + 原始 HTTP 状态/豆包错误码;不回显、不记录 key。
+- `POST /api/settings/test`:用表单值(打码字段回退已保存值)并行测 LLM(`/chat/completions`,`max_tokens: 5`,10s 超时)、豆包 TTS(用 `tts-proxy` 同样的头发 StartConnection,等 ConnectionStarted)、豆包 ASR(同 `asr-proxy` 的头与 full client request,首个非错误帧或握手后 3s 无错即通过)。每项 `{ ok, reason }`,LLM 失败额外返回稳定 `code`,与课堂共用 `classifyLlmFailure` 的中文原因并附 HTTP 状态,例如「余额不足:请到模型服务商控制台充值后再试(HTTP 402)」。豆包原因与错误码保持原契约;不回显、不记录 key。
 - **CSRF**:两个 POST 都经 `rejectBadOrigin()`,`Origin` 必须是 `http://localhost:<PORT>` 或 `http://127.0.0.1:<PORT>`;**缺失也拒绝**(与 WS 允许缺失的规则不同),返回 403。
 
 **退出码 75 重启约定**:server 保存设置后以 75 退出;`desktop/main.js` 的 utilityProcess `exit` 回调见 75 就用同样的 env 重启子进程,端口就绪后 `loadURL` 重新加载窗口。非 0 且非 75 退出自动恢复一次,再崩溃则显示含日志路径的错误页;恢复期间显示本地重启页,详见下方「桌面版」。`desktop/main.js` 的 `setWindowOpenHandler` / `will-navigate` 把站外 http(s) 链接交给系统浏览器,其余导航一律拦截。

@@ -15,6 +15,7 @@ import {
 import { deserializeProgress, isCourseComplete, serializeProgress } from './course-progress';
 import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/llm';
+import { LlmServiceError } from '@/lib/llm-errors';
 import { getDb } from '@/lib/db';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 import {
@@ -280,7 +281,7 @@ async function* streamSessionInput(
       extractor.feed(ev.delta);
     }
   } catch (err) {
-    yield { type: 'error', message: (err as Error).message };
+    yield { type: 'error', message: (err as Error).message, ...(err instanceof LlmServiceError ? { code: err.failure.code } : {}) };
     return;
   }
 

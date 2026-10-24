@@ -248,4 +248,33 @@ describe('PhasedLessonView', () => {
     expect(await screen.findByText(/Find the milk/)).toBeTruthy();
     expect(screen.queryByText(/Where is the apple/)).toBeNull();
   });
+  it.each(['LLM_INSUFFICIENT_BALANCE', 'LLM_AUTH_FAILED', 'LLM_MODEL_UNAVAILABLE'])('renders a specific reason and settings link for %s', (code) => {
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
+    act(() => lessonInstances[0].emit('error', { code, message: '余额不足:请到模型服务商控制台充值后再试' }));
+    const notice = screen.getByRole('status');
+    expect(notice.textContent).toContain('余额不足');
+    expect(within(notice).getByRole('link', { name: '去设置' }).getAttribute('href')).toBe('/settings');
+  });
+
+  it('keeps generic failures free of a configuration action', () => {
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
+    act(() => lessonInstances[0].emit('error', { message: '课堂暂时没准备好,再试一次吧' }));
+    expect(screen.getByRole('status').textContent).toContain('课堂暂时没准备好');
+    expect(screen.queryByRole('link', { name: '去设置' })).toBeNull();
+  });
+
+  it('keeps configuration errors actionable after four seconds and clears them after a successful turn', () => {
+    vi.useFakeTimers();
+    try {
+      render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
+      act(() => lessonInstances[0].emit('error', { code: 'LLM_INSUFFICIENT_BALANCE', message: '余额不足:请到模型服务商控制台充值后再试' }));
+      act(() => vi.advanceTimersByTime(5000));
+      expect(screen.getByRole('link', { name: '去设置' })).toBeTruthy();
+      act(() => lessonInstances[0].emitProgress(['apple']));
+      expect(screen.queryByRole('status')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 });

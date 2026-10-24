@@ -5,10 +5,15 @@ import { WebSocket as WsClient } from 'ws';
 import { decodeTtsFrame, encodeFullClientRequest, encodeTtsEvent, MessageType } from '../voice/doubao-codec';
 import { doubaoAsrWsUrl, doubaoTtsWsUrl } from '../voice/doubao-endpoints';
 import type { SettingsValues } from './store';
+import { classifyLlmFailure, type LlmErrorCode, type LlmFailure } from '../llm-errors';
+import { createLogger } from '../logger';
+
+const log = createLogger('settings-llm-test');
 
 export interface CheckResult {
   ok: boolean;
   reason: string;
+  code?: LlmErrorCode;
 }
 
 const TIMEOUT_MS = 10_000;
@@ -56,12 +61,15 @@ export async function testLlm(v: Pick<SettingsValues, 'llmApiKey' | 'llmBaseUrl'
       return { ok: true, reason: '连接正常' };
     }
     const text = await res.text().catch(() => '');
-    // 模型名错误常见返回 400/404 + model 字样
-    if (res.status === 400 && /model/i.test(text)) return { ok: false, reason: `模型名称不对或没有权限(HTTP 400)` };
-    return { ok: false, reason: classifyFailure(res.status, text) };
-  } catch (err) {
-    return { ok: false, reason: networkReason(err) };
+    return llmCheckFailure(classifyLlmFailure({ status: res.status, body: text }));
+  } catch (error) {
+    return llmCheckFailure(classifyLlmFailure({ error }));
   }
+}
+
+function llmCheckFailure(failure: LlmFailure): CheckResult {
+  log.error('LLM probe failed', { code: failure.code, status: failure.status ?? null, providerCode: failure.providerCode ?? null });
+  return { ok: false, code: failure.code, reason: `${failure.message}${failure.status ? `(HTTP ${failure.status})` : ''}` };
 }
 
 // ─── 豆包(WS 握手探测)──────────────────────────────────────────────────

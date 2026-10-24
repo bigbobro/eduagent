@@ -11,11 +11,27 @@ import { TtsClient } from './tts-client';
 import { PcmPlayer } from '@/lib/audio/pcm-player';
 import { LessonRecorder, type RecorderHandle } from '@/lib/audio/recorder';
 import { TurnTimeoutGuard } from './turn-timeout-guard';
+import { LlmServiceError, llmErrorCodes } from '@/lib/llm-errors';
 
 /** /api/chat 503 + { code: 'NOT_CONFIGURED' }:还没有配置 API Key。 */
 async function isNotConfigured(res: Response): Promise<boolean> {
   const body: unknown = await res.clone().json().catch(() => null);
   return !!body && typeof body === 'object' && 'code' in body && body.code === 'NOT_CONFIGURED';
+}
+
+/** Only known codes may opt into a specific model-service message. */
+function lessonFailure(error: unknown, fallback: string): { message: string; code?: string } {
+  if (error instanceof LlmServiceError && error.failure.code !== 'LLM_OTHER') return error.failure;
+  return { message: fallback };
+}
+
+async function responseFailure(res: Response, fallback: string): Promise<Error> {
+  const body: unknown = await res.clone().json().catch(() => null);
+  if (body && typeof body === 'object' && 'code' in body && llmErrorCodes.includes(body.code as typeof llmErrorCodes[number])) {
+    const code = body.code as typeof llmErrorCodes[number];
+    return new LlmServiceError({ code, message: 'message' in body && typeof body.message === 'string' ? body.message : fallback });
+  }
+  return new Error(fallback);
 }
 
 export type LessonStateName =
@@ -169,12 +185,12 @@ export class LessonController {
         return false;
       }
       if (res.status === 409) {
-        const problem: unknown = await res.json();
+        const problem: unknown = await res.clone().json();
         if (problem && typeof problem === 'object' && 'code' in problem && problem.code === 'INVALID_COURSE_PROGRESS') {
           failureMessage = invalidProgressMessage;
         }
       }
-      if (!res.ok || !res.body) throw new Error(`Start failed: ${res.status}`);
+      if (!res.ok || !res.body) throw await responseFailure(res, `Start failed: ${res.status}`);
       this.sessionId = res.headers.get('X-Session-Id');
       this.resumeInfo = parseResumeInfo(res.headers.get('X-Resume-Info'));
       await this.consumeSSE(res.body, () => {}, run);
@@ -182,7 +198,7 @@ export class LessonController {
     } catch (error) {
       if (!this.isCurrent(run)) return false;
       console.warn('[lesson] start failed:', error);
-      this.emit('error', { message: failureMessage });
+      this.emit('error', lessonFailure(error, failureMessage));
       await this.endLesson();
       return false;
     }
@@ -267,7 +283,7 @@ export class LessonController {
         signal: run.signal,
       });
       if (!this.isCurrent(run)) { void res.body?.cancel().catch(() => {}); return { ok: false }; }
-      if (!res.ok || !res.body) throw new Error(`Action ${body.action} failed: ${res.status}`);
+      if (!res.ok || !res.body) throw await responseFailure(res, `Action ${body.action} failed: ${res.status}`);
       const phase = res.headers.get('X-Lesson-Phase');
       if (phase === 'intro' || phase === 'interactive' || phase === 'reinforcement' || phase === 'done') {
         acceptedPhase = phase;
@@ -315,7 +331,7 @@ export class LessonController {
     await this.player.stop();
     if (!this.isCurrent(run)) return;
     this.routeCurrentAsrToChat = true;
-    this.emit('error', { message: '我有点没反应过来…再试一次吧' });
+    this.emit('error', lessonFailure(error, '我有点没反应过来…再试一次吧'));
     this.setState('awaiting');
   }
 
@@ -576,7 +592,7 @@ export class LessonController {
         const reason = res.status === 404
           ? '课程已过期啦~回首页重新进入课程吧'
           : 'AI 没反应过来,再试一次';
-        this.emit('error', { message: reason });
+        this.emit('error', lessonFailure(await responseFailure(res, reason), reason));
         this.setState('awaiting');
         return;
       }
@@ -694,7 +710,10 @@ export class LessonController {
           }
           if (!event) continue;
           const parsed = parseLessonEvent(event, data);
-          if (parsed.type === 'error') throw new Error(parsed.message || 'Lesson stream failed');
+          if (parsed.type === 'error') {
+            if (parsed.code) throw new LlmServiceError({ code: parsed.code, message: parsed.message });
+            throw new Error(parsed.message || 'Lesson stream failed');
+          }
           if (parsed.type === 'done') {
             completed = true;
             this.sseCommitted = true;

@@ -76,7 +76,7 @@ describe('streamLLM abort + error paths', () => {
     );
 
     const gen = streamLLM('sys', [{ role: 'user', content: 'hi' }]);
-    await expect(gen.next()).rejects.toThrow('LLM API error: 500 Server Error');
+    await expect(gen.next()).rejects.toMatchObject({ failure: { code: 'LLM_OTHER', status: 500 } });
     await expect(
       streamLLM('sys', [{ role: 'user', content: 'hi' }]).next(),
     ).rejects.not.toThrow('secret upstream stack trace');

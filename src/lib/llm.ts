@@ -1,5 +1,6 @@
 import { getConfig } from './config';
 import { createLogger } from './logger';
+import { classifyLlmFailure, LlmServiceError } from './llm-errors';
 
 const log = createLogger('llm');
 
@@ -48,81 +49,88 @@ export async function* streamLLM(
   const timeoutSignal = AbortSignal.timeout(LLM_TIMEOUT_MS);
   const fetchSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
-  const res = await fetch(`${config.llmBaseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.llmApiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.llmModel,
-      messages: apiMessages,
-      response_format: { type: 'json_object' },
-      temperature: 0.7,
-      stream: true,
-      stream_options: { include_usage: true },
-    }),
-    signal: fetchSignal,
-  });
-
-  if (!res.ok || !res.body) {
-    const errorBody = await res.text().catch(() => '');
-    // Sanitize error to prevent info disclosure (don't leak full API response body to client)
-    const sanitized = `LLM API error: ${res.status} ${res.statusText}`;
-    log.error('LLM request failed', { status: res.status, statusText: res.statusText });
-    throw new Error(sanitized);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buf = '';
-  let fullText = '';
-  let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
-
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+    const res = await fetch(`${config.llmBaseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.llmApiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.llmModel,
+        messages: apiMessages,
+        response_format: { type: 'json_object' },
+        temperature: 0.7,
+        stream: true,
+        stream_options: { include_usage: true },
+      }),
+      signal: fetchSignal,
+    });
 
-      // SSE: 双换行分帧;每帧一行 "data: ..."
-      let nl: number;
-      while ((nl = buf.indexOf('\n\n')) >= 0) {
-        const frame = buf.slice(0, nl);
-        buf = buf.slice(nl + 2);
-        const line = frame.trim();
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (payload === '[DONE]') continue;
+    if (!res.ok || !res.body) {
+      const errorBody = await res.text().catch(() => '');
+      throw new LlmServiceError(classifyLlmFailure({ status: res.status, body: errorBody }));
+    }
 
-        try {
-          const json = JSON.parse(payload);
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) {
-            fullText += delta;
-            yield { delta, done: false };
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buf = '';
+    let fullText = '';
+    let usage: LLMUsage = { inputTokens: 0, outputTokens: 0 };
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        // SSE: 双换行分帧;每帧一行 "data: ..."
+        let nl: number;
+        while ((nl = buf.indexOf('\n\n')) >= 0) {
+          const frame = buf.slice(0, nl);
+          buf = buf.slice(nl + 2);
+          const line = frame.trim();
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]') continue;
+
+          try {
+            const json = JSON.parse(payload);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+              yield { delta, done: false };
+            }
+            if (json.usage) {
+              usage = {
+                inputTokens: json.usage.prompt_tokens || 0,
+                outputTokens: json.usage.completion_tokens || 0,
+              };
+            }
+          } catch {
+            // 跳过无法解析的 chunk
           }
-          if (json.usage) {
-            usage = {
-              inputTokens: json.usage.prompt_tokens || 0,
-              outputTokens: json.usage.completion_tokens || 0,
-            };
-          }
-        } catch {
-          // 跳过无法解析的 chunk
         }
       }
+    } finally {
+      reader.releaseLock();
     }
-  } finally {
-    reader.releaseLock();
-  }
 
-  yield {
-    done: true,
-    fullText,
-    usage,
-    latency: Date.now() - start,
-  };
+    yield {
+      done: true,
+      fullText,
+      usage,
+      latency: Date.now() - start,
+    };
+  } catch (error) {
+    // User cancellation is not an upstream failure and must retain abort semantics.
+    if (signal?.aborted) throw error;
+    const failure = error instanceof LlmServiceError ? error.failure : classifyLlmFailure({
+      error: timeoutSignal.aborted ? { name: 'TimeoutError' } : error,
+    });
+    log.error('LLM request failed', { code: failure.code, status: failure.status ?? null, providerCode: failure.providerCode ?? null });
+    throw new LlmServiceError(failure);
+  }
 }
 
 async function* mockStreamLLM(signal?: AbortSignal): AsyncGenerator<StreamEvent> {

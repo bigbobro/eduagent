@@ -1,4 +1,5 @@
 import { streamUserInput } from './session';
+import { LlmServiceError } from '@/lib/llm-errors';
 import { encodeLessonEvent } from '@/lib/lesson-protocol';
 
 export function streamUserInputToSSE(
@@ -37,7 +38,7 @@ export function streamUserInputToSSE(
         }
       } catch (err) {
         if (!canceled) controller.enqueue(
-          encoder.encode(encodeLessonEvent({ type: 'error', message: (err as Error).message }))
+          encoder.encode(encodeLessonEvent({ type: 'error', message: (err as Error).message, ...(err instanceof LlmServiceError ? { code: err.failure.code } : {}) }))
         );
       } finally {
         if (!canceled) controller.close();

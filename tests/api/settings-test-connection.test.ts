@@ -55,7 +55,9 @@ describe('POST /api/settings/test against local fake servers', () => {
       seenAuth.push(req.headers.authorization ?? '');
       req.resume();
       req.on('end', () => {
-        if (req.headers.authorization === `Bearer ${GOOD_LLM_KEY}`) {
+        if (req.headers.authorization === 'Bearer fake-balance-key') {
+          res.writeHead(402, { 'Content-Type': 'application/json' }).end('{"code":30001,"message":"Sorry, your account balance is insufficient"}');
+        } else if (req.headers.authorization === `Bearer ${GOOD_LLM_KEY}`) {
           res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"choices":[{"message":{"content":"hi"}}]}');
         } else {
           res.writeHead(401, { 'Content-Type': 'application/json' }).end('{"error":{"message":"Invalid token"}}');
@@ -103,6 +105,12 @@ describe('POST /api/settings/test against local fake servers', () => {
     expect(report.tts.ok).toBe(true);
     expect(report.asr.ok).toBe(true);
     expect(seenAuth).toEqual([`Bearer ${GOOD_LLM_KEY}`]);
+  });
+
+  it('insufficient balance is explicit in the settings API response', async () => {
+    const report = await run({ llmApiKey: 'fake-balance-key', doubaoAccessKey: GOOD_ACCESS });
+    expect(report.llm).toEqual({ ok: false, code: 'LLM_INSUFFICIENT_BALANCE', reason: '余额不足:请到模型服务商控制台充值后再试(HTTP 402)' });
+    expect(JSON.stringify(report)).not.toContain('fake-balance-key');
   });
 
   it('auth failure path: readable Chinese reason with the raw HTTP code, and no key in the response', async () => {

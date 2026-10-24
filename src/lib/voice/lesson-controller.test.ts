@@ -659,6 +659,32 @@ describe('command acknowledgements', () => {
     return new Response(frames, { headers: { 'X-Session-Id': 'failed-opening', ...headers } });
   }
 
+  it.each(['sse', 'http'])('preserves a specific model failure from opening %s and clears the failed lesson', async (transport) => {
+    const failure = { code: 'LLM_INSUFFICIENT_BALANCE', message: '余额不足:请到模型服务商控制台充值后再试' };
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => JSON.parse(options.body).action === 'end'
+      ? Response.json({ ok: true })
+      : transport === 'sse' ? stream(`event: error\ndata: ${JSON.stringify(failure)}\n\n`) : Response.json(failure, { status: 502 })));
+    const controller = new LessonController();
+    const error = vi.fn(); controller.on('error', error);
+    expect(await controller.startLesson('food', 'test-learner')).toBe(false);
+    expect(error).toHaveBeenCalledWith(failure);
+    expect(controller.getState()).toBe('idle');
+    expect(controller.getSessionId()).toBeNull();
+  });
+
+  it('preserves classified errors on a dialogue turn and recovers to awaiting', async () => {
+    const controller = new LessonController();
+    vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
+    expect(await controller.startLesson('food', 'test-learner')).toBe(true);
+    const failure = { code: 'LLM_AUTH_FAILED', message: '鉴权失败:请在设置中检查模型服务的 API Key 和访问权限' };
+    vi.stubGlobal('fetch', vi.fn(async () => stream(`event: error\ndata: ${JSON.stringify(failure)}\n\n`)));
+    const error = vi.fn(); controller.on('error', error);
+    await (controller as any).handleAsrFinal('hello');
+    expect(error).toHaveBeenCalledWith(failure);
+    expect(controller.getState()).toBe('awaiting');
+    await controller.endLesson();
+  });
+
   it('shows a preserved-progress error without sending end for an uncreated session', async () => {
     const fetchMock = vi.fn(async () => Response.json({ code: 'INVALID_COURSE_PROGRESS' }, { status: 409 }));
     vi.stubGlobal('fetch', fetchMock);

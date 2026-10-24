@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Course, PhaseName } from '@/types/course';
+import { llmFailureNeedsSettings } from '@/lib/llm-errors';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import { LessonController } from '@/lib/voice/lesson-controller';
 import { PhasedLessonController } from '@/lib/voice/phased-lesson-controller';
@@ -35,7 +36,7 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
   const [resumeClearedCardIds, setResumeClearedCardIds] = useState<string[]>([]);
   const [resumePassedQuizIds, setResumePassedQuizIds] = useState<string[]>([]);
   const [lessonRun, setLessonRun] = useState(0);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [lessonError, setLessonError] = useState<{ message: string; code?: string } | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // R1 (2026-07-20): guards against re-applying resume info on later, ordinary phase changes
   // (e.g. a post-resume interactive→reinforcement transition once the child finishes the rest
@@ -71,13 +72,15 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
     const onIntroBusyChange = (busy: boolean) => setIntroBusy(busy);
     const onIntroActiveCardChange = (cardId: string | null) => setIntroActiveCardId(cardId);
     const onProgress = (next: LessonProgressSnapshot) => {
+      setLessonError(null);
       setClearedWordCount(next.clearedCardIds.filter((cardId) => wordCardIds.has(cardId)).length);
     };
-    const onError = (err: { message: string }) => {
+    const onError = (err: { message: string; code?: string }) => {
       if (!err?.message) return;
-      setErrorMsg(err.message);
+      setLessonError(err);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-      errorTimerRef.current = setTimeout(() => setErrorMsg(null), 4000);
+      // Configuration problems need to remain visible long enough to act on them.
+      if (!llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
     };
     v2Ref.current = v2;
     phasedRef.current = phased;
@@ -102,6 +105,8 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
   }, [course, lessonRun, wordCardIds]);
 
   const handleStart = async () => {
+    setLessonError(null);
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     setStarted(true);
     const phased = phasedRef.current;
     const startedOk = await phased?.startLesson(learnerId);
@@ -123,6 +128,7 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
 
   const handleLeave = () => router.push('/');
   const handleRestart = () => {
+    setLessonError(null);
     setTransitionRetry(false);
     setStarted(false);
     setPhase('intro');
@@ -151,13 +157,16 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
         <div className="w-20" />
       </header>
 
-      {errorMsg && (
+      {lessonError && (
         <div
           role="status"
           aria-live="polite"
           className="absolute left-1/2 top-16 z-40 max-w-[90vw] -translate-x-1/2 rounded-paper-pill border-2 border-ink bg-butter px-5 py-2.5 text-center font-zh text-base text-ink shadow-paper"
         >
-          {errorMsg}
+          {lessonError.message}
+          {llmFailureNeedsSettings(lessonError.code) && (
+            <a href="/settings" className="ml-3 underline underline-offset-4">去设置</a>
+          )}
         </div>
       )}
 
@@ -167,6 +176,7 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
             <p>老师还没准备好下一步,再试一次吧</p>
             <button type="button" disabled={retrying} className="rounded-paper-md border-2 border-ink bg-butter px-5 py-3 focus-visible:outline" onClick={async () => {
               const phased = phasedRef.current;
+              setLessonError(null);
               setRetrying(true);
               try { await phased?.retryTransition(); } finally { if (phasedRef.current === phased) setRetrying(false); }
             }}>

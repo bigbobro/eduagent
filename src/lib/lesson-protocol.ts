@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { llmErrorCodes } from './llm-errors';
 import type { AgentResponse, ToolAction } from '@/types/tools';
 
 // Pure transport contract: safe to import from the server and browser.
@@ -49,7 +50,7 @@ const streamEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('actions'), actions: z.array(toolActionSchema), state_update: stateUpdateSchema.optional() }),
   progressSchema.extend({ type: z.literal('progress_snapshot') }),
   z.object({ type: z.literal('done') }),
-  z.object({ type: z.literal('error'), message: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string(), code: z.enum(llmErrorCodes).optional() }),
 ]);
 export type StreamUserEvent = z.infer<typeof streamEventSchema>;
 export function parseLessonEvent(type: string, json: string): StreamUserEvent {
