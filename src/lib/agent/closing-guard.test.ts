@@ -39,7 +39,7 @@ describe('R4: closing guard in streamUserInput', () => {
   });
 
   it('does NOT override speech when all mentioned target words have been learned', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     // Mark apple as learned
     session.memory.wordsLearned = ['apple'];
     // LLM speech only mentions apple (which is learned)
@@ -63,7 +63,7 @@ describe('R4: closing guard in streamUserInput', () => {
   });
 
   it('overrides speech with safe template when LLM mentions unlearned target words', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     // No words learned this session
     session.memory.wordsLearned = [];
     // LLM hallucinates — claims we learned apple, banana, milk (none are in wordsLearned)
@@ -87,7 +87,7 @@ describe('R4: closing guard in streamUserInput', () => {
   });
 
   it('R6 AC3/AC9: does NOT override when speech mentions currentWord being taught (not yet learned)', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     // We are currently teaching apple; apple is not yet in wordsLearned
     session.memory.wordsLearned = [];
     session.memory.currentWord = 'apple';
@@ -112,7 +112,7 @@ describe('R4: closing guard in streamUserInput', () => {
   });
 
   it('R6 AC10: overrides when speech mentions currentWord AND a different unlearned word', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     session.memory.wordsLearned = [];
     session.memory.currentWord = 'apple';
     session.memory.currentCardId = 'apple';
@@ -135,7 +135,7 @@ describe('R4: closing guard in streamUserInput', () => {
   });
 
   it('overrides speech when LLM mentions only some unlearned words', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     // apple is learned, but banana is not
     session.memory.wordsLearned = ['apple'];
     mockStreamLLM.mockReturnValue(asyncMakeStreamEvents(
@@ -158,7 +158,7 @@ describe('R4: closing guard in streamUserInput', () => {
   });
 
   it('does not stream the unsafe speech before server-side guards run', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     session.memory.wordsLearned = [];
     mockStreamLLM.mockReturnValue(asyncMakeStreamEvents(
       '今天我们学了 apple 和 banana，下次再来玩吧！',
@@ -178,7 +178,7 @@ describe('R4: closing guard in streamUserInput', () => {
   });
 
   it('overrides speech when normalized show_card advances to a different word card', async () => {
-    const session = createSession(animalsCourse);
+    const session = createSession(animalsCourse, 'test-learner');
     session.currentPhase = 'interactive';
     session.memory.currentCardId = 'dog';
     session.memory.currentWord = 'dog';

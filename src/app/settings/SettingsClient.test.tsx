@@ -14,7 +14,7 @@ beforeEach(() => vi.restoreAllMocks());
 
 describe('SettingsClient', () => {
   it('web mode is read-only and points at .env.local', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ mode: 'web', configured: true, values }));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input) === '/api/learners' ? json([]) : json({ mode: 'web', configured: true, values }));
     render(<SettingsClient />);
     expect(await screen.findByTestId('readonly-hint')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '保存' })).toBeNull();
@@ -25,6 +25,7 @@ describe('SettingsClient', () => {
     const calls: Array<{ url: string; body?: string }> = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
+      if (url === '/api/learners') return json([]);
       calls.push({ url, body: init?.body as string | undefined });
       if (url === '/api/settings' && !init) {
         return json({ mode: 'app', configured: false, values: { ...values, doubaoAccessKey: '••••5678' } });

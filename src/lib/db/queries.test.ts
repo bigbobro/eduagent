@@ -23,17 +23,17 @@ const zeroUsage: TokenUsage = {
   tts: { requests: 0, characters: 0 },
 };
 
-beforeAll(() => runMigrations(db()));
+beforeAll(() => { runMigrations(db()); db().prepare('INSERT OR IGNORE INTO learners (id, name, created_at) VALUES (?, ?, ?)').run('test-learner', '测试孩子', new Date().toISOString()); });
 beforeEach(() => db().exec('DELETE FROM lesson_logs'));
 
 describe('touchLessonLog — incremental lesson finalization', () => {
   it('turns a fresh lesson\'s NULL end_time into a set one and tracks interaction_count', () => {
-    createLessonLog('l1', 'food');
-    expect(getRecentLessons(db(), 10)[0].endTime).toBeNull();
+    createLessonLog('l1', 'food', 'test-learner');
+    expect(getRecentLessons(db(), 10, 'test-learner')[0].endTime).toBeNull();
 
     touchLessonLog('l1', 4, zeroUsage);
 
-    const row = getRecentLessons(db(), 10)[0];
+    const row = getRecentLessons(db(), 10, 'test-learner')[0];
     expect(row.endTime).not.toBeNull();
     expect(row.interactionCount).toBe(4);
   });
@@ -42,19 +42,19 @@ describe('touchLessonLog — incremental lesson finalization', () => {
     // Kid started 15 min ago, then closed the tab → finishLessonLog never ran.
     const start = new Date(Date.now() - 15 * 60_000).toISOString();
     db()
-      .prepare("INSERT INTO lesson_logs (id, course_id, start_time, interaction_count) VALUES ('l2','food',?,0)")
+      .prepare("INSERT INTO lesson_logs (learner_id, id, course_id, start_time, interaction_count) VALUES ('test-learner', 'l2','food',?,0)")
       .run(start);
-    expect(buildStatsSnapshot(db()).totalMinutes).toBe(0); // NULL end_time counts as 0 duration
+    expect(buildStatsSnapshot(db(), 'test-learner').totalMinutes).toBe(0); // NULL end_time counts as 0 duration
 
     touchLessonLog('l2', 9, zeroUsage);
 
-    expect(buildStatsSnapshot(db()).totalMinutes).toBeGreaterThanOrEqual(14);
+    expect(buildStatsSnapshot(db(), 'test-learner').totalMinutes).toBeGreaterThanOrEqual(14);
   });
 
   it('finishLessonLog still overwrites end_time as the graceful final flush', () => {
-    createLessonLog('l3', 'food');
+    createLessonLog('l3', 'food', 'test-learner');
     touchLessonLog('l3', 2, zeroUsage);
-    const mid = getRecentLessons(db(), 10)[0].endTime;
+    const mid = getRecentLessons(db(), 10, 'test-learner')[0].endTime;
 
     finishLessonLog('l3', 6, {
       asr: { requests: 0, tokens: 0 },
@@ -62,7 +62,7 @@ describe('touchLessonLog — incremental lesson finalization', () => {
       tts: { requests: 0, characters: 0 },
     });
 
-    const row = getRecentLessons(db(), 10)[0];
+    const row = getRecentLessons(db(), 10, 'test-learner')[0];
     expect(row.endTime).not.toBeNull();
     expect(row.endTime! >= mid!).toBe(true);
     expect(row.interactionCount).toBe(6);
@@ -71,7 +71,7 @@ describe('touchLessonLog — incremental lesson finalization', () => {
   // R1 (2026-07-04, session 6f6e7bec): a lesson that never sends action:'end' (tab close /
   // crash) used to permanently report token_usage={} — touchLessonLog now carries it every turn.
   it('persists non-empty token_usage on a touch, before any graceful finish', () => {
-    createLessonLog('l4', 'food');
+    createLessonLog('l4', 'food', 'test-learner');
     const usage: TokenUsage = {
       asr: { requests: 2, tokens: 40 },
       llm: { requests: 3, inputTokens: 3000, outputTokens: 300 },
@@ -90,7 +90,7 @@ describe('touchLessonLog — incremental lesson finalization', () => {
   });
 
   it('finishLessonLog sets ended_gracefully=1; touchLessonLog alone leaves it 0', () => {
-    createLessonLog('l5', 'food');
+    createLessonLog('l5', 'food', 'test-learner');
     touchLessonLog('l5', 1, zeroUsage);
     finishLessonLog('l5', 2, zeroUsage);
 
@@ -122,13 +122,13 @@ describe('course_progress upsert/get (2026-07-20 session persistence)', () => {
   beforeEach(() => db().exec('DELETE FROM course_progress'));
 
   it('returns undefined when no breakpoint exists for a course', () => {
-    expect(getCourseProgress('food')).toBeUndefined();
+    expect(getCourseProgress('food', 'test-learner')).toBeUndefined();
   });
 
   it('round-trips a snapshot through JSON storage', () => {
-    upsertCourseProgress('food', sampleSnapshot, 'interactive', false);
+    upsertCourseProgress('food', sampleSnapshot, 'interactive', false, 'test-learner');
 
-    const row = getCourseProgress('food');
+    const row = getCourseProgress('food', 'test-learner');
     expect(row).toBeDefined();
     expect(row!.phase).toBe('interactive');
     expect(row!.completed).toBe(false);
@@ -137,12 +137,12 @@ describe('course_progress upsert/get (2026-07-20 session persistence)', () => {
   });
 
   it('upserts in place — a second write for the same course replaces the row, not adds one', () => {
-    upsertCourseProgress('food', sampleSnapshot, 'interactive', false);
+    upsertCourseProgress('food', sampleSnapshot, 'interactive', false, 'test-learner');
     const updated: CourseProgressSnapshot = { ...sampleSnapshot, currentCardId: 'banana', totalInteractions: 9 };
 
-    upsertCourseProgress('food', updated, 'reinforcement', true);
+    upsertCourseProgress('food', updated, 'reinforcement', true, 'test-learner');
 
-    const row = getCourseProgress('food');
+    const row = getCourseProgress('food', 'test-learner');
     expect(row!.snapshot.currentCardId).toBe('banana');
     expect(row!.snapshot.totalInteractions).toBe(9);
     expect(row!.phase).toBe('reinforcement');
@@ -152,17 +152,17 @@ describe('course_progress upsert/get (2026-07-20 session persistence)', () => {
 
   it('distinguishes a corrupt snapshot from a missing breakpoint', () => {
     db().prepare(
-      "INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('broken', '{not valid json', 'intro', 0, ?)",
+      "INSERT INTO course_progress (learner_id, course_id, snapshot, phase, completed, updated_at) VALUES ('test-learner', 'broken', '{not valid json', 'intro', 0, ?)",
     ).run(new Date().toISOString());
 
-    expect(() => getCourseProgress('broken')).toThrow('已保留原记录');
+    expect(() => getCourseProgress('broken', 'test-learner')).toThrow('已保留原记录');
   });
 
   it('tracks separate breakpoints per course', () => {
-    upsertCourseProgress('food', sampleSnapshot, 'interactive', false);
-    upsertCourseProgress('animals', { ...sampleSnapshot, currentCardId: 'cat' }, 'intro', false);
+    upsertCourseProgress('food', sampleSnapshot, 'interactive', false, 'test-learner');
+    upsertCourseProgress('animals', { ...sampleSnapshot, currentCardId: 'cat' }, 'intro', false, 'test-learner');
 
-    expect(getCourseProgress('food')!.snapshot.currentCardId).toBe('apple');
-    expect(getCourseProgress('animals')!.snapshot.currentCardId).toBe('cat');
+    expect(getCourseProgress('food', 'test-learner')!.snapshot.currentCardId).toBe('apple');
+    expect(getCourseProgress('animals', 'test-learner')!.snapshot.currentCardId).toBe('cat');
   });
 });

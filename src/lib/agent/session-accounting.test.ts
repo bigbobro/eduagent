@@ -20,7 +20,7 @@ async function turn(id: string) {
 async function expectCount(id: string, count: number) {
   const db = getDb();
   expect(db.prepare('SELECT COUNT(*) AS n FROM interaction_logs WHERE lesson_id = ?').get(id)).toEqual({ n: count });
-  expect(buildSessionList(db, [foodCourse]).find((row) => row.lessonId === id)?.interactionCount).toBe(count);
+  expect(buildSessionList(db, [foodCourse], 'test-learner').find((row) => row.lessonId === id)?.interactionCount).toBe(count);
   const report = await buildReport(db, id, async () => null);
   expect(report.eval.sessionHealth.interactionCountMatchesLog).toBe(true);
   expect(report.eval.sessionHealth.issues).not.toContain('interaction_count_mismatch');
@@ -28,7 +28,7 @@ async function expectCount(id: string, count: number) {
 
 describe('per-lesson accounting', () => {
   it('counts each lesson independently through two resumes without resetting course context', async () => {
-    let session = createSession(foodCourse);
+    let session = createSession(foodCourse, 'test-learner');
     for (let round = 0; round < 3; round++) {
       expect(session.memory.totalInteractions).toBe(round * 3);
       setSessionPhase(session.id, 'interactive');
@@ -39,15 +39,15 @@ describe('per-lesson accounting', () => {
       await expectCount(session.id, 3);
       endSession(session.id);
       await expectCount(session.id, 3);
-      const progress = getCourseProgress(foodCourse.id)!;
+      const progress = getCourseProgress(foodCourse.id, 'test-learner')!;
       expect(progress.snapshot.totalInteractions).toBe((round + 1) * 3);
       expect(progress.snapshot.passedQuizIds).toContain(foodCourse.phases.reinforcement.quizzes[0].id);
-      if (round < 2) session = createSessionFromSnapshot(foodCourse, progress);
+      if (round < 2) session = createSessionFromSnapshot(foodCourse, progress, 'test-learner');
     }
   });
 
   it('does not include a failed generation in the lesson count, even on end', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     await turn(session.id);
     vi.mocked(llm.streamLLM).mockImplementationOnce(async function* () { throw new Error('provider unavailable'); });
     expect(await turn(session.id)).toContainEqual({ type: 'error', message: 'provider unavailable' });
@@ -58,7 +58,7 @@ describe('per-lesson accounting', () => {
   it('leaves existing historical summaries untouched', async () => {
     const db = getDb();
     db.prepare("INSERT INTO lesson_logs (id, course_id, start_time, interaction_count) VALUES ('historical', 'food', '2026-01-01', 91)").run();
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     await turn(session.id);
     endSession(session.id);
     expect(db.prepare("SELECT interaction_count FROM lesson_logs WHERE id = 'historical'").get()).toEqual({ interaction_count: 91 });

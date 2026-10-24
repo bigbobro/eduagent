@@ -192,7 +192,7 @@ describe('LessonController', () => {
     controller.on('error', (err) => errors.push(err.message));
     controller.on('state', (state) => states.push(state));
 
-    await expect(controller.startLesson('food')).resolves.toBe(false);
+    await expect(controller.startLesson('food', 'test-learner')).resolves.toBe(false);
 
     expect(errors).toContain('课堂暂时没准备好,再试一次吧');
     expect(states).toContain('greeting');
@@ -307,7 +307,7 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
     })));
     const controller = new LessonController();
 
-    await controller.startLesson('animals');
+    await controller.startLesson('animals', 'test-learner');
 
     expect(controller.getResumeInfo()).toEqual({
       resumed: true,
@@ -322,7 +322,7 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
     vi.stubGlobal('fetch', vi.fn(async () => resumeSseResponse(null)));
     const controller = new LessonController();
 
-    await controller.startLesson('animals');
+    await controller.startLesson('animals', 'test-learner');
 
     expect(controller.getResumeInfo()).toBeNull();
   });
@@ -334,7 +334,7 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
     vi.stubGlobal('fetch', vi.fn(async () => res));
     const controller = new LessonController();
 
-    await expect(controller.startLesson('animals')).resolves.toBe(true);
+    await expect(controller.startLesson('animals', 'test-learner')).resolves.toBe(true);
     expect(controller.getResumeInfo()).toBeNull();
   });
 
@@ -347,7 +347,7 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
       passedQuizIds: [],
     })));
     const controller = new LessonController();
-    await controller.startLesson('animals');
+    await controller.startLesson('animals', 'test-learner');
     expect(controller.getResumeInfo()).not.toBeNull();
 
     await controller.endLesson();
@@ -664,7 +664,7 @@ describe('command acknowledgements', () => {
     vi.stubGlobal('fetch', fetchMock);
     const controller = new LessonController();
     const error = vi.fn(); controller.on('error', error);
-    await expect(controller.startLesson('food')).resolves.toBe(false);
+    await expect(controller.startLesson('food', 'test-learner')).resolves.toBe(false);
     expect(error).toHaveBeenCalledWith({ message: '这门课的学习进度暂时无法读取，已保留原记录。' });
     expect(controller.getSessionId()).toBeNull();
     expect(controller.getState()).toBe('idle');
@@ -675,7 +675,7 @@ describe('command acknowledgements', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, options) => JSON.parse(options.body).action === 'end'
       ? Response.json({ ok: true }) : stream(`event: done\ndata: ${payload}\n\n`)));
     const controller = new LessonController();
-    await expect(controller.startLesson('food')).resolves.toBe(false);
+    await expect(controller.startLesson('food', 'test-learner')).resolves.toBe(false);
     expect(controller.getSessionId()).toBeNull();
     expect(controller.getState()).toBe('idle');
   });
@@ -691,10 +691,10 @@ describe('command acknowledgements', () => {
       return stream(failure === 'error' ? 'event: error\ndata: {"message":"unavailable"}\n\n' : 'event: speech-delta\ndata: {"text":"Hi"}\n\n');
     }));
     const controller = new LessonController();
-    await expect(controller.startLesson('food')).resolves.toBe(false);
+    await expect(controller.startLesson('food', 'test-learner')).resolves.toBe(false);
     expect(controller.getState()).toBe('idle');
     expect(controller.getSessionId()).toBeNull();
-    await expect(controller.startLesson('food')).resolves.toBe(true);
+    await expect(controller.startLesson('food', 'test-learner')).resolves.toBe(true);
     await controller.endLesson();
   });
 
@@ -743,7 +743,7 @@ describe('classroom run cancellation', () => {
       (controller as any).setState('awaiting');
       (controller as any).bindTtsHandlers();
     }
-    const pending = operation === 'start' ? controller.startLesson('food')
+    const pending = operation === 'start' ? controller.startLesson('food', 'test-learner')
       : operation === 'quiz' ? controller.submitQuizAnswer('q1', 'apple', true)
       : operation === 'message' ? (controller as any).handleAsrFinal('apple')
       : controller.sendCustomAction({ action: 'message', text: 'apple' });
@@ -769,7 +769,7 @@ describe('classroom run cancellation', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url, options) => JSON.parse(options.body).action === 'end'
       ? Response.json({ ok: true }) : new Response(new ReadableStream({ cancel }), { headers: { 'X-Session-Id': 'old-session' } })));
     const controller = new LessonController();
-    const pending = controller.startLesson('food');
+    const pending = controller.startLesson('food', 'test-learner');
     await vi.waitFor(() => expect(controller.getSessionId()).toBe('old-session'));
     await controller.endLesson();
     await expect(pending).resolves.toBe(false);
@@ -782,10 +782,10 @@ describe('classroom run cancellation', () => {
     recorderPrewarm.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
     const controller = new LessonController();
-    const first = controller.startLesson('food');
+    const first = controller.startLesson('food', 'test-learner');
     await controller.endLesson();
     await expect(first).resolves.toBe(false);
-    await expect(controller.startLesson('animals')).resolves.toBe(true);
+    await expect(controller.startLesson('animals', 'test-learner')).resolves.toBe(true);
     release();
     await Promise.resolve();
     expect(controller.getSessionId()).toBe('session-1');
@@ -796,7 +796,7 @@ describe('classroom run cancellation', () => {
   it('ignores old ASR handlers and TTS events after end', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => sseResponse()));
     const controller = new LessonController();
-    await controller.startLesson('food');
+    await controller.startLesson('food', 'test-learner');
     (controller as any).setState('awaiting');
     await controller.startListening();
     const asr = asrInstances[0];

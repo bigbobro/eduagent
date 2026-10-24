@@ -6,8 +6,10 @@ import { ensureDatabaseInitialized } from '@/lib/init';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const learnerId = new URL(req.url).searchParams.get('learnerId');
+  if (!learnerId) return NextResponse.json({ error: 'learnerId is required' }, { status: 400 });
   ensureDatabaseInitialized();
-  const snap = buildProgressSnapshot(getDb(), allCourses);
+  const snap = buildProgressSnapshot(getDb(), allCourses, learnerId);
   return NextResponse.json(snap);
 }

@@ -9,6 +9,7 @@ function makeSession(id: string): Session {
     lifetime: new AbortController(),
     lessonInteractionCount: 0,
     revision: 0,
+    learnerId: 'test-learner',
     courseId: foodCourse.id,
     course: foodCourse,
     memory: initializeCardProgress(createMemory(), foodCourse),

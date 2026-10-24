@@ -9,6 +9,7 @@ export interface ReportData {
   session: {
     id: string;
     courseId: string;
+    learnerId: string | null;
     courseTitle: string;
     targetWords: string[];
     startTime: string;
@@ -185,6 +186,7 @@ interface PromptInputBreakdownSummary {
 interface LessonRow {
   id: string;
   course_id: string;
+  learner_id?: string | null;
   start_time: string;
   end_time: string | null;
   interaction_count: number;
@@ -258,6 +260,7 @@ export async function buildReport(
   const session = {
     id: lesson.id,
     courseId: lesson.course_id,
+    learnerId: lesson.learner_id ?? null,
     courseTitle,
     targetWords,
     startTime: lesson.start_time,

@@ -12,7 +12,7 @@ describe('/api/chat when not configured', () => {
   const start = () => POST(new NextRequest('http://127.0.0.1:3000/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'start', courseId: 'animals' }),
+    body: JSON.stringify({ learnerId: 'test-learner', action: 'start', courseId: 'animals' }),
   }));
 
   it('returns 503 with code NOT_CONFIGURED', async () => {

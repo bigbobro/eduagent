@@ -3,7 +3,7 @@ import Database from '../../src/lib/db/sqlite';
 
 const memDb = new Database(':memory:');
 memDb.exec(`
-  CREATE TABLE lesson_logs (id TEXT PRIMARY KEY, course_id TEXT, start_time TEXT, end_time TEXT, interaction_count INTEGER, token_usage TEXT);
+  CREATE TABLE lesson_logs (learner_id TEXT DEFAULT 'test-learner', id TEXT PRIMARY KEY, course_id TEXT, start_time TEXT, end_time TEXT, interaction_count INTEGER, token_usage TEXT);
   CREATE TABLE word_performance (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson_id TEXT, word TEXT, attempts INTEGER, correct INTEGER, needs_review INTEGER);
 `);
 vi.mock('@/lib/db', () => ({ getDb: () => memDb }));
@@ -16,7 +16,7 @@ beforeEach(() => {
 
 describe('/api/stats', () => {
   it('empty DB shape', async () => {
-    const res = await GET();
+    const res = await GET(new Request('http://x/api/stats?learnerId=test-learner'));
     const json = await res.json();
     expect(json.totalMinutes).toBe(0);
     expect(json.totalSessions).toBe(0);
@@ -27,7 +27,7 @@ describe('/api/stats', () => {
   it('totalWordsMastered matches progress aggregator', async () => {
     memDb.prepare(`INSERT INTO lesson_logs (id, course_id, start_time, end_time, interaction_count, token_usage) VALUES ('l1','food','2026-05-10T10:00:00Z','2026-05-10T10:30:00Z',3,'{}')`).run();
     memDb.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','apple',10,10,0)`).run();
-    const res = await GET();
+    const res = await GET(new Request('http://x/api/stats?learnerId=test-learner'));
     const json = await res.json();
     expect(json.totalWordsMastered).toBeGreaterThanOrEqual(1);
     expect(json.totalSessions).toBe(1);

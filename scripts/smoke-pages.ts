@@ -131,6 +131,12 @@ async function main() {
       process.exit(1);
     }
 
+    const learnerRes = await fetch(`${BASE}/api/learners`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: BASE },
+      body: JSON.stringify({ name: `Page smoke ${new Date().toISOString()}` }),
+    });
+    if (!learnerRes.ok) throw new Error(`Cannot create smoke learner: ${learnerRes.status}`);
+    const learnerId = encodeURIComponent((await learnerRes.json()).id);
     const checks = [
       await fetchOk(`${BASE}/`),
       await fetchOk(`${BASE}/lesson/food`),
@@ -138,9 +144,9 @@ async function main() {
       await fetchOk(`${BASE}/journal`),
       await fetchOk(`${BASE}/parents`),
       await fetchCoursesCatalog(),
-      await fetchOk(`${BASE}/api/progress`, { jsonHas: ['courses', 'totalWordsMastered'] }),
-      await fetchOk(`${BASE}/api/sessions`),
-      await fetchOk(`${BASE}/api/stats`, { jsonHas: ['totalMinutes', 'last7Days'] }),
+      await fetchOk(`${BASE}/api/progress?learnerId=${learnerId}`, { jsonHas: ['courses', 'totalWordsMastered'] }),
+      await fetchOk(`${BASE}/api/sessions?learnerId=${learnerId}`),
+      await fetchOk(`${BASE}/api/stats?learnerId=${learnerId}`, { jsonHas: ['totalMinutes', 'last7Days'] }),
     ];
 
     const allOk = checks.every(Boolean);

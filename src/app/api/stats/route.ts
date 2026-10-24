@@ -7,10 +7,12 @@ import { ensureDatabaseInitialized } from '@/lib/init';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+  const learnerId = new URL(req.url).searchParams.get('learnerId');
+  if (!learnerId) return NextResponse.json({ error: 'learnerId is required' }, { status: 400 });
   ensureDatabaseInitialized();
   const db = getDb();
-  const stats = buildStatsSnapshot(db);
-  const prog = buildProgressSnapshot(db, allCourses);
+  const stats = buildStatsSnapshot(db, learnerId);
+  const prog = buildProgressSnapshot(db, allCourses, learnerId);
   return NextResponse.json({ ...stats, totalWordsMastered: prog.totalWordsMastered });
 }

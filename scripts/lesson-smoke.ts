@@ -13,7 +13,6 @@
 import fs from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import Database from '../src/lib/db/sqlite';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { getCourseById } from '../src/data/courses';
 import type { WordCard } from '../src/types/course';
@@ -48,6 +47,7 @@ const ANIMALS_SCRIPT: Step[] = [
 ];
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:3000';
+let smokeLearnerId = '';
 const COURSE_ID = process.env.SMOKE_COURSE || 'animals';
 const COURSE = getCourseById(COURSE_ID);
 const WORD_CARDS = (COURSE?.cards.filter((card) => card.kind === 'word') ?? []) as WordCard[];
@@ -251,7 +251,7 @@ async function runPushToTalkSmoke(): Promise<InteractionResult[]> {
     const context = await browser.newContext({ permissions: ['microphone'] });
     const page = await context.newPage();
     await installBrowserMocks(page);
-    await page.goto(`${BASE}/lesson/${COURSE_ID}`);
+    await page.goto(`${BASE}/lesson/${COURSE_ID}?learnerId=${encodeURIComponent(smokeLearnerId)}`);
     await page.getByRole('button', { name: /我们开始吧/ }).click();
     const button = page.getByRole('button', { name: /按住 Space 跟我读/ });
     await button.waitFor({ state: 'visible', timeout: 10000 });
@@ -348,33 +348,8 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// R1 (2026-07-20 session persistence): ANIMALS_SCRIPT above hard-codes an assumed fresh start
-// (phase-transition→interactive expects show_card=cat). The 'start' route now resumes from any
-// incomplete `course_progress` breakpoint (src/app/api/chat/route.ts), and this same script's
-// own `action:'end'` call at the bottom leaves exactly that: an incomplete breakpoint (the fixed
-// script never clears every word card or answers every quiz). Without this reset, the SECOND
-// (and every later) run against the same dev DB would resume mid-course instead of starting at
-// cat, and every `expectShowCard` assertion would fail — not a product bug, a fixture-vs-feature
-// interaction. Best-effort and non-fatal: a fresh checkout's DB has no course_progress table yet
-// (created lazily on first /api/chat call), which is equally "nothing to reset".
-function resetCourseProgressBreakpoint(courseId: string): void {
-  const dbPath = path.resolve(process.cwd(), process.env.DATABASE_PATH || './db/eduagent.db');
-  if (!existsSync(dbPath)) return;
-  try {
-    const db = new Database(dbPath);
-    try {
-      db.prepare('DELETE FROM course_progress WHERE course_id = ?').run(courseId);
-    } finally {
-      db.close();
-    }
-  } catch (e) {
-    console.warn('[smoke] could not reset course_progress breakpoint (continuing):', (e as Error).message);
-  }
-}
-
 async function main(): Promise<number> {
   console.log(`[smoke] base=${BASE} course=${COURSE_ID}`);
-  resetCourseProgressBreakpoint(COURSE_ID);
 
   const health = await fetch(`${BASE}/api/courses`).catch(() => null);
   if (!health || !health.ok) {
@@ -382,6 +357,13 @@ async function main(): Promise<number> {
     return 1;
   }
   console.log('[smoke] server reachable');
+  const learnerRes = await fetch(`${BASE}/api/learners`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: new URL(BASE).origin },
+    body: JSON.stringify({ name: `Smoke ${new Date().toISOString()}` }),
+  });
+  if (!learnerRes.ok) throw new Error(`Cannot create smoke learner: ${learnerRes.status}`);
+  smokeLearnerId = (await learnerRes.json()).id;
+  console.log(`[smoke] isolated learner=${smokeLearnerId}`);
 
   const interactionResults = await runPushToTalkSmoke();
   for (const result of interactionResults) {
@@ -390,7 +372,7 @@ async function main(): Promise<number> {
   }
 
   const t0 = Date.now();
-  const start = await postChat({ action: 'start', courseId: COURSE_ID });
+  const start = await postChat({ action: 'start', courseId: COURSE_ID, learnerId: smokeLearnerId });
   if (!start.sessionId) {
     console.error('[smoke] ✗ start returned no sessionId (course missing?)');
     return 1;

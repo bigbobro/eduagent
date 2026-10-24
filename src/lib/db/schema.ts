@@ -106,6 +106,39 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'local_learners',
+    up(db) {
+      db.exec(`CREATE TABLE IF NOT EXISTS learners (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, avatar TEXT, created_at TEXT NOT NULL
+      )`);
+      const columns = db.prepare('PRAGMA table_info(lesson_logs)').all() as { name: string }[];
+      if (!columns.some((c) => c.name === 'learner_id')) {
+        db.exec('ALTER TABLE lesson_logs ADD COLUMN learner_id TEXT REFERENCES learners(id)');
+      }
+      const progressColumns = db.prepare('PRAGMA table_info(course_progress)').all() as { name: string }[];
+      const oldProgress = !progressColumns.some((c) => c.name === 'learner_id');
+      const hasLegacy = db.prepare(`SELECT 1 FROM lesson_logs WHERE learner_id IS NULL LIMIT 1`).get()
+        || (oldProgress && db.prepare('SELECT 1 FROM course_progress LIMIT 1').get());
+      if (hasLegacy) {
+        db.prepare(`INSERT OR IGNORE INTO learners (id, name, created_at) VALUES (?, ?, ?)`)
+          .run('legacy-learner', '宝贝', new Date().toISOString());
+        db.prepare('UPDATE lesson_logs SET learner_id = ? WHERE learner_id IS NULL').run('legacy-learner');
+      }
+      if (oldProgress) {
+        db.exec(`CREATE TABLE course_progress_v5 (
+          learner_id TEXT NOT NULL REFERENCES learners(id), course_id TEXT NOT NULL,
+          snapshot TEXT NOT NULL, phase TEXT NOT NULL, completed INTEGER DEFAULT 0,
+          updated_at TEXT NOT NULL, PRIMARY KEY (learner_id, course_id)
+        );
+        INSERT INTO course_progress_v5 SELECT 'legacy-learner', course_id, snapshot, phase, completed, updated_at FROM course_progress;
+        DROP TABLE course_progress;
+        ALTER TABLE course_progress_v5 RENAME TO course_progress;`);
+      }
+      db.exec('CREATE INDEX IF NOT EXISTS lesson_logs_learner ON lesson_logs(learner_id)');
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

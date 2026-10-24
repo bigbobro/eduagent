@@ -41,7 +41,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('keeps a rejected transition on the original phase and retries once on request', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     v2.sendCustomAction.mockResolvedValueOnce({ ok: false });
     v2.emit('state', 'awaiting');
     await vi.waitFor(() => expect(v2.sendCustomAction).toHaveBeenCalledTimes(1));
@@ -54,7 +54,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('keeps the server-accepted phase if only the opening speech fails', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     const retry = vi.fn();
     ctrl.on('transition-retry-change', retry);
     v2.sendCustomAction.mockResolvedValueOnce({ ok: false, acceptedPhase: 'interactive' });
@@ -66,7 +66,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('ignores a transition response that arrives after end', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     let resolve!: (result: LessonCommandResult) => void;
     v2.sendCustomAction.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
     const changed = vi.fn(); ctrl.on('phase-change', changed);
@@ -82,7 +82,7 @@ describe('PhasedLessonController phase transitions', () => {
   it('does not apply a late resumed start after end', async () => {
     let resolve!: (value: boolean) => void;
     v2.startLesson.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
-    const starting = ctrl.startLesson();
+    const starting = ctrl.startLesson('test-learner');
     await ctrl.endLesson();
     resolve(true);
     await expect(starting).resolves.toBe(false);
@@ -90,7 +90,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('starts at phase=intro', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     expect(ctrl.getCurrentPhase()).toBe('intro');
   });
 
@@ -99,7 +99,7 @@ describe('PhasedLessonController phase transitions', () => {
     const busyChanges: boolean[] = [];
     ctrl.on('intro-busy-change', (busy: boolean) => busyChanges.push(busy));
 
-    await expect(ctrl.startLesson()).resolves.toBe(false);
+    await expect(ctrl.startLesson('test-learner')).resolves.toBe(false);
 
     expect(ctrl.isIntroBusy()).toBe(false);
     expect(busyChanges).toEqual([true, false]);
@@ -107,7 +107,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('intro to interactive when opening TTS finishes even without card actions', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     const phaseChanges: PhaseName[] = [];
     ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
 
@@ -122,7 +122,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('interactive to reinforcement when all cards cleared and TTS finished', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     (ctrl as any).currentPhase = 'interactive';
     const phaseChanges: PhaseName[] = [];
     const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
@@ -140,7 +140,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('transitions to reinforcement immediately when the last word clears while already awaiting', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     (ctrl as any).currentPhase = 'interactive';
     const phaseChanges: PhaseName[] = [];
     const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
@@ -158,7 +158,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('interactive to reinforcement when snapshot reports allWordsDone with a parked word (F3)', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     (ctrl as any).currentPhase = 'interactive';
     const phaseChanges: PhaseName[] = [];
     const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
@@ -178,7 +178,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('interactive to reinforcement when max attempts reached', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     (ctrl as any).currentPhase = 'interactive';
     const phaseChanges: PhaseName[] = [];
     const wordCards = foodCourse.cards.filter((card) => card.kind === 'word');
@@ -196,7 +196,7 @@ describe('PhasedLessonController phase transitions', () => {
   });
 
   it('waits for reinforcement transition speech before showing reinforcement UI', async () => {
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     (ctrl as any).currentPhase = 'interactive';
     let resolveTransition!: (result: LessonCommandResult) => void;
     v2.sendCustomAction.mockImplementationOnce(() => new Promise<LessonCommandResult>((resolve) => {
@@ -235,7 +235,7 @@ describe('PhasedLessonController resume (2026-07-20 session persistence)', () =>
     const phaseChanges: PhaseName[] = [];
     ctrl.on('phase-change', (phase: PhaseName) => phaseChanges.push(phase));
 
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
 
     expect(ctrl.getCurrentPhase()).toBe('interactive');
     expect(phaseChanges).toEqual(['interactive']);
@@ -260,7 +260,7 @@ describe('PhasedLessonController resume (2026-07-20 session persistence)', () =>
     const v2 = mockV2(resume);
     const ctrl = new PhasedLessonController(v2 as any, foodCourse);
 
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
 
     expect(ctrl.getCurrentPhase()).toBe('reinforcement');
   });
@@ -269,7 +269,7 @@ describe('PhasedLessonController resume (2026-07-20 session persistence)', () =>
     const v2 = mockV2(null);
     const ctrl = new PhasedLessonController(v2 as any, foodCourse);
 
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
 
     expect(ctrl.getCurrentPhase()).toBe('intro');
     expect(ctrl.getResumeInfo()).toBeNull();
@@ -285,7 +285,7 @@ describe('PhasedLessonController resume (2026-07-20 session persistence)', () =>
     };
     const v2 = mockV2(resume);
     const ctrl = new PhasedLessonController(v2 as any, foodCourse);
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     expect(ctrl.getResumeInfo()).not.toBeNull();
 
     await ctrl.endLesson();
@@ -296,13 +296,13 @@ describe('PhasedLessonController resume (2026-07-20 session persistence)', () =>
   it('clears previous resume state when restarting before old end completes', async () => {
     const v2 = mockV2({ resumed: true, phase: 'interactive', clearedCardIds: ['apple'], resumeCardId: 'banana', passedQuizIds: [] });
     const ctrl = new PhasedLessonController(v2 as any, foodCourse);
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     let finishEnd!: () => void;
     v2.endLesson.mockImplementationOnce(() => new Promise<void>((resolve) => { finishEnd = resolve; }));
     const ending = ctrl.endLesson();
     v2.getResumeInfo.mockReturnValue(null);
 
-    await ctrl.startLesson();
+    await ctrl.startLesson('test-learner');
     expect(ctrl.getResumeInfo()).toBeNull();
     expect(ctrl.getCurrentPhase()).toBe('intro');
     finishEnd();
@@ -329,7 +329,7 @@ describe('PhasedLessonController intro follow-up fallback', () => {
     const busyChanges: boolean[] = [];
     ctrl.on('intro-busy-change', (busy: boolean) => busyChanges.push(busy));
 
-    void ctrl.startLesson();
+    void ctrl.startLesson('test-learner');
     expect(ctrl.isIntroBusy()).toBe(true);
 
     vi.advanceTimersByTime(7100);

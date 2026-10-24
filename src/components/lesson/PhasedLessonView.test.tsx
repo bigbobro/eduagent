@@ -144,13 +144,13 @@ describe('PhasedLessonView', () => {
   });
 
   it('initial render shows IntroFrame and start button', () => {
-    render(<PhasedLessonView course={foodCourse} />);
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
     expect(screen.getByText(/餐桌上摆着各种食物/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /我们开始吧/ })).toBeTruthy();
   });
 
   it('moves from intro to interactive after the opening greeting finishes', async () => {
-    render(<PhasedLessonView course={foodCourse} />);
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 
@@ -160,7 +160,7 @@ describe('PhasedLessonView', () => {
   });
 
   it('offers a working retry control when the phase controller reports a failed transition', async () => {
-    render(<PhasedLessonView course={foodCourse} />);
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
     await screen.findByRole('button', { name: /按住 Space 跟我读/ });
     act(() => phasedInstances[0].emit('transition-retry-change', true));
@@ -171,7 +171,7 @@ describe('PhasedLessonView', () => {
 
   it('returns to the start screen when lesson startup fails', async () => {
     phasedStartQueue.push(async () => false);
-    render(<PhasedLessonView course={foodCourse} />);
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 
@@ -182,7 +182,7 @@ describe('PhasedLessonView', () => {
   });
 
   it('restarts the current course from the in-lesson done frame', async () => {
-    render(<PhasedLessonView course={foodCourse} />);
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 
@@ -198,7 +198,7 @@ describe('PhasedLessonView', () => {
   });
 
   it('uses cleared progress instead of total course words on the done frame', async () => {
-    render(<PhasedLessonView course={foodCourse} />);
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 
@@ -220,7 +220,7 @@ describe('PhasedLessonView', () => {
       clearedCardIds: ['apple'],
       passedQuizIds: [],
     });
-    const { container } = render(<PhasedLessonView course={foodCourse} />);
+    const { container } = render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 
@@ -241,7 +241,7 @@ describe('PhasedLessonView', () => {
       clearedCardIds: foodCourse.cards.filter((c) => c.kind === 'word').map((c) => c.id),
       passedQuizIds: [passedQuizId],
     });
-    render(<PhasedLessonView course={foodCourse} />);
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 

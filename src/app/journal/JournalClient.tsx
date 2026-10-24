@@ -1,4 +1,5 @@
 'use client';
+import { resolveCurrentLearner } from '@/lib/current-learner';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { JournalPage } from '@/components/journal/JournalPage';
@@ -11,7 +12,10 @@ export function JournalClient() {
 
   const load = () => {
     setError(false);
-    fetch('/api/progress')
+    resolveCurrentLearner().then((learner) => {
+      if (!learner) { router.replace('/'); throw new Error('请选择孩子'); }
+      return fetch(`/api/progress?learnerId=${encodeURIComponent(learner.id)}`);
+    })
       .then((r) => {
         if (!r.ok) throw new Error('fetch failed');
         return r.json();

@@ -3,7 +3,7 @@ import Database from '../../src/lib/db/sqlite';
 
 const memDb = new Database(':memory:');
 memDb.exec(`
-  CREATE TABLE lesson_logs (id TEXT PRIMARY KEY, course_id TEXT, start_time TEXT, end_time TEXT, interaction_count INTEGER, token_usage TEXT);
+  CREATE TABLE lesson_logs (learner_id TEXT DEFAULT 'test-learner', id TEXT PRIMARY KEY, course_id TEXT, start_time TEXT, end_time TEXT, interaction_count INTEGER, token_usage TEXT);
   CREATE TABLE word_performance (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson_id TEXT, word TEXT, attempts INTEGER, correct INTEGER, needs_review INTEGER);
 `);
 vi.mock('@/lib/db', () => ({ getDb: () => memDb }));
@@ -20,7 +20,7 @@ describe('/api/sessions', () => {
       const dt = `2026-05-${String(i + 1).padStart(2, '0')}T10:00:00Z`;
       memDb.prepare(`INSERT INTO lesson_logs (id, course_id, start_time, end_time, interaction_count, token_usage) VALUES (?, 'food', ?, ?, 3, '{}')`).run(`s${i}`, dt, dt);
     }
-    const req = new Request('http://x/api/sessions');
+    const req = new Request('http://x/api/sessions?learnerId=test-learner');
     const res = await GET(req);
     const json = await res.json();
     expect(json).toHaveLength(10);
@@ -32,7 +32,7 @@ describe('/api/sessions', () => {
       const dt = `2026-05-0${i + 1}T10:00:00Z`;
       memDb.prepare(`INSERT INTO lesson_logs (id, course_id, start_time, end_time, interaction_count, token_usage) VALUES (?, 'food', ?, ?, 1, '{}')`).run(`s${i}`, dt, dt);
     }
-    const req = new Request('http://x/api/sessions?limit=3');
+    const req = new Request('http://x/api/sessions?learnerId=test-learner&limit=3');
     const res = await GET(req);
     const json = await res.json();
     expect(json).toHaveLength(3);

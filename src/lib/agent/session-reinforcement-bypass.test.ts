@@ -31,7 +31,7 @@ describe('R4: reinforcement squeeze-in speech skips the LLM', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('a real utterance during reinforcement gets the fixed phrase with zero LLM calls', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     setSessionPhase(session.id, 'reinforcement');
 
     const events: any[] = [];
@@ -48,7 +48,7 @@ describe('R4: reinforcement squeeze-in speech skips the LLM', () => {
   });
 
   it('the reinforcement phaseOpening (transition) turn is unaffected — still calls the LLM', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     setSessionPhase(session.id, 'reinforcement');
     mockStreamLLM.mockReturnValue(yieldSpeech('接下来我们玩个游戏!'));
 
@@ -70,7 +70,7 @@ describe('R4: reinforcement squeeze-in speech skips the LLM', () => {
   });
 
   it('a stray "[quiz:" or "(切换到" marked text in reinforcement still calls the LLM (defense-in-depth)', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     setSessionPhase(session.id, 'reinforcement');
     mockStreamLLM.mockReturnValue(yieldSpeech('好的!'));
 
@@ -84,7 +84,7 @@ describe('R4: reinforcement squeeze-in speech skips the LLM', () => {
   });
 
   it('a real utterance during interactive (not reinforcement) is unaffected — still calls the LLM', async () => {
-    const session = createSession(foodCourse); // starts at 'intro', but check any non-reinforcement phase
+    const session = createSession(foodCourse, 'test-learner'); // starts at 'intro', but check any non-reinforcement phase
     setSessionPhase(session.id, 'interactive');
     // No course word mentioned (other than via current_word exemption) — avoids tripping
     // closingGuard's unlearned-word check, which is unrelated to what this test verifies.
@@ -101,7 +101,7 @@ describe('R4: reinforcement squeeze-in speech skips the LLM', () => {
   });
 
   it('records the bypassed turn into token usage (tts + asr, but not llm) and interaction log', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     setSessionPhase(session.id, 'reinforcement');
 
     for await (const _ev of streamUserInput(session.id, '苹果', { latency: 120, tokens: 4 })) {

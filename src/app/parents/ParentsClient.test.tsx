@@ -1,11 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearAll } from '@/lib/pin';
+import { saveCurrentLearnerId } from '@/lib/current-learner';
 import { ParentsClient } from './ParentsClient';
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
+vi.mock('next/navigation', () => { const router = { push: vi.fn(), replace: vi.fn() }; return { useRouter: () => router }; });
 
 class MemStorage {
   private values = new Map<string, string>();
@@ -37,14 +35,15 @@ class MemStorage {
 
 beforeEach(() => {
   (globalThis as any).localStorage = new MemStorage();
-  clearAll();
+  saveCurrentLearnerId('test-learner');
   vi.restoreAllMocks();
 });
 
 describe('ParentsClient', () => {
-  it('unlocks first-time PIN setup and loads the stats panel', async () => {
+  it('loads the current child statistics directly', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
+      if (url === '/api/learners') return Promise.resolve(new Response(JSON.stringify([{ id: 'test-learner', name: '宝宝' }])));
       if (url.startsWith('/api/stats')) {
         return Promise.resolve(new Response(JSON.stringify({
           totalMinutes: 24,
@@ -73,15 +72,9 @@ describe('ParentsClient', () => {
 
     render(<ParentsClient />);
 
-    expect(await screen.findByText('设置家长阁楼 PIN')).toBeTruthy();
-    for (const digit of ['1', '2', '3', '4']) fireEvent.click(screen.getByRole('button', { name: `数字${digit}` }));
-    expect(await screen.findByText('再输一次确认')).toBeTruthy();
-    for (const digit of ['1', '2', '3', '4']) fireEvent.click(screen.getByRole('button', { name: `数字${digit}` }));
-
-    expect(await screen.findByText('已用 PIN 解锁')).toBeTruthy();
     expect(await screen.findByText('本周学习')).toBeTruthy();
     expect(screen.getByText('24')).toBeTruthy();
     expect(screen.getByText('食物')).toBeTruthy();
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/api/stats'));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledWith('/api/stats?learnerId=test-learner'));
   });
 });

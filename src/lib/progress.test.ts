@@ -29,9 +29,9 @@ const fixtureCourses: Course[] = [
 function makeDb() {
   const db = new Database(':memory:');
   db.exec(`
-    CREATE TABLE lesson_logs (id TEXT PRIMARY KEY, course_id TEXT, start_time TEXT, end_time TEXT, interaction_count INTEGER, token_usage TEXT);
+    CREATE TABLE lesson_logs (learner_id TEXT DEFAULT 'test-learner', id TEXT PRIMARY KEY, course_id TEXT, start_time TEXT, end_time TEXT, interaction_count INTEGER, token_usage TEXT);
     CREATE TABLE word_performance (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson_id TEXT, word TEXT, attempts INTEGER, correct INTEGER, needs_review INTEGER);
-    CREATE TABLE course_progress (course_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, phase TEXT NOT NULL, completed INTEGER DEFAULT 0, updated_at TEXT NOT NULL);
+    CREATE TABLE course_progress (learner_id TEXT DEFAULT 'test-learner', course_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, phase TEXT NOT NULL, completed INTEGER DEFAULT 0, updated_at TEXT NOT NULL);
   `);
   return db;
 }
@@ -57,7 +57,7 @@ describe('buildProgressSnapshot', () => {
   });
 
   it('empty DB → all words ★0 with lastPracticed=null', () => {
-    const snap = buildProgressSnapshot(db, fixtureCourses);
+    const snap = buildProgressSnapshot(db, fixtureCourses, 'test-learner');
     expect(snap.totalWordsMastered).toBe(0);
     expect(snap.courses[0].courseTone).toBe('peach');
     expect(snap.courses[0].masteredWords).toBe(0);
@@ -66,10 +66,10 @@ describe('buildProgressSnapshot', () => {
   });
 
   it('single lesson with partial correct → stars derived', () => {
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs (id,course_id,start_time,end_time,interaction_count,token_usage) VALUES ('l1','food','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
     db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','apple',10,9,1)`).run();
     db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','milk',5,3,2)`).run();
-    const snap = buildProgressSnapshot(db, fixtureCourses);
+    const snap = buildProgressSnapshot(db, fixtureCourses, 'test-learner');
     const apple = snap.courses[0].words.find((w) => w.word === 'apple')!;
     const milk = snap.courses[0].words.find((w) => w.word === 'milk')!;
     expect(apple.masteryStars).toBe(3);
@@ -79,11 +79,11 @@ describe('buildProgressSnapshot', () => {
   });
 
   it('multi lesson same word → attempts/correct summed, lastPracticed=latest', () => {
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-05-09T10:00:00Z','2026-05-09T10:15:00Z',5,'{}')`).run();
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l2','food','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs (id,course_id,start_time,end_time,interaction_count,token_usage) VALUES ('l1','food','2026-05-09T10:00:00Z','2026-05-09T10:15:00Z',5,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs (id,course_id,start_time,end_time,interaction_count,token_usage) VALUES ('l2','food','2026-05-10T10:00:00Z','2026-05-10T10:15:00Z',5,'{}')`).run();
     db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l1','apple',5,3,2)`).run();
     db.prepare(`INSERT INTO word_performance (lesson_id,word,attempts,correct,needs_review) VALUES ('l2','apple',5,4,1)`).run();
-    const snap = buildProgressSnapshot(db, fixtureCourses);
+    const snap = buildProgressSnapshot(db, fixtureCourses, 'test-learner');
     const apple = snap.courses[0].words.find((w) => w.word === 'apple')!;
     expect(apple.attempts).toBe(10);
     expect(apple.correct).toBe(7);
@@ -98,7 +98,7 @@ describe('buildProgressSnapshot — session persistence (R2 home status)', () =>
   });
 
   it('no lessons / no breakpoint → timesStarted 0, 0%, no resume, not completed', () => {
-    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    const c = buildProgressSnapshot(db, fixtureCourses, 'test-learner').courses[0];
     expect(c.timesStarted).toBe(0);
     expect(c.progressPercent).toBe(0);
     expect(c.hasResume).toBe(false);
@@ -107,13 +107,13 @@ describe('buildProgressSnapshot — session persistence (R2 home status)', () =>
 
   it('counts every entry (incl. resumes) as timesStarted and derives breakpoint %', () => {
     // fixture food has 2 word cards (apple, milk), 0 quizzes → 1 cleared = 50%.
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-07-20T10:00:00Z',NULL,3,'{}')`).run();
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l2','food','2026-07-20T11:00:00Z',NULL,4,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs (id,course_id,start_time,end_time,interaction_count,token_usage) VALUES ('l1','food','2026-07-20T10:00:00Z',NULL,3,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs (id,course_id,start_time,end_time,interaction_count,token_usage) VALUES ('l2','food','2026-07-20T11:00:00Z',NULL,4,'{}')`).run();
     db.prepare(
       `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'interactive', 0, '2026-07-20T11:05:00Z')`,
     ).run(JSON.stringify({ ...serializeProgress(createMemory()), clearedCardIds: ['apple'], passedQuizIds: [] }));
 
-    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    const c = buildProgressSnapshot(db, fixtureCourses, 'test-learner').courses[0];
     expect(c.timesStarted).toBe(2);
     expect(c.progressPercent).toBe(50);
     expect(c.hasResume).toBe(true);
@@ -121,12 +121,12 @@ describe('buildProgressSnapshot — session persistence (R2 home status)', () =>
   });
 
   it('completed breakpoint → 100%, no resume (kept for review)', () => {
-    db.prepare(`INSERT INTO lesson_logs VALUES ('l1','food','2026-07-20T10:00:00Z',NULL,9,'{}')`).run();
+    db.prepare(`INSERT INTO lesson_logs (id,course_id,start_time,end_time,interaction_count,token_usage) VALUES ('l1','food','2026-07-20T10:00:00Z',NULL,9,'{}')`).run();
     db.prepare(
       `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'reinforcement', 1, '2026-07-20T10:30:00Z')`,
     ).run(JSON.stringify({ ...serializeProgress(createMemory()), clearedCardIds: ['apple', 'milk'], passedQuizIds: [] }));
 
-    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    const c = buildProgressSnapshot(db, fixtureCourses, 'test-learner').courses[0];
     expect(c.timesStarted).toBe(1);
     expect(c.progressPercent).toBe(100);
     expect(c.hasResume).toBe(false);
@@ -138,7 +138,7 @@ describe('buildProgressSnapshot — session persistence (R2 home status)', () =>
       `INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES ('food', ?, 'intro', 0, '2026-07-20T10:00:00Z')`,
     ).run(JSON.stringify({ ...serializeProgress(createMemory()), clearedCardIds: [], passedQuizIds: [] }));
 
-    const c = buildProgressSnapshot(db, fixtureCourses).courses[0];
+    const c = buildProgressSnapshot(db, fixtureCourses, 'test-learner').courses[0];
     expect(c.hasResume).toBe(false);
     expect(c.progressPercent).toBe(0);
   });

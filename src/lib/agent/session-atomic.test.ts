@@ -24,7 +24,7 @@ afterEach(() => {
   vi.restoreAllMocks(); vi.unstubAllEnvs();
 });
 function prepare(kind = 'normal') {
-  const session = createSession(foodCourse); sessions.push(session);
+  const session = createSession(foodCourse, 'test-learner'); sessions.push(session);
   recordQuizAnswer(session.id, quizId, 'first', false);
   session.memory = { ...session.memory, currentCardId: 'apple', currentWord: 'apple' };
   setSessionPhase(session.id, kind === 'normal' ? 'interactive' : 'reinforcement');
@@ -80,7 +80,7 @@ describe('atomic lesson commits', () => {
   it('publishes no session if initial lesson insertion fails', () => {
     const save = vi.spyOn(sessionStore, 'save');
     failWrite('lesson_logs', 'INSERT');
-    expect(() => createSession(foodCourse)).toThrow('injected');
+    expect(() => createSession(foodCourse, 'test-learner')).toThrow('injected');
     expect(save).not.toHaveBeenCalled();
   });
 

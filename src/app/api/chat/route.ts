@@ -3,6 +3,7 @@ import { createSession, createSessionFromSnapshot, getSession, endSession, recor
 import { resolveResumeCardId, isResumableProgress } from '@/lib/agent/course-progress';
 import { streamUserInputToSSE } from '@/lib/agent/orchestrator';
 import { getCourseById } from '@/data/courses';
+import { getLearner } from '@/lib/db/learners';
 import { getCourseProgress } from '@/lib/db/queries';
 import { ensureInitialized } from '@/lib/init';
 import { isConfigured } from '@/lib/config';
@@ -37,6 +38,7 @@ async function handleChatAction(body: LessonRequest) {
   console.log('[chat]', 'action=' + body.action, 'courseId=' + ('courseId' in body ? body.courseId : '-'), 'sessionId=' + ('sessionId' in body ? body.sessionId : '-'));
 
   if (body.action === 'start') {
+    if (!getLearner(body.learnerId)) return NextResponse.json({ error: 'Learner not found' }, { status: 404 });
     const course = getCourseById(body.courseId);
     if (!course) {
       console.warn('[chat] 404 course not found:', body.courseId);
@@ -54,9 +56,9 @@ async function handleChatAction(body: LessonRequest) {
     // fresh-start branch instead of resuming.
     let session;
     let resumeHeader: string | undefined;
-    const progress = getCourseProgress(course.id);
+    const progress = getCourseProgress(course.id, body.learnerId);
     if (progress && isResumableProgress(progress)) {
-      session = createSessionFromSnapshot(course, progress);
+      session = createSessionFromSnapshot(course, progress, body.learnerId);
       const resumeCardId = resolveResumeCardId(course, session.memory);
       console.log('[chat] resume hit', {
         courseId: course.id,
@@ -73,7 +75,7 @@ async function handleChatAction(body: LessonRequest) {
         passedQuizIds: session.memory.passedQuizIds,
       } satisfies ResumeInfo);
     } else {
-      session = createSession(course);
+      session = createSession(course, body.learnerId);
       console.log('[chat] fresh start', { courseId: course.id, hadProgress: !!progress, completed: progress?.completed ?? false });
     }
 

@@ -15,7 +15,7 @@ describe('POST /api/chat action=quiz-answer', () => {
   });
 
   it('records quiz answer and returns ok', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     const res = await POST(makeReq({
       action: 'quiz-answer',
       sessionId: session.id,

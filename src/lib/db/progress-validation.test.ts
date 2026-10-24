@@ -14,7 +14,7 @@ const raw = () => getDb().prepare('SELECT * FROM course_progress WHERE course_id
 beforeEach(() => { vi.stubEnv('VOICE_MOCK', 'true'); vi.stubEnv('LLM_API_KEY', 'mock-key'); getDb().exec('DELETE FROM course_progress'); });
 afterEach(() => vi.unstubAllEnvs());
 function insert(snapshot: unknown, phase = 'interactive', completed = 0) {
-  getDb().prepare('INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at) VALUES (?, ?, ?, ?, ?)').run(foodCourse.id, typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot), phase, completed, '2026-07-20T00:00:00Z');
+  getDb().prepare("INSERT INTO course_progress (learner_id, course_id, snapshot, phase, completed, updated_at) VALUES ('test-learner', ?, ?, ?, ?, ?)").run(foodCourse.id, typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot), phase, completed, '2026-07-20T00:00:00Z');
 }
 
 describe('persisted progress validation and preservation', () => {
@@ -34,14 +34,14 @@ describe('persisted progress validation and preservation', () => {
     insert(snapshot, phase as string, completed as number);
     const before = raw();
     const lessons = getDb().prepare('SELECT COUNT(*) AS n FROM lesson_logs').get();
-    expect(() => getCourseProgress(foodCourse.id)).toThrow();
+    expect(() => getCourseProgress(foodCourse.id, 'test-learner')).toThrow();
     for (let i = 0; i < 2; i++) {
-      const response = await POST({ json: async () => ({ action: 'start', courseId: foodCourse.id }) } as any);
+      const response = await POST({ json: async () => ({ learnerId: 'test-learner', action: 'start', courseId: foodCourse.id }) } as any);
       expect(response.status).toBe(409);
       expect(await response.json()).toMatchObject({ code: 'INVALID_COURSE_PROGRESS' });
     }
-    expect(getAllCourseProgress(getDb()).has(foodCourse.id)).toBe(false);
-    expect(buildProgressSnapshot(getDb(), [foodCourse, animalsCourse]).courses).toHaveLength(2);
+    expect(getAllCourseProgress(getDb(), 'test-learner').has(foodCourse.id)).toBe(false);
+    expect(buildProgressSnapshot(getDb(), [foodCourse, animalsCourse], 'test-learner').courses).toHaveLength(2);
     expect(raw()).toEqual(before);
     expect(getDb().prepare('SELECT COUNT(*) AS n FROM lesson_logs').get()).toEqual(lessons);
   });
@@ -53,15 +53,15 @@ describe('persisted progress validation and preservation', () => {
     snapshot.passedQuizIds = ['retired-quiz']; snapshot.currentCardId = 'retired';
     insert(snapshot);
     const before = raw();
-    expect(getCourseProgress(foodCourse.id)?.snapshot).toEqual(snapshot);
-    const projected = buildProgressSnapshot(getDb(), [foodCourse]).courses[0];
+    expect(getCourseProgress(foodCourse.id, 'test-learner')?.snapshot).toEqual(snapshot);
+    const projected = buildProgressSnapshot(getDb(), [foodCourse], 'test-learner').courses[0];
     expect(projected.progressPercent).toBe(0);
     expect(raw()).toEqual(before);
-    const response = await POST({ json: async () => ({ action: 'start', courseId: foodCourse.id }) } as any);
+    const response = await POST({ json: async () => ({ learnerId: 'test-learner', action: 'start', courseId: foodCourse.id }) } as any);
     expect(response.status).toBe(200);
     expect(JSON.parse(response.headers.get('X-Resume-Info')!).resumeCardId).toBe('apple');
     await response.text(); endSession(response.headers.get('X-Session-Id')!);
-    const restored = getCourseProgress(foodCourse.id)!;
+    const restored = getCourseProgress(foodCourse.id, 'test-learner')!;
     expect(restored.snapshot.cardProgress.egg).toBe('untouched');
     expect(restored.snapshot.cardProgress.retired).toBe('cleared');
     expect(restored.snapshot.passedQuizIds).toContain('retired-quiz');
@@ -71,10 +71,10 @@ describe('persisted progress validation and preservation', () => {
     insert({});
     const other = serializeProgress(initializeCardProgress(createMemory(), animalsCourse));
     other.clearedCardIds = ['cat'];
-    upsertCourseProgress(animalsCourse.id, other, 'interactive', false);
+    upsertCourseProgress(animalsCourse.id, other, 'interactive', false, 'test-learner');
     const before = raw();
-    expect(getAllCourseProgress(getDb()).get(animalsCourse.id)?.snapshot).toEqual(other);
-    expect(buildProgressSnapshot(getDb(), [foodCourse, animalsCourse]).courses[1].progressPercent).toBeGreaterThan(0);
+    expect(getAllCourseProgress(getDb(), 'test-learner').get(animalsCourse.id)?.snapshot).toEqual(other);
+    expect(buildProgressSnapshot(getDb(), [foodCourse, animalsCourse], 'test-learner').courses[1].progressPercent).toBeGreaterThan(0);
     expect(raw()).toEqual(before);
   });
 });

@@ -124,6 +124,9 @@ describe('buildReport — basic aggregation', () => {
 
     const r = await buildReport(db, 'sess-1', noopCourseLoader);
 
+    expect(r.session.learnerId).toBeNull();
+    db.exec("ALTER TABLE lesson_logs ADD COLUMN learner_id TEXT; UPDATE lesson_logs SET learner_id = 'learner-a' WHERE id = 'sess-1'");
+    expect((await buildReport(db, 'sess-1', noopCourseLoader)).session.learnerId).toBe('learner-a');
     expect(r.session.id).toBe('sess-1');
     expect(r.session.courseId).toBe('food');
     expect(r.session.startTime).toBe('2026-05-02T04:17:35.000Z');

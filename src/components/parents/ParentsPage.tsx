@@ -8,9 +8,8 @@ interface ParentsPageProps {
   sessions: SessionSummary[] | null;
   errStats?: boolean;
   errSessions?: boolean;
-  ttsVoice: string;
+  learnerName: string;
   onBack: () => void;
-  onSettings?: () => void;
 }
 
 export function ParentsPage({
@@ -18,20 +17,19 @@ export function ParentsPage({
   sessions,
   errStats = false,
   errSessions = false,
-  ttsVoice,
+  learnerName,
   onBack,
-  onSettings,
 }: ParentsPageProps) {
   return (
     <PaperBg tone="paper" className="h-screen w-screen">
       <main className="h-full px-12 py-6 text-ink">
         <header className="flex items-center justify-between border-b border-dashed border-inkPale pb-4">
           <div className="flex items-center gap-4">
-            <PaperButton size="sm" color="paper" onClick={onBack}>离开阁楼</PaperButton>
-            <h1 className="font-display text-[30px] leading-none">家长阁楼</h1>
-            <span className="font-en-script text-lg text-inkSoft">Parents</span>
+            <PaperButton size="sm" color="paper" onClick={onBack}>回首页</PaperButton>
+            <h1 className="font-display text-[30px] leading-none">学习记录</h1>
+            <span className="font-en-script text-lg text-inkSoft">Learning</span>
           </div>
-          <span className="font-zh text-sm text-inkSoft">已用 PIN 解锁</span>
+          <span className="font-zh text-sm text-inkSoft">{learnerName}</span>
         </header>
 
         <section className="grid grid-cols-4 gap-5 py-6">
@@ -71,17 +69,6 @@ export function ParentsPage({
           </div>
 
           <aside className="flex flex-col gap-5">
-            <div className="rounded-paper-lg border-2 border-ink bg-paper p-5 shadow-paper">
-              <h2 className="font-display text-[24px] leading-none">设置</h2>
-              <SettingRow label="老师猫的声音" value={ttsVoice || '—'} />
-              <SettingRow label="每次课时长" value="15 分钟" />
-              <SettingRow label="难度" value="简单" />
-              {onSettings && (
-                <div className="mt-4 border-t border-dashed border-inkPale pt-4">
-                  <PaperButton size="sm" color="sky" onClick={onSettings}>API 与语音设置</PaperButton>
-                </div>
-              )}
-            </div>
             <div className="flex items-center gap-4 rounded-paper-lg border-2 border-ink bg-lilac p-4 shadow-paper">
               <Cat size={90} mood="idle" />
               <p className="font-zh text-sm leading-relaxed text-ink">
@@ -115,15 +102,6 @@ function SessionLine({ session }: { session: SessionSummary }) {
       <span>{session.courseTitle}</span>
       <span>{minutes} 分钟</span>
       <span className="text-mintDeep">{session.wordsMastered} 个词</span>
-    </div>
-  );
-}
-
-function SettingRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="mt-4 flex items-center justify-between border-t border-dashed border-inkPale pt-4 font-zh text-sm">
-      <span>{label}</span>
-      <span className="rounded-paper-pill border border-ink bg-butter px-3 py-1">{value}</span>
     </div>
   );
 }

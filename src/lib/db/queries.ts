@@ -6,11 +6,11 @@ import type { CourseProgressRow } from '@/types/session';
 import { parseCourseProgressRow, InvalidCourseProgressError, type StoredCourseProgressRow } from './progress-snapshot';
 export type { CourseProgressRow } from '@/types/session';
 
-export function createLessonLog(id: string, courseId: string): void {
+export function createLessonLog(id: string, courseId: string, learnerId: string): void {
   const db = getDb();
   db.prepare(
-    'INSERT INTO lesson_logs (id, course_id, start_time) VALUES (?, ?, ?)'
-  ).run(id, courseId, new Date().toISOString());
+    'INSERT INTO lesson_logs (id, course_id, start_time, learner_id) VALUES (?, ?, ?, ?)'
+  ).run(id, courseId, new Date().toISOString(), learnerId);
 }
 
 export function finishLessonLog(id: string, interactionCount: number, tokenUsage: TokenUsage): void {
@@ -92,7 +92,7 @@ export function upsertWordRcState(lessonId: string, word: string, rcCorrect: num
   }
 }
 
-// R1/R3 (2026-07-20 session persistence): one breakpoint row per course. `phase` here is the
+// R1/R3 (2026-07-20 session persistence): one breakpoint row per learner and course. `phase` here is the
 // course-level PhaseName (intro/interactive/reinforcement/done), distinct from
 // CourseProgressSnapshot.phase (LessonMemory's internal teaching micro-phase). `completed`
 // gates resume in the /api/chat 'start' route — a completed course is not deleted, it is
@@ -103,25 +103,26 @@ export function upsertCourseProgress(
   snapshot: CourseProgressSnapshot,
   phase: PhaseName,
   completed: boolean,
+  learnerId: string,
 ): void {
   const db = getDb();
   db.prepare(`
-    INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(course_id) DO UPDATE SET
+    INSERT INTO course_progress (course_id, snapshot, phase, completed, updated_at, learner_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(learner_id, course_id) DO UPDATE SET
       snapshot = excluded.snapshot,
       phase = excluded.phase,
       completed = excluded.completed,
       updated_at = excluded.updated_at
-  `).run(courseId, JSON.stringify(snapshot), phase, completed ? 1 : 0, new Date().toISOString());
+  `).run(courseId, JSON.stringify(snapshot), phase, completed ? 1 : 0, new Date().toISOString(), learnerId);
 }
 
 // Missing and invalid are different: callers must not overwrite a damaged breakpoint.
-export function getCourseProgress(courseId: string): CourseProgressRow | undefined {
+export function getCourseProgress(courseId: string, learnerId: string): CourseProgressRow | undefined {
   const db = getDb();
   const row = db.prepare(
-    'SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress WHERE course_id = ?',
-  ).get(courseId) as StoredCourseProgressRow | undefined;
+    'SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress WHERE course_id = ? AND learner_id = ?',
+  ).get(courseId, learnerId) as StoredCourseProgressRow | undefined;
   return row ? parseCourseProgressRow(row) : undefined;
 }
 
@@ -133,10 +134,10 @@ export function getCourseProgress(courseId: string): CourseProgressRow | undefin
 // Session persistence (2026-07-20): per-course "times started" for the home list. Each
 // createSession AND createSessionFromSnapshot inserts a lesson_logs row, so this counts
 // every entry into the course including resumes (PRD R2 semantics).
-export function getLessonCountByCourse(db: Database): Map<string, number> {
+export function getLessonCountByCourse(db: Database, learnerId: string): Map<string, number> {
   const rows = db
-    .prepare('SELECT course_id AS courseId, COUNT(*) AS n FROM lesson_logs GROUP BY course_id')
-    .all() as Array<{ courseId: string; n: number }>;
+    .prepare('SELECT course_id AS courseId, COUNT(*) AS n FROM lesson_logs WHERE learner_id = ? GROUP BY course_id')
+    .all(learnerId) as Array<{ courseId: string; n: number }>;
   const map = new Map<string, number>();
   for (const r of rows) map.set(r.courseId, r.n);
   return map;
@@ -146,13 +147,13 @@ export function getLessonCountByCourse(db: Database): Map<string, number> {
 // Tolerant of a missing table (fresh checkout before the first /api/chat call, or a minimal
 // test DB) and of a corrupt snapshot row (skipped) — a bad breakpoint must never break the
 // home list. Both paths share structural validation; invalid rows are never written here.
-export function getAllCourseProgress(db: Database): Map<string, CourseProgressRow> {
+export function getAllCourseProgress(db: Database, learnerId: string): Map<string, CourseProgressRow> {
   const map = new Map<string, CourseProgressRow>();
   let rows: StoredCourseProgressRow[];
   try {
     rows = db
-      .prepare('SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress')
-      .all() as StoredCourseProgressRow[];
+      .prepare('SELECT course_id AS courseId, snapshot, phase, completed, updated_at AS updatedAt FROM course_progress WHERE learner_id = ?')
+      .all(learnerId) as StoredCourseProgressRow[];
   } catch {
     return map; // table not created yet — treat as "no breakpoints"
   }
@@ -173,10 +174,10 @@ export interface LessonTimingRow {
   endTime: string | null;
 }
 
-export function getLessonTimings(db: Database): LessonTimingRow[] {
+export function getLessonTimings(db: Database, learnerId: string): LessonTimingRow[] {
   return db
-    .prepare(`SELECT id, start_time AS startTime, end_time AS endTime FROM lesson_logs`)
-    .all() as LessonTimingRow[];
+    .prepare(`SELECT id, start_time AS startTime, end_time AS endTime FROM lesson_logs WHERE learner_id = ?`)
+    .all(learnerId) as LessonTimingRow[];
 }
 
 export interface RecentLessonRow {
@@ -187,15 +188,15 @@ export interface RecentLessonRow {
   interactionCount: number;
 }
 
-export function getRecentLessons(db: Database, limit: number): RecentLessonRow[] {
+export function getRecentLessons(db: Database, limit: number, learnerId: string): RecentLessonRow[] {
   return db
     .prepare(
       `SELECT id, course_id AS courseId, start_time AS startTime, end_time AS endTime, interaction_count AS interactionCount
-       FROM lesson_logs
+       FROM lesson_logs WHERE learner_id = ?
        ORDER BY start_time DESC
        LIMIT ?`,
     )
-    .all(limit) as RecentLessonRow[];
+    .all(learnerId, limit) as RecentLessonRow[];
 }
 
 export interface LessonWordPerfCount {
@@ -221,7 +222,7 @@ export interface WordPerfByCourseRow {
   courseId: string;
 }
 
-export function getWordPerformanceByCourse(db: Database): WordPerfByCourseRow[] {
+export function getWordPerformanceByCourse(db: Database, learnerId: string): WordPerfByCourseRow[] {
   return db
     .prepare(
       `SELECT wp.word            AS word,
@@ -231,7 +232,8 @@ export function getWordPerformanceByCourse(db: Database): WordPerfByCourseRow[] 
               ll.course_id       AS courseId
        FROM word_performance wp
        JOIN lesson_logs ll ON ll.id = wp.lesson_id
+       WHERE ll.learner_id = ?
        GROUP BY wp.word, ll.course_id`,
     )
-    .all() as WordPerfByCourseRow[];
+    .all(learnerId) as WordPerfByCourseRow[];
 }

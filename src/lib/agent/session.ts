@@ -41,12 +41,13 @@ function freshTokenUsage(): TokenUsage {
   };
 }
 
-export function createSession(course: Course): Session {
+export function createSession(course: Course, learnerId: string): Session {
   const id = uuidv4();
   const session: Session = {
     id,
     lifetime: new AbortController(),
     courseId: course.id,
+    learnerId,
     course,
     memory: initializeCardProgress(createMemory(), course),
     tokenUsage: freshTokenUsage(),
@@ -55,7 +56,7 @@ export function createSession(course: Course): Session {
     startTime: new Date(),
     currentPhase: 'intro',
   };
-  createLessonLog(id, course.id);
+  createLessonLog(id, course.id, learnerId);
   sessionStore.save(session);
   return session;
 }
@@ -64,7 +65,7 @@ export function createSession(course: Course): Session {
 // breakpoint instead of starting fresh. Conversation history (messages/interestSignals) is
 // NOT restored — PRD R1 is "跳到上次位置,重新开个头", not a seamless resume. New cards added
 // to the course since the snapshot was taken are backfilled via initializeCardProgress.
-export function createSessionFromSnapshot(course: Course, progress: CourseProgressRow): Session {
+export function createSessionFromSnapshot(course: Course, progress: CourseProgressRow, learnerId: string): Session {
   const id = uuidv4();
   const restoredMemory = deserializeProgress(createMemory(), progress.snapshot);
   const memory = initializeCardProgress(restoredMemory, course);
@@ -72,6 +73,7 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
     id,
     lifetime: new AbortController(),
     courseId: course.id,
+    learnerId,
     course,
     memory,
     tokenUsage: freshTokenUsage(),
@@ -80,10 +82,11 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
     startTime: new Date(),
     currentPhase: progress.phase,
   };
-  createLessonLog(id, course.id);
+  createLessonLog(id, course.id, learnerId);
   sessionStore.save(session);
   console.log('[session] resumed from breakpoint', {
     courseId: course.id,
+    learnerId,
     sessionId: id,
     phase: progress.phase,
     clearedCount: memory.clearedCardIds.length,
@@ -94,12 +97,20 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
 
 export function getSession(id: string): Session | undefined {
   const session = sessionStore.get(id);
+  if (session && !getDb().prepare('SELECT 1 FROM learners WHERE id = ?').get(session.learnerId)) {
+    session.lifetime.abort();
+    sessionStore.delete(id);
+    return undefined;
+  }
   return session?.lifetime.signal.aborted ? undefined : session;
 }
 
 export function endSession(sessionId: string): void {
   const session = sessionStore.get(sessionId);
   if (!session) return;
+  if (!getDb().prepare('SELECT 1 FROM learners WHERE id = ?').get(session.learnerId)) {
+    session.lifetime.abort(); sessionStore.delete(sessionId); return;
+  }
   // Cancellation is irreversible even if the final disk write fails. Keep the closed
   // object available only to endSession so its final transaction can be retried.
   session.lifetime.abort();
@@ -111,7 +122,7 @@ export function endSession(sessionId: string): void {
 }
 
 export function setSessionPhase(sessionId: string, phase: PhaseName): void {
-  const session = sessionStore.get(sessionId);
+  const session = getSession(sessionId);
   if (!session || session.lifetime.signal.aborted) return;
   session.currentPhase = phase;
   session.revision += 1;
@@ -123,7 +134,7 @@ export function recordQuizAnswer(
   answer: string,
   correct: boolean,
 ): boolean {
-  const session = sessionStore.get(sessionId);
+  const session = getSession(sessionId);
   if (!session || session.lifetime.signal.aborted) return false;
   const nextMemory = {
     ...session.memory,
@@ -151,6 +162,7 @@ function persistCourseProgress(session: Session): void {
     serializeProgress(session.memory),
     session.currentPhase,
     isCourseComplete(session.course, session.memory),
+    session.learnerId,
   );
 }
 
@@ -160,11 +172,12 @@ function commitSessionUpdate(
   tokenUsage: TokenUsage,
   writeRecords: () => void,
 ): void {
+  if (!getSession(session.id)) throw new Error('孩子档案已删除，请返回首页。');
   const lessonInteractionCount = session.lessonInteractionCount + 1;
   getDb().transaction(() => {
     writeRecords();
     touchLessonLog(session.id, lessonInteractionCount, tokenUsage);
-    upsertCourseProgress(session.courseId, serializeProgress(memory), session.currentPhase, isCourseComplete(session.course, memory));
+    upsertCourseProgress(session.courseId, serializeProgress(memory), session.currentPhase, isCourseComplete(session.course, memory), session.learnerId);
   })();
   session.memory = memory;
   session.tokenUsage = tokenUsage;

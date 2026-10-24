@@ -13,17 +13,17 @@ const ORIGINAL_DATABASE_PATH = process.env.DATABASE_PATH;
 const ROUTES = [
   {
     name: '/api/progress',
-    get: async () => (await import('@/app/api/progress/route')).GET(),
+    get: async () => (await import('@/app/api/progress/route')).GET(new Request('http://x/api/progress?learnerId=test-learner')),
     expectBody: (body: unknown) => expect(body).toMatchObject({ totalWordsMastered: 0 }),
   },
   {
     name: '/api/stats',
-    get: async () => (await import('@/app/api/stats/route')).GET(),
+    get: async () => (await import('@/app/api/stats/route')).GET(new Request('http://x/api/stats?learnerId=test-learner')),
     expectBody: (body: unknown) => expect(body).toMatchObject({ totalMinutes: 0, totalSessions: 0 }),
   },
   {
     name: '/api/sessions',
-    get: async () => (await import('@/app/api/sessions/route')).GET(new Request('http://x/api/sessions')),
+    get: async () => (await import('@/app/api/sessions/route')).GET(new Request('http://x/api/sessions?learnerId=test-learner')),
     expectBody: (body: unknown) => expect(body).toEqual([]),
   },
 ];

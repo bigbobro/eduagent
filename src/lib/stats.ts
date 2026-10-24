@@ -13,8 +13,8 @@ function durationMs(start: string, end: string | null): number {
   return new Date(end).getTime() - new Date(start).getTime();
 }
 
-export function buildStatsSnapshot(db: Database): StatsSnapshot {
-  const rows = getLessonTimings(db);
+export function buildStatsSnapshot(db: Database, learnerId: string): StatsSnapshot {
+  const rows = getLessonTimings(db, learnerId);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -46,8 +46,8 @@ export function buildStatsSnapshot(db: Database): StatsSnapshot {
   };
 }
 
-export function buildSessionList(db: Database, courses: Course[], limit = 10): SessionSummary[] {
-  const rows = getRecentLessons(db, limit);
+export function buildSessionList(db: Database, courses: Course[], learnerId: string, limit = 10): SessionSummary[] {
+  const rows = getRecentLessons(db, limit, learnerId);
 
   const titleByCourse = new Map(courses.map((c) => [c.id, c.title]));
 

@@ -16,7 +16,7 @@ describe('POST /api/chat action=phase-transition', () => {
 
   it('updates session.currentPhase and streams SSE', async () => {
     if (process.env.VOICE_MOCK !== 'true') return;
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     const res = await POST(makeReq({
       action: 'phase-transition',
       sessionId: session.id,
@@ -41,7 +41,7 @@ describe('POST /api/chat action=phase-transition', () => {
   });
 
   it('returns 400 for invalid phase', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     const res = await POST(makeReq({
       action: 'phase-transition',
       sessionId: session.id,

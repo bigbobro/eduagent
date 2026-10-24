@@ -30,7 +30,7 @@
 └─────────────────────┘         └──────────────────────┘         └─────────────────┘
                                        ↓
                                  SQLite (lesson_logs / interaction_logs /
-                                 word_performance / course_progress)
+                                 word_performance / course_progress / learners)
 ```
 
 **为什么自定义 Next.js server**:Next.js App Router 不支持 WebSocket `upgrade` 事件。`server.ts` 接管 HTTP server,把 `/api/voice/asr` 与 `/api/voice/tts` 的 upgrade 请求转给对应 proxy 模块,其它请求让 Next.js 处理。upgrade 前先按 `isAllowedWsOrigin`(loopback + 配置端口白名单,`src/lib/voice/ws-origin.ts`)校验 `Origin`,拒绝跨站 WS 劫持(CSWSH,会盗用服务端豆包凭据);缺失 `Origin` 的非浏览器客户端放行。
@@ -81,10 +81,11 @@
 | `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes,错答时播静态 retry hint |
 | `src/components/lesson/DoneCelebrateFrame.tsx` | 下课庆祝页,星星 + 数据 + 双 CTA |
 | `src/components/journal/JournalPage.tsx` | 魔法书双页,展示 progress 聚合的词卡 |
-| `src/components/parents/PINGateFrame.tsx` / `ParentsPage.tsx` | 家长阁楼 PIN 解锁 + stats/session dashboard |
+| `src/components/parents/ParentsPage.tsx` | 按当前孩子展示学习统计与课次记录 |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/index.ts` | SQLite 连接持有者。`getDb()` **每次调用时**解析 `DATABASE_PATH`(相对 `process.cwd()`),路径与已开连接不同则 close 旧的重开——正常运行路径恒定,行为仍是进程内单连接;开库前 `mkdirSync(dirname, {recursive:true})`(better-sqlite3 只建文件不建目录,而 `db/` 不在 git 里,fresh checkout 没有该目录);导出 `closeDb()` 供测试在切临时 DB 前后显式释放,堵住"模块加载期捕获路径"导致的跨测试文件泄漏 |
-| `src/lib/db/schema.ts` + `queries.ts` | `schema.ts`:SQLite migration runner / 表结构 / `schema_migrations` 版本记录(**v4 加 `course_progress` 断点表**,PK=course_id);`queries.ts`:全部业务 SQL 的单一边界——写入 + 断点读写(`upsert`/`getCourseProgress`)+ 报表只读(`getLessonTimings` / `getRecentLessons` / `getLessonWordPerfCount` / `getWordPerformanceByCourse` / **`getLessonCountByCourse` / `getAllCourseProgress`**),调用方注入 `db` 只做 JS 聚合,自己不写 SQL |
+| `src/lib/db/learners.ts` | 孩子档案 CRUD 与单事务连带删除 |
+| `src/lib/db/schema.ts` + `queries.ts` | `schema.ts`:SQLite migration runner / 表结构 / `schema_migrations` 版本记录(v5 按孩子隔离，断点表主键为 `(learner_id, course_id)`);`queries.ts`:全部业务 SQL 的单一边界——写入 + 断点读写(`upsert`/`getCourseProgress`)+ 报表只读(`getLessonTimings` / `getRecentLessons` / `getLessonWordPerfCount` / `getWordPerformanceByCourse` / **`getLessonCountByCourse` / `getAllCourseProgress`**),调用方注入 `db` 只做 JS 聚合,自己不写 SQL |
 
 ---
 
@@ -94,14 +95,14 @@
 
 ```
 PhasedLessonView mount → new LessonController → new PhasedLessonController
-  ├─ phased.startLesson()
-  │    └─ controller.startLesson(courseId)
+  ├─ phased.startLesson(learnerId)
+  │    └─ controller.startLesson(courseId, learnerId)
   │    ├─ Promise.all:
   │    │   ├─ tts.open() → WS /api/voice/tts → 豆包 StartConnection (event=1)
   │    │   │     ◀── ConnectionStarted (event=50, ~3.7s 首次握手)
   │    │   │     ConnectionStarted 前前端发来的 session 控制帧在 proxy 内排队
   │    │   └─ audioRecorder.prewarm() — getUserMedia + AudioContext + worklet + source 全就绪
-  │    └─ POST /api/chat?action=start
+  │    └─ POST /api/chat {action:start, courseId, learnerId}
   │         ◀── SSE: speech-delta × N, actions, done
   │              ├─ speech-delta → tts.startSession + sendText (流式合成)
   │              │     ◀── TTSResponse (event=352, PCM) → PcmPlayer.enqueue
@@ -119,7 +120,7 @@ PhasedLessonView mount → new LessonController → new PhasedLessonController
 
 ### 3.1b 断点续课恢复(2026-07-20)
 
-`POST /api/chat?action=start` 每门课查 `course_progress`:
+`POST /api/chat?action=start` 必填 `learnerId`，档案不存在返回 404；按 `(learner_id, course_id)` 查 `course_progress`，会话保存 `learnerId`，后续动作只传 `sessionId`:
 - `isResumableProgress` 为真(未完成 + 非空 intro 断点)→ `createSessionFromSnapshot` 用断点重建 memory(messages 清空,**不回放对话**),`currentPhase` 恢复到断点阶段,响应头 `X-Resume-Info`(JSON:`{resumed,phase,clearedCardIds,resumeCardId,passedQuizIds}`);前端据此从断点阶段起播、老师"欢迎回来"、reinforcement 从第一个未过 quiz 起。
 - 否则(新课 / 已完成 / 空 intro 断点)→ 现状 `createSession`,无 `X-Resume-Info`,响应字节同旧版(PRD"否则现状")。
 
@@ -517,7 +518,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 - 2026-05-01 — git history redact secrets + CLAUDE.md 加凭据规则
 - 2026-05-05 — **画布 v2:WordCardCanvas 替换 ImageCanvas** — 协议从 show/focus/annotate 统一为 `show_card`;课程数据从 `images[]` 迁移到 `cards[]`(`kind: 'word'|'sentence'`);画布层从图叠层改为图+中英文独立 DOM;删除 ShowTool/FocusTool/AnnotateTool 组件
 - 2026-05-10 — **教学循环 v1.1:课堂内进度引擎 + drillParts** — 每张 card 必填 `drillParts`;服务端用 `show_card` 同步 currentCardId;LLM 输出 `attempt_assessment`;memory 维护 `cardProgress` / `clearedCardIds`;history 裁到最近 12 条
-- 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};客户端 PIN 门控;详见 §12
+- 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};详见 §12
 - 2026-05-15 — **三阶段 lesson structure refactor** — 新增 food 三阶段课程、ImageGen PNG 单卡资产 + 结构化 `scene.svg`;新增 phase-aware prompt / SSE progress_snapshot / `phase-transition` / `quiz-answer`;新增 `PhasedLessonController` + Intro / Interactive / Reinforce / Quiz 组件;删除旧课程数据与旧 `LessonView` fallback;`Course.phases` 收紧为必填
 - 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
 - 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
@@ -531,6 +532,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 - 2026-05-26 — **Prompt input quantification** — `/api/chat` 每轮 LLM 调用前通过 `buildPromptInput()` 生成同一份 system prompt 与 inputBreakdown,按 static rules / phase rules / course definition / lesson state / summary constraints / history / separators 记录字符数,并在拿到 MiMo `prompt_tokens` 后按字符占比估算各 bucket token;`interaction_logs.model_calls.llm.inputBreakdown` 持久化该诊断,`lesson-report-data.ts` 聚合 trackedTurns、平均字符、最大 bucket 和估算 token share,用于决定下一轮 prompt slimming 先压哪里。
 - 2026-05-26 — **Eval v1 lesson quality scorecard** — `lesson-report-data.ts` 在原有 session/tokens/interactions 基础上输出 `eval` 结构化评分卡:session health、cost/context、teaching-loop outcomes、agent behavior risks、next-iteration signals。所有指标从 `lesson_logs`、`interaction_logs`、课程词卡定义和 `word_performance` 确定性计算,不引入 LLM-as-judge,用于把课后报告里的人工判断沉淀成可回归、可比较的数据。
 - 2026-07-05 — **repeat-after-me 降难度 + final-clear 矛盾话术拦截** — fruits 真人课(session `893ed393`)暴露 q7 `I see the grape.` 被 `See the.` 过宽判 correct,以及最后词 clear 当轮 n=28 仍说"还有几张水果卡片没看"。修法:repeat-after-me 初次静态 TTS 改为"完整句 → 慢速拆分 → 完整句",判分要求目标词/核心内容词出现并覆盖足够句子内容;`speechCardAlign` all-cleared just-cleared 分支新增终态矛盾话术检测,命中"还有...没看/继续学下一个"等续课句时改写为 `ALL_CLEARED_CELEBRATION`。
+- 2026-10-24 — **本地多孩子档案** — migration v5 将课次和课程断点按孩子隔离；首页选择孩子，设置页管理档案，学习记录直接进入；旧库迁移到默认「宝贝」。
 - 2026-07-20 — **会话持久化与断点续课**(真人课信号触发:课上一半退出下次从头) — 新增 `course_progress` 表(migration v4,PK=course_id,每门课一条断点)+ `course-progress.ts`(进度序列化 / `isCourseComplete` / `isResumableProgress` / `resolveResumeCardId`);`/api/chat` start 从有效断点 `createSessionFromSnapshot` 恢复(响应头 `X-Resume-Info`,新课字节不变),每轮 upsert 断点,quiz 答对累积 `passedQuizIds`;完成 = 全 word cleared + 全 quiz passed,**不过期**;前端从断点阶段起播 + 老师"欢迎回来" + reinforcement 跳过已过 quiz(§3.1b);首页 `HomeStudy` 每门课展示上课次数 + 完成度% + "继续"角标(`/api/progress` 扩展 `timesStarted`/`progressPercent`/`hasResume`/`completed`,`getLessonCountByCourse` + `getAllCourseProgress` 聚合)。次数 = 每次进课(含续课)计一次。同批「工程安全债」评估为单用户纯本地无外部攻击面、收益低,整批 park(见 TODO.md)。
 
 > 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
@@ -559,14 +561,15 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ## 12. 前端架构(麻吉魔法学院,2026-05 CC 重构)
 
-5 个空间 / 5 个页面 / 1 个麻吉小猫组件:
+课程、学习记录与设置页面沿用麻吉小猫组件:
 
 ```
 /                          魔法书房  · HomeStudy
 /lesson/[id]               魔法课堂  · IntroFrame / LessonMandalaV2 / ReinforcementFlow
 /lesson/[id]/done          下课庆祝  · DoneCelebrateFrame
 /journal                   魔法书    · JournalPage
-/parents                   家长阁楼  · PINGateFrame + ParentsPage (PIN 客户端门控)
+/parents                   学习记录  · ParentsPage(当前孩子)
+/settings                  通用设置  · 服务配置 + 孩子档案管理
 ```
 
 ### 关键模块
@@ -578,9 +581,9 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | 课中六屏 view 层,保留控制器与 phase 状态机 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
 | `src/components/journal/JournalPage.tsx` | 魔法书双页,按 progress 聚合展示词卡 |
-| `src/components/parents/{PINGateFrame,ParentsPage}.tsx` | 家长阁楼 PIN + dashboard |
+| `src/components/parents/ParentsPage.tsx` | 当前孩子的学习记录 dashboard |
 | `src/components/ui/{ErrorBoundary,SVGDefs}.tsx` | root 兜底与全局 SVG defs |
-| `src/lib/progress.ts` / `stats.ts` / `pin.ts` | 纯聚合(SQL 全部下沉到 `db/queries.ts`,这里只对返回行做 JS 整形)+ 客户端 PIN |
+| `src/lib/progress.ts` / `stats.ts` | 纯聚合(SQL 全部下沉到 `db/queries.ts`,这里只对返回行做 JS 整形) |
 | `src/app/api/{progress,sessions,stats}/route.ts` | 三个只读聚合 API;请求开始先 `ensureDatabaseInitialized()` 支持 fresh DB |
 | `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 5 页面 + 4 API |
 | `scripts/lesson-smoke.ts` | `pnpm smoke:lesson` 先用 Chrome 验证 push-to-talk 按钮 / Space 持按保持 recording,再用 `/api/chat` 文本脚本验证 teacher agent 状态机与 speech/show_card 一致性 |
@@ -592,21 +595,27 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 - 圆角阶:`rounded-paper-sm/md/lg/pill`。
 - 阴影:`shadow-paper` / `shadow-paper-hero`,均为绘本纸张的实心偏移阴影。
 
-### PIN 门控
+### 本地孩子档案(2026-10-24)
 
-家长后台 PIN 在客户端 `lib/pin.ts`,SHA-256 加盐 hash 存 localStorage,错 3 次锁 30s,成功验证 reset 失败计数。不走服务端 API(单用户本地工具)。
+档案只区分学习进度，无登录或角色。首页无档案时引导去设置页新建，单个档案自动选中，多个可切换；当前 id 存 localStorage，读写失败回到选择流程。设置页以独立 `LearnersSection` 管理新建、改名、删除；删除必须输入孩子名字二次确认。学习记录页直接打开，只显示当前孩子统计，不再承担设置功能。
+
+`/api/learners` 提供 GET 列表、POST `{name}`、PATCH `{id,name}`、DELETE `{id}`；写请求复用设置接口的回环 Origin 校验。删除在单事务内先删 interaction / word performance，再删断点、课次和档案；被删孩子的在途会话不能再提交。
+
+数据模型 v5：`learners(id TEXT PRIMARY KEY, name TEXT NOT NULL, avatar TEXT, created_at TEXT NOT NULL)`；`lesson_logs.learner_id` 关联孩子，`interaction_logs` / `word_performance` 继续经 `lesson_id` 关联，不重复保存归属；`course_progress` 重建为 `(learner_id, course_id)` 复合主键。旧库有记录时创建「宝贝」并迁移课次及原断点，空库不创建默认档案。迁移沿用事务和 PRAGMA 检查，丢失 migration marker 后重跑仍保留已有归属。
+
+`/api/progress`、`/api/stats`、`/api/sessions` 必填 query `learnerId`，缺失返回 400；所有聚合查询和断点读写均按孩子过滤。`lesson-smoke.ts` 自建测试孩子，不清理用户的课程断点；课次报告携带 `learnerId`。
 
 ### 数据流
 
 ```
 fetch /api/courses    → 首页 HomeStudy 书本列表(返回 registry `allCourses` 全部课程,数量见 index.ts)
-fetch /api/progress   → JournalPage / 总结页(WordMastery + 3 星掌握筛选)
-fetch /api/sessions   → ParentsPage 最近课堂列表(默认 limit=10)
-fetch /api/stats      → ParentsPage 数据卡(总分钟 + 掌握词数;streak/accuracy 暂显示占位)
+fetch /api/progress?learnerId   → JournalPage / 总结页(WordMastery + 3 星掌握筛选)
+fetch /api/sessions?learnerId   → ParentsPage 最近课堂列表(默认 limit=10)
+fetch /api/stats?learnerId      → ParentsPage 数据卡(总分钟 + 掌握词数;streak/accuracy 暂显示占位)
 voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonController)
 ```
 
-`/api/progress` / `/api/sessions` / `/api/stats` 是只读业务接口,但会在查询前调用 `ensureDatabaseInitialized()` 跑 SQLite migrations。这样 fresh checkout 或临时 `DATABASE_PATH` 不需要先跑一节课或命中 `/api/chat`。当前 migrations:v1 创建 `lesson_logs` / `interaction_logs` / `word_performance`;v2(2026-07-04)给 `word_performance` 增 `rc_correct` / `rc_cleared`(R-C 权威账本,ALTER 前查 PRAGMA 幂等);v3(2026-07-04)给 `lesson_logs` 增 `ended_gracefully INTEGER DEFAULT 0`(同一 ALTER-前-查-PRAGMA 幂等约定),只由 `finishLessonLog` 置 1,`touchLessonLog` 不碰它。已有本地 DB 若缺少 marker,会幂等补写而不删除课堂数据。
+`/api/progress` / `/api/sessions` / `/api/stats` 是只读业务接口,但会在查询前调用 `ensureDatabaseInitialized()` 跑 SQLite migrations。这样 fresh checkout 或临时 `DATABASE_PATH` 不需要先跑一节课或命中 `/api/chat`。当前 migrations:v5 加本地孩子归属与复合断点主键(见上文);v4 加断点表;v1 创建 `lesson_logs` / `interaction_logs` / `word_performance`;v2(2026-07-04)给 `word_performance` 增 `rc_correct` / `rc_cleared`(R-C 权威账本,ALTER 前查 PRAGMA 幂等);v3(2026-07-04)给 `lesson_logs` 增 `ended_gracefully INTEGER DEFAULT 0`(同一 ALTER-前-查-PRAGMA 幂等约定),只由 `finishLessonLog` 置 1,`touchLessonLog` 不碰它。已有本地 DB 若缺少 marker,会幂等补写而不删除课堂数据。
 
 **课堂结算是增量的**:`lesson_logs.end_time` 现在由 `touchLessonLog()` 在**每一轮提交时**写(`commitTurn` 的消息轮 + `recordQuizAnswer` 的 quiz 轮),而不是只靠优雅结课的 `finishLessonLog()`(`action:'end'`)。这样关 tab / 刷新 / 崩溃 / 断网都不会让 `end_time` 永久 NULL —— 否则 `stats.durationMs` 会把整节课时长算成 0。**R1(2026-07-04)**:`touchLessonLog()` 现在同时传 `tokenUsage` 参数、每轮把 `session.tokenUsage` 序列化落库——此前 `token_usage` 只有 `finishLessonLog()` 写,非优雅结束的课永远是 `{}`(报告假报 0 req/asr/tts "not tracked")。但这也意味着 `token_usage` 非空**不再能**当"是否优雅结束"的判据(现在每轮都非空);新增的 `ended_gracefully` 列专门只由 `finishLessonLog()` 置 1,`lesson-report-data.ts` 的 `sessionHealth.endedGracefully` 读这一列。`finishLessonLog()` 保留为优雅结课的最终 flush(`token_usage` + `ended_gracefully=1`)。`end_time IS NULL` 不被任何地方当"进行中"标志,所以课中写它是安全的。
 

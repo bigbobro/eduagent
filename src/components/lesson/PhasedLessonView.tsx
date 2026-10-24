@@ -13,10 +13,11 @@ import { ReinforcementFlow } from './ReinforcementFlow';
 
 interface PhasedLessonViewProps {
   course: Course;
+  learnerId: string;
 }
 
 
-export function PhasedLessonView({ course }: PhasedLessonViewProps) {
+export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
   const router = useRouter();
   const v2Ref = useRef<LessonController | null>(null);
   const phasedRef = useRef<PhasedLessonController | null>(null);
@@ -103,7 +104,7 @@ export function PhasedLessonView({ course }: PhasedLessonViewProps) {
   const handleStart = async () => {
     setStarted(true);
     const phased = phasedRef.current;
-    const startedOk = await phased?.startLesson();
+    const startedOk = await phased?.startLesson(learnerId);
     if (phasedRef.current !== phased) return;
     if (startedOk === false) {
       setStarted(false);

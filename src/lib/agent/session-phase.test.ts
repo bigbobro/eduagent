@@ -4,13 +4,13 @@ import { createSession, endSession, getSession, setSessionPhase } from './sessio
 
 describe('session phase tracking', () => {
   it('phased course session starts at intro', () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     expect(session.currentPhase).toBe('intro');
     endSession(session.id);
   });
 
   it('setSessionPhase updates phase', () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     setSessionPhase(session.id, 'interactive');
     expect(getSession(session.id)?.currentPhase).toBe('interactive');
     endSession(session.id);

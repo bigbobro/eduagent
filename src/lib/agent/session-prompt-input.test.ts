@@ -53,7 +53,7 @@ describe('streamUserInput prompt input measurement', () => {
   });
 
   it('persists inputBreakdown aligned with the actual LLM request', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     mockStreamLLM.mockReturnValue(streamResponse());
 
     for await (const _event of streamUserInput(session.id, 'Apple.')) {

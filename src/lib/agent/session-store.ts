@@ -5,6 +5,7 @@ export interface Session {
   id: string;
   lifetime: AbortController;
   courseId: string;
+  learnerId: string;
   course: Course;
   memory: LessonMemory;
   tokenUsage: TokenUsage;

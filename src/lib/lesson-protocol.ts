@@ -9,7 +9,7 @@ export type LessonAck = z.infer<typeof lessonAckSchema>;
 const count = z.number().int().nonnegative();
 const asrResult = z.object({ latency: z.number().nonnegative(), tokens: count });
 export const lessonRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('start'), courseId: z.string().min(1) }),
+  z.object({ action: z.literal('start'), courseId: z.string().min(1), learnerId: z.string().min(1) }),
   z.object({ action: z.literal('message'), sessionId: z.string().min(1), text: z.string(), system: z.boolean().optional(), asrResult: asrResult.optional() }),
   z.object({ action: z.literal('phase-transition'), sessionId: z.string().min(1), to: lessonPhaseSchema }),
   z.object({ action: z.literal('quiz-answer'), sessionId: z.string().min(1), quizId: z.string().min(1), answer: z.string(), correct: z.boolean() }),

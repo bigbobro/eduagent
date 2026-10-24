@@ -13,8 +13,8 @@ export function masteryStarsFromRatio(correct: number, attempts: number): 0 | 1 
   return 0;
 }
 
-export function buildProgressSnapshot(db: Database, courses: Course[]): ProgressSnapshot {
-  const rows = getWordPerformanceByCourse(db);
+export function buildProgressSnapshot(db: Database, courses: Course[], learnerId: string): ProgressSnapshot {
+  const rows = getWordPerformanceByCourse(db, learnerId);
 
   const perfByCourse = new Map<string, Map<string, WordPerfByCourseRow>>();
   for (const r of rows) {
@@ -23,8 +23,8 @@ export function buildProgressSnapshot(db: Database, courses: Course[]): Progress
   }
 
   // Session persistence (2026-07-20, PRD R2): per-course times-started + breakpoint state.
-  const lessonCounts = getLessonCountByCourse(db);
-  const progressRows = getAllCourseProgress(db);
+  const lessonCounts = getLessonCountByCourse(db, learnerId);
+  const progressRows = getAllCourseProgress(db, learnerId);
 
   const courseSnapshots: CourseProgress[] = courses.map((course) => {
     const perfMap = perfByCourse.get(course.id) ?? new Map<string, WordPerfByCourseRow>();

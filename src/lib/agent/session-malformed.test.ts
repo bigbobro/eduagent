@@ -26,7 +26,7 @@ describe('id-7: malformed LLM output → recoverable error, not a silent turn', 
   beforeEach(() => vi.clearAllMocks());
 
   it('yields an error event when output is unparseable and no speech was recovered', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     mockStreamLLM.mockReturnValue(yieldRaw('totally not json — malformed garbage'));
 
     const events: any[] = [];
@@ -42,7 +42,7 @@ describe('id-7: malformed LLM output → recoverable error, not a silent turn', 
   });
 
   it('still completes the turn when malformed but speech was recovered (best-effort)', async () => {
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     // speech streams fine, trailing JSON is broken → malformed=true but speech is present
     mockStreamLLM.mockReturnValue(yieldRaw('{"speech":"我们一起来玩吧","actions":[oops'));
 

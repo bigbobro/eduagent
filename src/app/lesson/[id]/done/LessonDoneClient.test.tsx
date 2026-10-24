@@ -35,7 +35,8 @@ describe('LessonDoneClient', () => {
   beforeEach(() => {
     routerPush.mockClear();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url !== '/api/progress') throw new Error(`unexpected fetch: ${url}`);
+      if (url === '/api/learners') return Promise.resolve(new Response(JSON.stringify([{ id: 'test-learner', name: '宝宝' }])));
+      if (url !== '/api/progress?learnerId=test-learner') throw new Error(`unexpected fetch: ${url}`);
       return new Response(JSON.stringify(progress), { status: 200 });
     }));
   });
@@ -48,7 +49,7 @@ describe('LessonDoneClient', () => {
     render(<LessonDoneClient courseId="food" />);
 
     expect(await screen.findByText('2 个词')).toBeTruthy();
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledWith('/api/progress');
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledWith('/api/progress?learnerId=test-learner');
   });
 });

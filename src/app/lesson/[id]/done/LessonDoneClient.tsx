@@ -1,4 +1,5 @@
 'use client';
+import { resolveCurrentLearner } from '@/lib/current-learner';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DoneCelebrateFrame } from '@/components/lesson/DoneCelebrateFrame';
@@ -13,7 +14,10 @@ export function LessonDoneClient({ courseId }: Props) {
   const [snap, setSnap] = useState<ProgressSnapshot | null>(null);
 
   useEffect(() => {
-    fetch('/api/progress')
+    resolveCurrentLearner().then((learner) => {
+      if (!learner) { router.replace('/'); throw new Error('请选择孩子'); }
+      return fetch(`/api/progress?learnerId=${encodeURIComponent(learner.id)}`);
+    })
       .then((r) => r.json())
       .then((p: ProgressSnapshot) => setSnap(p))
       .catch(() => {

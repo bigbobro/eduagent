@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterAll } from 'vitest';
-import { closeDb } from '@/lib/db';
+import { getDb, closeDb } from '@/lib/db';
 import { initDatabase } from '@/lib/db/schema';
 
 // Every test file gets its own migrated SQLite file under a temp dir. Without
@@ -13,6 +13,7 @@ import { initDatabase } from '@/lib/db/schema';
 const testDbDir = mkdtempSync(join(tmpdir(), 'eduagent-vitest-'));
 process.env.DATABASE_PATH = join(testDbDir, 'eduagent.db');
 initDatabase();
+getDb().prepare('INSERT INTO learners (id, name, created_at) VALUES (?, ?, ?)').run('test-learner', '测试孩子', new Date().toISOString());
 
 afterAll(() => {
   closeDb();

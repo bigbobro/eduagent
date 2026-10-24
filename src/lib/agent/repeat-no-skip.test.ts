@@ -25,7 +25,7 @@ const REPEAT_TEXT =
   '(孩子刚刚没听清,请重新介绍当前卡片 apple: apple / 苹果) 必须先 show_card 当前卡片,不要切换到其它卡。';
 
 function seedAppleAtCountOne() {
-  const session = createSession(foodCourse);
+  const session = createSession(foodCourse, 'test-learner');
   session.memory.currentCardId = 'apple';
   session.memory.currentWord = 'apple';
   session.memory.cardProgress = { ...session.memory.cardProgress, apple: 'attempted' };

@@ -6,7 +6,7 @@ describe('progress_snapshot SSE event', () => {
   it('emits a progress_snapshot event with clearedCardIds and totalAttempts', async () => {
     if (process.env.VOICE_MOCK !== 'true') return;
 
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     const events: any[] = [];
     for await (const ev of streamUserInput(session.id, '(课堂开始)')) {
       events.push(ev);

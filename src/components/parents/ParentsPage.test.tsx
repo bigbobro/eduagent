@@ -26,9 +26,9 @@ const sessions: SessionSummary[] = [
 
 describe('ParentsPage', () => {
   it('renders stats and recent sessions', () => {
-    render(<ParentsPage stats={stats} sessions={sessions} ttsVoice="Tina" onBack={() => {}} />);
+    render(<ParentsPage stats={stats} sessions={sessions} learnerName="Tina" onBack={() => {}} />);
 
-    expect(screen.getByText('家长阁楼')).toBeTruthy();
+    expect(screen.getByText('学习记录')).toBeTruthy();
     expect(screen.getByText('本周学习')).toBeTruthy();
     expect(screen.getByText('24')).toBeTruthy();
     expect(screen.getByText('食物')).toBeTruthy();
@@ -36,7 +36,7 @@ describe('ParentsPage', () => {
   });
 
   it('renders fetch error states', () => {
-    render(<ParentsPage stats={null} sessions={null} errStats errSessions ttsVoice="" onBack={() => {}} />);
+    render(<ParentsPage stats={null} sessions={null} errStats errSessions learnerName="" onBack={() => {}} />);
 
     expect(screen.getByText('暂时拿不到数据')).toBeTruthy();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);

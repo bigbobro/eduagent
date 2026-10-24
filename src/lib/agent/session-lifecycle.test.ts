@@ -29,8 +29,8 @@ describe('session lifetime', () => {
       yield { done: false, delta: reply };
       yield { done: true, fullText: reply, usage: { inputTokens: 1, outputTokens: 1 }, latency: 1 };
     });
-    const initial = action === 'message' ? createSession(foodCourse) : null;
-    const res = await post(action === 'start' ? { action, courseId: foodCourse.id } : { action, sessionId: initial!.id, text: 'apple' });
+    const initial = action === 'message' ? createSession(foodCourse, 'test-learner') : null;
+    const res = await post(action === 'start' ? { learnerId: 'test-learner', action, courseId: foodCourse.id } : { action, sessionId: initial!.id, text: 'apple' });
     const id = initial?.id ?? res.headers.get('X-Session-Id')!;
     await vi.waitFor(() => expect(signal).toBeDefined());
     await post({ action: 'end', sessionId: id });
@@ -44,7 +44,7 @@ describe('session lifetime', () => {
 
   it.each(['intro', 'reinforcement'] as const)('does not commit a %s generator paused at yield when ended', async (phase) => {
     vi.spyOn(llm, 'streamLLM').mockImplementation(async function* () { yield { done: false, delta: reply }; });
-    const session = createSession(foodCourse);
+    const session = createSession(foodCourse, 'test-learner');
     setSessionPhase(session.id, phase);
     const stream = streamUserInput(session.id, 'apple');
     expect((await stream.next()).value?.type).toBe('speech-delta');
@@ -68,7 +68,7 @@ describe('session lifetime', () => {
       try { await barrier; inputSignal?.throwIfAborted(); yield { done: false, delta: reply }; }
       finally { finished = true; }
     });
-    const res = await post({ action: 'start', courseId: foodCourse.id });
+    const res = await post({ learnerId: 'test-learner', action: 'start', courseId: foodCourse.id });
     const id = res.headers.get('X-Session-Id')!;
     await vi.waitFor(() => expect(signal).toBeDefined());
     const before = snapshot(id);
@@ -82,7 +82,7 @@ describe('session lifetime', () => {
 
   it('preserves a completed turn when end follows its successful commit', async () => {
     vi.spyOn(llm, 'streamLLM').mockImplementation(async function* () { yield { done: false, delta: reply }; });
-    const res = await post({ action: 'start', courseId: foodCourse.id });
+    const res = await post({ learnerId: 'test-learner', action: 'start', courseId: foodCourse.id });
     const id = res.headers.get('X-Session-Id')!;
     expect(await res.text()).toContain('event: done');
     const interactions = snapshot(id).interactions;
