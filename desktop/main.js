@@ -41,14 +41,8 @@ function startServer() {
     HOST,
     PORT: String(PORT),
     DATABASE_PATH: path.join(app.getPath('userData'), 'eduagent.db'),
-    // spike 固定 mock;config 校验仍要求这些变量非空,值是占位符,不是凭据。Phase 1 会让配置可缺省。
-    VOICE_MOCK: 'true',
-    LLM_API_KEY: 'mock-placeholder',
-    DOUBAO_APP_ID: 'mock-placeholder',
-    DOUBAO_ACCESS_KEY: 'mock-placeholder',
-    DOUBAO_ASR_RESOURCE_ID: 'mock-placeholder',
-    DOUBAO_TTS_RESOURCE_ID: 'mock-placeholder',
-    DOUBAO_TTS_DEFAULT_SPEAKER: 'mock-placeholder',
+    // 配置来源:server 启动时读这个文件并映射成 LLM_* / DOUBAO_* env(main 不注入任何 key)。
+    EDUAGENT_SETTINGS_PATH: path.join(app.getPath('userData'), 'settings.json'),
   };
   serverProc = utilityProcess.fork(path.join(dir, 'eduagent-server.js'), [], {
     cwd: dir,
@@ -62,8 +56,28 @@ function startServer() {
   serverProc.on('exit', (code) => {
     log(`server exited code=${code}`);
     serverProc = null;
-    if (!quitting) showError(`服务进程已退出(code=${code})。日志:${path.join(app.getPath('userData'), 'logs', 'server.log')}`);
+    if (quitting) return;
+    if (code === RESTART_EXIT_CODE) {
+      restartServer();
+      return;
+    }
+    showError(`服务进程已退出(code=${code})。日志:${path.join(app.getPath('userData'), 'logs', 'server.log')}`);
   });
+}
+
+// 约定:server 保存设置后以退出码 75 退出,请求 main 用新配置重启(见 docs/architecture.md)。
+const RESTART_EXIT_CODE = 75;
+
+async function restartServer() {
+  log('server requested restart (exit 75), restarting with new settings');
+  startServer();
+  try {
+    await waitForServer();
+    log('server ready after restart');
+    if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(ORIGIN);
+  } catch (err) {
+    showError(String(err && err.message ? err.message : err));
+  }
 }
 
 function waitForServer(timeoutMs = 30000) {
@@ -101,6 +115,14 @@ function isLocalOrigin(url) {
   }
 }
 
+// 站外链接交给系统浏览器;只放行 http(s)。
+function openExternalSafely(url) {
+  try {
+    const u = new URL(url);
+    if ((u.protocol === 'https:' || u.protocol === 'http:') && u.origin !== ORIGIN) shell.openExternal(u.href);
+  } catch {}
+}
+
 function setupPermissions() {
   const ses = session.defaultSession;
   // 只对本地 origin 放行麦克风(media),其余一律拒绝。
@@ -121,11 +143,13 @@ function createWindow() {
   });
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (!isLocalOrigin(url)) shell.openExternal(url);
+    openExternalSafely(url);
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith('data:') && !isLocalOrigin(url)) e.preventDefault();
+    if (url.startsWith('data:') || isLocalOrigin(url)) return;
+    e.preventDefault();
+    openExternalSafely(url);
   });
   mainWindow.on('closed', () => {
     mainWindow = null;

@@ -61,6 +61,10 @@ await build({
   target: 'node24',
   format: 'cjs',
   external: ['next', 'bufferutil', 'utf-8-validate'],
+  // 打包版里 require('bufferutil') 会被 Next 的 require hook 解析到一个没有 mask 的占位模块,
+  // ws 发送 >=48 字节的帧时抛 "t.mask is not a function"(真实 ASR 的请求帧/音频帧都会中招)。
+  // 关掉 ws 的可选原生加速,走纯 JS 实现。
+  banner: { js: "process.env.WS_NO_BUFFER_UTIL = '1';" },
   tsconfig: join(root, 'tsconfig.server.json'),
   logLevel: 'info',
 });

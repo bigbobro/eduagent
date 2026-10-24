@@ -8,8 +8,9 @@ import {
   Serialization,
 } from './doubao-codec';
 import { createWsTeardown } from './ws-teardown';
+import { DEFAULT_TTS_SPEAKER } from '../config';
+import { doubaoTtsWsUrl } from './doubao-endpoints';
 
-const DOUBAO_TTS_URL = 'wss://openspeech.bytedance.com/api/v3/tts/bidirection';
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -39,7 +40,8 @@ export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void
     'X-Api-Connect-Id': connectId,
   };
 
-  const upstream = options.createUpstream?.(DOUBAO_TTS_URL, { headers }) ?? new WsClient(DOUBAO_TTS_URL, { headers, handshakeTimeout: 10000 });
+  const ttsUrl = doubaoTtsWsUrl();
+  const upstream = options.createUpstream?.(ttsUrl, { headers }) ?? new WsClient(ttsUrl, { headers, handshakeTimeout: 10000 });
   let connectionReady = false;
   let currentSession: PendingSession | null = null;
   const pendingControlFrames: Array<() => void> = [];
@@ -138,7 +140,7 @@ export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void
         const sessionId = msg.sessionId || randomUUID();
         currentSession = { sessionId };
         const reqParams = {
-          speaker: process.env.DOUBAO_TTS_DEFAULT_SPEAKER,
+          speaker: process.env.DOUBAO_TTS_DEFAULT_SPEAKER || DEFAULT_TTS_SPEAKER,
           model: 'seed-tts-2.0-standard',
           audio_params: {
             format: 'pcm',

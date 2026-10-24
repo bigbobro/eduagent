@@ -12,8 +12,8 @@ import {
   Serialization,
 } from './doubao-codec';
 import { createWsTeardown } from './ws-teardown';
+import { doubaoAsrWsUrl } from './doubao-endpoints';
 
-const DOUBAO_ASR_URL = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async';
 
 const wss = new WebSocketServer({ noServer: true });
 
@@ -228,7 +228,8 @@ export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: Asr
     'X-Api-Sequence': '-1',
   };
 
-  const upstream = options.createUpstream?.(DOUBAO_ASR_URL, { headers }) ?? new WsClient(DOUBAO_ASR_URL, { headers, handshakeTimeout: 10000 });
+  const asrUrl = doubaoAsrWsUrl();
+  const upstream = options.createUpstream?.(asrUrl, { headers }) ?? new WsClient(asrUrl, { headers, handshakeTimeout: 10000 });
   let sequence = 1;
   let upstreamReady = false;
   let pcmCount = 0;

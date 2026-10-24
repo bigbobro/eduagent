@@ -5,12 +5,18 @@ import { streamUserInputToSSE } from '@/lib/agent/orchestrator';
 import { getCourseById } from '@/data/courses';
 import { getCourseProgress } from '@/lib/db/queries';
 import { ensureInitialized } from '@/lib/init';
+import { isConfigured } from '@/lib/config';
 import { lessonRequestSchema, type LessonRequest, type ResumeInfo, type LessonAck } from '@/lib/lesson-protocol';
 import { InvalidCourseProgressError } from '@/lib/db/progress-snapshot';
 
 export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
+  // 缺 key 时 server 照常启动;课堂入口明确告知"未配置",前端据此跳转 /settings。
+  if (!isConfigured()) {
+    console.warn('[chat] 503 NOT_CONFIGURED');
+    return NextResponse.json({ code: 'NOT_CONFIGURED', error: '还没有配置 API Key' }, { status: 503 });
+  }
   ensureInitialized();
   const parsed = lessonRequestSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: 'Invalid lesson action' }, { status: 400 });

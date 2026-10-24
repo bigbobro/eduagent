@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getConfig, resetConfig } from './config';
+import { getConfig, isConfigured, resetConfig } from './config';
 
 // Minimum env for getConfig() to pass validation (everything else has defaults).
 const REQUIRED: Record<string, string> = {
@@ -86,5 +86,45 @@ describe('config: LLM credential group resolution', () => {
   it('legacy group falls back to the MiMo default host when no base var is set', () => {
     resetConfig();
     expect(getConfig().llmBaseUrl).toBe('https://token-plan-cn.xiaomimimo.com/v1');
+  });
+});
+
+describe('config: 未配置 / 已配置 / mock 三种状态', () => {
+  const KEYS = [
+    'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
+    'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'VOICE_MOCK',
+  ];
+  const saved: Record<string, string | undefined> = {};
+  beforeEach(() => {
+    for (const k of KEYS) { saved[k] = process.env[k]; delete process.env[k]; }
+    resetConfig();
+  });
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k]!;
+    }
+    resetConfig();
+  });
+
+  it('unconfigured: getConfig() does not throw and isConfigured() is false', () => {
+    expect(() => getConfig()).not.toThrow();
+    expect(isConfigured()).toBe(false);
+  });
+
+  it('configured: all credentials present', () => {
+    for (const [k, v] of Object.entries(REQUIRED)) process.env[k] = v;
+    expect(isConfigured()).toBe(true);
+  });
+
+  it('partially configured stays unconfigured', () => {
+    for (const [k, v] of Object.entries(REQUIRED)) process.env[k] = v;
+    delete process.env.DOUBAO_ACCESS_KEY;
+    expect(isConfigured()).toBe(false);
+  });
+
+  it('mock: VOICE_MOCK=true counts as configured without any key', () => {
+    process.env.VOICE_MOCK = 'true';
+    expect(isConfigured()).toBe(true);
   });
 });

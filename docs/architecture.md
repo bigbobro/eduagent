@@ -39,14 +39,14 @@
 
 > 2026-10 spike:SQLite 驱动由 `better-sqlite3` 换成 Node 内置 `node:sqlite`,统一经 `src/lib/db/sqlite.ts` 封装(保留 `prepare/exec/pragma/transaction/close`,嵌套 transaction 用 SAVEPOINT)。无原生模块,`pnpm.onlyBuiltDependencies` 已移除。上文历史条目中的 better-sqlite3 描述以此为准。
 
-> 2026-10 桌面版 spike(`desktop/`,未合并):Electron main 用 `utilityProcess` 拉起打包后的 server(`EDUAGENT_APP=1`、`HOST=127.0.0.1`、`DATABASE_PATH=<userData>/eduagent.db`、固定端口 38417),等端口就绪再开窗口。`EDUAGENT_APP=1` 时 `server.ts` 不读 `.env.local`,Next 配置取自 `.next/required-server-files.json`(经 `__NEXT_PRIVATE_STANDALONE_CONFIG`),`HOST` 缺省仍监听所有网卡(开发行为不变)。server 打包:`EDUAGENT_STANDALONE=1 next build`(`output: 'standalone'`)+ esbuild 打 `server.ts` + 手动补 `public/`、`.next/static`,见 `desktop/scripts/stage.mjs`。
+> 2026-10 桌面版 spike(`desktop/`,未合并):Electron main 用 `utilityProcess` 拉起打包后的 server(`EDUAGENT_APP=1`、`EDUAGENT_SETTINGS_PATH=<userData>/settings.json`、`HOST=127.0.0.1`、`DATABASE_PATH=<userData>/eduagent.db`、固定端口 38417),等端口就绪再开窗口。`EDUAGENT_APP=1` 时 `server.ts` 不读 `.env.local`,Next 配置取自 `.next/required-server-files.json`(经 `__NEXT_PRIVATE_STANDALONE_CONFIG`),`HOST` 缺省仍监听所有网卡(开发行为不变)。server 打包:`EDUAGENT_STANDALONE=1 next build`(`output: 'standalone'`)+ esbuild 打 `server.ts` + 手动补 `public/`、`.next/static`,见 `desktop/scripts/stage.mjs`。
 
 ## 2. 模块清单与职责
 
 | 文件 | 职责(一句话) |
 |------|--------------|
 | `server.ts` | 自定义 Next.js server,WebSocket upgrade 路由分发 |
-| `src/lib/init.ts` | 启动期 env 校验(DOUBAO_*;LLM_API_KEY 或旧名 MIMO_API_KEY 有一即可),`VOICE_MOCK=true` 时放行;只读聚合 API 可单独调用 `ensureDatabaseInitialized()` 建表 |
+| `src/lib/init.ts` | 数据库初始化(`ensureInitialized` / `ensureDatabaseInitialized`)。不再校验 env:凭据缺省由 `config.ts` 的 `isConfigured()` 判定,见文末「配置来源与未配置状态」 |
 | `src/lib/voice/doubao-codec.ts` | 豆包二进制协议编解码,ASR/TTS 共用 |
 | `src/lib/voice/asr-proxy.ts` | server 端 ASR 代理,**握手期 PCM buffer + finish 缓存 + 按 currentCardId/nextCardId 注入 hot_words(无 cardId 时 fallback 全课词)** |
 | `src/lib/voice/tts-proxy.ts` | server 端 TTS 代理,**长连复用**(StartConnection 一次,session 多次),ConnectionStarted 前缓存 session 控制帧 |
@@ -643,3 +643,24 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 当前完整无版本快照继续兼容；后来新增的卡片仍 backfill，已移除/未知 card 和 quiz ID 保留，在首页派生比例时按当前课程识别项统计。缺整个必需集合不能用默认空数组掩盖。没有格式迁移、历史重算或自动修复。原聚合测试中仅含两个字段的简化 fixture 已补成完整合法快照，它们不代表旧持久化格式。
 
 纯共享 `lib/lesson-protocol.ts` 定义并解析 HTTP request/ack、ResumeInfo、LessonProgressSnapshot 与 StreamUserEvent，服务端编码和浏览器消费复用同一判别联合。跨网络输入在入口校验；非法 done JSON 不算成功，resume phase 不再由任意 string 强转。合法事件 JSON 字段与事件名保持，allWordsDone 和 actions 的 state_update 允许既有可选字段。内部教学函数不重复解析外部 schema。
+
+## 配置来源与未配置状态(桌面版 Phase 1)
+
+**配置来源**
+- Web 开发模式(无 `EDUAGENT_APP`):`server.ts` 读 `.env.local`,行为不变。
+- App 模式(`EDUAGENT_APP=1`):Electron main 只传 `EDUAGENT_SETTINGS_PATH=<userData>/settings.json`,不注入任何 key。`server.ts` 在 `getConfig()` 之前调用 `applySettingsToEnv()`(`src/lib/settings/store.ts`):先清掉继承来的同名 env 与旧 `MIMO_*`,再把 settings.json 字段映射到 `LLM_API_KEY / LLM_BASE_URL / LLM_MODEL / DOUBAO_APP_ID / DOUBAO_ACCESS_KEY / DOUBAO_ASR_RESOURCE_ID / DOUBAO_TTS_RESOURCE_ID / DOUBAO_TTS_DEFAULT_SPEAKER`。`asr-proxy` / `tts-proxy` / `config.ts` 继续只读 `process.env`。非密钥字段留空时用默认值(SiliconFlow、DeepSeek-V4-Flash、`volc.seedasr.sauc.duration`、`seed-tts-2.0`、`BV001_streaming`)。
+- 豆包 WS 端点由 `src/lib/voice/doubao-endpoints.ts` 提供,env `DOUBAO_ASR_WS_URL` / `DOUBAO_TTS_WS_URL` 可覆盖(仅测试用,指向本地 fake server)。`config.ts` 里原先过期的 v2 默认地址已改成与 proxy 一致的 v3 端点。
+
+**未配置状态**
+- `config.ts` 的 `isConfigured()` 直接读 `process.env`:`VOICE_MOCK=true` 视为已配置;否则要求 LLM key(`LLM_API_KEY` 或旧 `MIMO_API_KEY`)、`DOUBAO_APP_ID`、`DOUBAO_ACCESS_KEY`、两个 Resource ID 齐全。`getConfig()` 缺凭据不再抛错,server 照常启动。
+- 未配置时 `POST /api/chat` 返回 HTTP 503 + `{ code: 'NOT_CONFIGURED' }`;语音 WS upgrade 在 `guardUpgrade()`(`voice/upgrade-guard.ts`,先验 Origin 再验配置)里直接回 HTTP 503 并关闭 socket。前端:首页加载时 `GET /api/settings` 发现 `configured=false` 跳 `/settings`;`LessonController.start` 收到 NOT_CONFIGURED 也跳 `/settings`。
+
+**Settings API**(`src/app/api/settings/`)
+- `GET /api/settings` -> `{ mode: 'app'|'web', configured, mock, values }`;`llmApiKey / doubaoAppId / doubaoAccessKey` 打码(末 4 位,长度 ≤8 只给 `••••`),其余原样。
+- `POST /api/settings`:仅 App 模式(web 模式 403 `WEB_MODE_READONLY`)。zod 校验,凭据字段提交打码值或空串 = 保留原值;同目录临时文件(0600)写完 rename,再 chmod 0600。返回 200 后 400ms 以**退出码 75** 退出。
+- `POST /api/settings/test`:用表单值(打码字段回退已保存值)并行测 LLM(`/chat/completions`,`max_tokens: 5`,10s 超时)、豆包 TTS(用 `tts-proxy` 同样的头发 StartConnection,等 ConnectionStarted)、豆包 ASR(同 `asr-proxy` 的头与 full client request,首个非错误帧或握手后 3s 无错即通过)。每项 `{ ok, reason }`,reason 是中文原因 + 原始 HTTP 状态/豆包错误码;不回显、不记录 key。
+- **CSRF**:两个 POST 都经 `rejectBadOrigin()`,`Origin` 必须是 `http://localhost:<PORT>` 或 `http://127.0.0.1:<PORT>`;**缺失也拒绝**(与 WS 允许缺失的规则不同),返回 403。
+
+**退出码 75 重启约定**:server 保存设置后以 75 退出;`desktop/main.js` 的 utilityProcess `exit` 回调见 75 就用同样的 env 重启子进程,端口就绪后 `loadURL` 重新加载窗口。其他非 0 退出码仍显示错误页(日志路径)。`desktop/main.js` 的 `setWindowOpenHandler` / `will-navigate` 把站外 http(s) 链接交给系统浏览器,其余导航一律拦截。
+
+**打包坑**:`desktop/scripts/stage.mjs` 的 esbuild 产物开头设 `process.env.WS_NO_BUFFER_UTIL='1'`。否则打包版里 `ws` 的可选依赖 `bufferutil` 会被 Next 的 require hook 解析到没有 `mask` 的占位模块,ws 发送 >=48 字节的帧(ASR 请求帧/音频帧)时抛 `t.mask is not a function`;Phase 0 的 mock 模式不经过 ws 客户端,所以没暴露。

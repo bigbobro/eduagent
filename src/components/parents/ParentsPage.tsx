@@ -10,6 +10,7 @@ interface ParentsPageProps {
   errSessions?: boolean;
   ttsVoice: string;
   onBack: () => void;
+  onSettings?: () => void;
 }
 
 export function ParentsPage({
@@ -19,6 +20,7 @@ export function ParentsPage({
   errSessions = false,
   ttsVoice,
   onBack,
+  onSettings,
 }: ParentsPageProps) {
   return (
     <PaperBg tone="paper" className="h-screen w-screen">
@@ -74,6 +76,11 @@ export function ParentsPage({
               <SettingRow label="老师猫的声音" value={ttsVoice || '—'} />
               <SettingRow label="每次课时长" value="15 分钟" />
               <SettingRow label="难度" value="简单" />
+              {onSettings && (
+                <div className="mt-4 border-t border-dashed border-inkPale pt-4">
+                  <PaperButton size="sm" color="sky" onClick={onSettings}>API 与语音设置</PaperButton>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-4 rounded-paper-lg border-2 border-ink bg-lilac p-4 shadow-paper">
               <Cat size={90} mood="idle" />

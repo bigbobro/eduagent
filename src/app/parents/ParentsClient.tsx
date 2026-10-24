@@ -12,6 +12,7 @@ export function ParentsClient() {
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [errStats, setErrStats] = useState(false);
   const [errSessions, setErrSessions] = useState(false);
+  const [ttsVoice, setTtsVoice] = useState('');
 
   useEffect(() => {
     if (!unlocked) return;
@@ -23,6 +24,11 @@ export function ParentsClient() {
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(setSessions)
       .catch(() => setErrSessions(true));
+    // 音色来自运行时设置(桌面版没有 NEXT_PUBLIC_* 构建期常量)
+    fetch('/api/settings')
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((s) => setTtsVoice(s?.values?.doubaoTtsSpeaker ?? ''))
+      .catch(() => {});
   }, [unlocked]);
 
   if (!unlocked) {
@@ -37,7 +43,8 @@ export function ParentsClient() {
       sessions={sessions}
       errStats={errStats}
       errSessions={errSessions}
-      ttsVoice={process.env.NEXT_PUBLIC_DOUBAO_TTS_DEFAULT_SPEAKER ?? '(未配置)'}
+      ttsVoice={ttsVoice}
+      onSettings={() => router.push('/settings')}
       onBack={() => router.push('/')}
     />
   );

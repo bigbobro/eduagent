@@ -41,6 +41,16 @@ export default function HomePage() {
   };
   useEffect(load, []);
 
+  // 未配置(桌面版首次打开)时直接进入设置页;读取失败则不拦截,照常显示首页。
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => {
+        if (s && s.configured === false) router.replace('/settings');
+      })
+      .catch(() => {});
+  }, [router]);
+
   return (
     <HomeStudy
       courses={courses}

@@ -12,6 +12,12 @@ import { PcmPlayer } from '@/lib/audio/pcm-player';
 import { LessonRecorder, type RecorderHandle } from '@/lib/audio/recorder';
 import { TurnTimeoutGuard } from './turn-timeout-guard';
 
+/** /api/chat 503 + { code: 'NOT_CONFIGURED' }:还没有配置 API Key。 */
+async function isNotConfigured(res: Response): Promise<boolean> {
+  const body: unknown = await res.clone().json().catch(() => null);
+  return !!body && typeof body === 'object' && 'code' in body && body.code === 'NOT_CONFIGURED';
+}
+
 export type LessonStateName =
   | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending';
 
@@ -154,6 +160,12 @@ export class LessonController {
         void res.body?.cancel().catch(() => {});
         const lateSession = res.headers.get('X-Session-Id');
         if (lateSession) void this.endRemoteSession(lateSession);
+        return false;
+      }
+      if (res.status === 503 && (await isNotConfigured(res))) {
+        // 未配置 API Key:不是课堂故障,直接带去设置页
+        window.location.assign('/settings');
+        await this.endLesson();
         return false;
       }
       if (res.status === 409) {

@@ -12,11 +12,15 @@ if (process.env.EDUAGENT_APP !== '1') {
 }
 
 // Validate configuration before starting server
-import { getConfig } from './src/lib/config';
+import { getConfig, isConfigured } from './src/lib/config';
 import { createLogger } from './src/lib/logger';
-import { isAllowedWsOrigin } from './src/lib/voice/ws-origin';
+import { guardUpgrade } from './src/lib/voice/upgrade-guard';
+import { applySettingsToEnv } from './src/lib/settings/store';
 
-const config = getConfig(); // Fail fast if config invalid
+// App 模式:settings.json -> process.env(与 .env.local 同一机制),必须先于 getConfig()。
+applySettingsToEnv();
+
+const config = getConfig(); // 凭据缺省不退出(进入"未配置"状态);非凭据项非法仍 fail-fast
 const log = createLogger('server');
 
 const dev = process.env.NODE_ENV !== 'production';
@@ -38,7 +42,7 @@ const app = next({
 const handle = app.getRequestHandler();
 
 async function main() {
-  log.info('Starting EduAgent server', { port: config.port, dev, voiceMock: config.voiceMock, llmBaseUrl: config.llmBaseUrl });
+  log.info('Starting EduAgent server', { port: config.port, dev, voiceMock: config.voiceMock, llmBaseUrl: config.llmBaseUrl, configured: isConfigured() });
 
   await app.prepare();
 
@@ -52,10 +56,11 @@ async function main() {
 
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const url = req.url || '';
-    // Reject cross-origin WS upgrades (CSWSH) before bridging to Doubao with server credentials.
-    if (!isAllowedWsOrigin(req.headers.origin, config.port)) {
-      log.warn('Rejected WS upgrade from disallowed origin', { origin: req.headers.origin, url });
-      socket.destroy();
+    // Reject cross-origin WS upgrades (CSWSH) before bridging to Doubao with server credentials;
+    // 未配置时回 HTTP 503 并关闭。
+    const verdict = guardUpgrade(req, socket, config.port);
+    if (verdict !== 'ok') {
+      log.warn('Rejected WS upgrade', { reason: verdict, origin: req.headers.origin, url });
       return;
     }
     if (url.startsWith('/api/voice/asr')) {
