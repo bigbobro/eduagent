@@ -9,6 +9,8 @@ const HOST = '127.0.0.1';
 const PREFERRED_PORT = Number(process.env.EDUAGENT_PORT) || 38417;
 const TEST_MODE = process.env.EDUAGENT_TEST === '1';
 const DEV_MODE = !app.isPackaged && process.env.EDUAGENT_DEV_URL;
+// P0 comparison only: opt in to native material during development.
+const NATIVE_MATERIAL = DEV_MODE && process.env.EDUAGENT_SHELL_MATERIAL === 'native';
 const MIC_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
 const RESTART_EXIT_CODE = 75;
 let port = PREFERRED_PORT;
@@ -175,7 +177,21 @@ function setupPermissions() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280, height: 800, show: false,
+    minWidth: 1100, minHeight: 720,
+    title: 'EduAgent', titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 16, y: 19 },
+    backgroundColor: NATIVE_MATERIAL ? '#00000000' : '#FFF6EE',
+    ...(NATIVE_MATERIAL ? { vibrancy: 'under-window', visualEffectState: 'followWindow' } : {}),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true },
+  });
+  const contents = mainWindow.webContents;
+  contents.setZoomFactor(1);
+  void contents.setVisualZoomLevelLimits(1, 1).catch((err) => log(`zoom limits failed: ${err.message}`));
+  contents.on('did-finish-load', () => contents.setZoomFactor(1));
+  contents.on('before-input-event', (event, input) => {
+    if ((input.meta || input.control) && (['+', '=', '-', '0'].includes(input.key) || ['Equal', 'Minus', 'Digit0', 'NumpadAdd', 'NumpadSubtract', 'Numpad0'].includes(input.code))) {
+      event.preventDefault();
+    }
   });
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { openExternalSafely(url); return { action: 'deny' }; });

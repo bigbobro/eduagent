@@ -64,3 +64,68 @@ body {
     transform: none !important;
   }
 }
+
+/* P0 shell spike: isolated from the existing lesson and paper design tokens. */
+body:has(.p0-shell) { background: transparent; }
+.p0-shell {
+  height: 100dvh;
+  color: #1e293b;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  background:
+    radial-gradient(ellipse at 0% 0%, #FFF6EE 0%, transparent 65%),
+    radial-gradient(ellipse at 100% 0%, #F3EEFF 0%, transparent 65%),
+    radial-gradient(ellipse at 0% 100%, #EDFBF5 0%, transparent 65%),
+    #EAF4FF;
+}
+[data-shell-material='native'] .p0-shell { background: rgba(247, 245, 255, .24); }
+.p0-toolbar {
+  position: relative;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: drag;
+  user-select: none;
+  background: rgba(255, 255, 255, .42);
+  backdrop-filter: blur(28px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, .7);
+}
+.p0-segments {
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+  border-radius: 999px;
+  background: rgba(104, 66, 255, .06);
+  -webkit-app-region: no-drag;
+}
+.p0-segments a {
+  padding: 5px 24px;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 20px;
+  color: #64748b;
+  cursor: default;
+}
+.p0-segments a[aria-current='page'] {
+  color: #6842ff;
+  background: rgba(255, 255, 255, .85);
+  box-shadow: 0 1px 5px #6842ff12;
+}
+.p0-segments a:focus-visible { outline: 2px solid #6842ff; outline-offset: 2px; }
+.p0-content { height: calc(100dvh - 52px); overflow: auto; contain: layout; }
+/* Existing pages size themselves with viewport units; constrain their viewport to
+   the content area without rewriting their layouts during this spike. */
+.p0-content > * { max-height: 100%; }
+.p0-material-preview { height: 100%; display: grid; place-items: center; padding: 48px; }
+.p0-glass-panel {
+  padding: 64px 80px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .55);
+  backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: 0 8px 32px -4px rgba(104, 66, 255, .08), inset 0 1px white;
+}
+.p0-eyebrow { color: #6842ff; font-size: 13px; letter-spacing: .08em; }
+.p0-glass-panel h1 { margin: 18px 0 12px; font-size: 32px; font-weight: 600; }
+.p0-glass-panel > p:not(.p0-eyebrow) { color: #64748b; }
+.p0-glass-panel a { display: inline-block; margin-top: 32px; color: #6842ff; }

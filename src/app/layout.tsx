@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { SVGDefs } from '@/components/ui/SVGDefs';
+import { ShellSpike } from '@/components/shell/ShellSpike';
 import './globals.css';
 
 const zcoolKuaiLe = localFont({
@@ -59,9 +60,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN" className={fontVariableClasses}>
-      <body className="font-zh antialiased bg-paper text-ink">
+      <body className="font-zh antialiased bg-paper text-ink" data-shell-material={process.env.NODE_ENV === 'development' && process.env.EDUAGENT_SHELL_MATERIAL === 'native' ? 'native' : 'css'}>
         <SVGDefs />
-        <ErrorBoundary>{children}</ErrorBoundary>
+        <ErrorBoundary><ShellSpike>{children}</ShellSpike></ErrorBoundary>
       </body>
     </html>
   );
