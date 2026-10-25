@@ -82,3 +82,109 @@ describe('streamLLM abort + error paths', () => {
     ).rejects.not.toThrow('secret upstream stack trace');
   });
 });
+
+// Builds a streaming fetch Response whose SSE chunks are released on demand, so a test can hold
+// the first token back (provider queueing) or stop mid-stream (stall).
+function controllableResponse(signal: AbortSignal) {
+  const encoder = new TextEncoder();
+  let push: (text: string) => void = () => {};
+  let finish: () => void = () => {};
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      push = (text) => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`));
+      finish = () => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ usage: { prompt_tokens: 10, completion_tokens: 2 } })}\n\n`));
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+        controller.close();
+      };
+      signal.addEventListener('abort', () => controller.error(abortError()));
+    },
+  });
+  return { response: { ok: true, status: 200, body, text: async () => '' }, push: (t: string) => push(t), finish: () => finish() };
+}
+
+async function drain(gen: AsyncGenerator<any>) {
+  const deltas: string[] = [];
+  let final: any;
+  for await (const ev of gen) {
+    if (ev.done) final = ev;
+    else deltas.push(ev.delta);
+  }
+  return { deltas, final };
+}
+
+const fastTimings = { hedgeAfterMs: 30, stallTimeoutMs: 80, totalTimeoutMs: 1000 };
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe('streamLLM hedge + stall deadlines', () => {
+  it('does not hedge when the first token arrives in time', async () => {
+    const streams: ReturnType<typeof controllableResponse>[] = [];
+    const fetchMock = vi.fn(async (_url: string, opts: any) => {
+      const s = controllableResponse(opts.signal);
+      streams.push(s);
+      setTimeout(() => { s.push('{"speech":'); s.push('"hi"}'); s.finish(); }, 5);
+      return s.response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { deltas, final } = await drain(streamLLM('sys', [{ role: 'user', content: 'hi' }], undefined, fastTimings));
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(deltas.join('')).toBe('{"speech":"hi"}');
+    expect(final.usage).toEqual({ inputTokens: 10, outputTokens: 2 });
+  });
+
+  it('fires a hedge when the first token is slow, keeps the faster stream and aborts the other', async () => {
+    const signals: AbortSignal[] = [];
+    const fetchMock = vi.fn(async (_url: string, opts: any) => {
+      const s = controllableResponse(opts.signal);
+      signals.push(opts.signal);
+      if (signals.length === 2) {
+        // The hedge streams right away; the primary stays queued.
+        setTimeout(() => { s.push('{"speech":"from hedge"}'); s.finish(); }, 5);
+      }
+      return s.response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { deltas } = await drain(streamLLM('sys', [{ role: 'user', content: 'hi' }], undefined, fastTimings));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(deltas.join('')).toBe('{"speech":"from hedge"}');
+    expect(signals[0].aborted).toBe(true);
+  });
+
+  it('fails fast without hedging when the primary returns an HTTP error', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 429, body: null, text: async () => '' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(streamLLM('sys', [{ role: 'user', content: 'hi' }], undefined, fastTimings).next())
+      .rejects.toMatchObject({ failure: { code: 'LLM_RATE_LIMITED' } });
+    await wait(fastTimings.hedgeAfterMs + 20);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('reports LLM_TIMEOUT when the stream stalls after the first token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, opts: any) => {
+      const s = controllableResponse(opts.signal);
+      setTimeout(() => s.push('{"speech":'), 5); // then nothing more
+      return s.response;
+    }));
+
+    await expect(drain(streamLLM('sys', [{ role: 'user', content: 'hi' }], undefined, fastTimings)))
+      .rejects.toMatchObject({ failure: { code: 'LLM_TIMEOUT' } });
+  });
+
+  it('reports LLM_TIMEOUT when neither attempt produces a token before the overall deadline', async () => {
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, opts: any) => {
+      signals.push(opts.signal);
+      return controllableResponse(opts.signal).response;
+    }));
+
+    await expect(streamLLM('sys', [{ role: 'user', content: 'hi' }], undefined, { ...fastTimings, totalTimeoutMs: 120 }).next())
+      .rejects.toMatchObject({ failure: { code: 'LLM_TIMEOUT' } });
+    expect(signals).toHaveLength(2);
+    expect(signals.every((s) => s.aborted)).toBe(true);
+  });
+});

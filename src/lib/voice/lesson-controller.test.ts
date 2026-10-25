@@ -594,7 +594,11 @@ describe('§1 loop-reliability fixes', () => {
       controller.on('error', (err) => errors.push(err.message));
 
       (controller as any).armChatWatchdog();
-      vi.advanceTimersByTime(25000);
+      // The server's own 30s LLM deadline must win; the client backstop only fires after it.
+      vi.advanceTimersByTime(30000);
+      expect(errors).toEqual([]);
+      expect(controller.getState()).toBe('thinking');
+      vi.advanceTimersByTime(5000);
 
       expect(errors).toContain('我有点没反应过来…我们再聊一句?');
       expect(controller.getState()).toBe('awaiting');

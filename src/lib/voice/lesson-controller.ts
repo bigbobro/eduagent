@@ -94,9 +94,10 @@ export class LessonController {
   } | null = null;
   private static readonly SPEECH_FINISH_FALLBACK_MS = 1500;
   private static readonly STATIC_SPEECH_TIMEOUT_MS = 10000;
-  // Client backstop: server-side LLM deadline is 20s (see lib/llm.ts). If no SSE event arrives
-  // within this window the whole route is unresponsive — abort and self-rescue to awaiting.
-  private static readonly CHAT_WATCHDOG_MS = 25000;
+  // Client backstop: must stay above the server's LLM_TOTAL_TIMEOUT_MS (30s, src/lib/llm.ts) so the
+  // server reports its own timeout first. If no SSE event arrives within this window the whole
+  // route is unresponsive — abort and self-rescue to awaiting.
+  private static readonly CHAT_WATCHDOG_MS = 35000;
 
   constructor() {
     this.player.onIdle(() => this.maybeReturnToAwaiting());
