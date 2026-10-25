@@ -7,7 +7,7 @@ import { llmFailureNeedsSettings } from '@/lib/llm-errors';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import { LessonController } from '@/lib/voice/lesson-controller';
 import { PhasedLessonController } from '@/lib/voice/phased-lesson-controller';
-import { DoneCelebrateFrame } from './DoneCelebrateFrame';
+import { DoneLesson } from './DoneLesson';
 import { IntroFrame } from './IntroFrame';
 import { LessonMandalaV2 } from './LessonMandalaV2';
 import { ReinforcementFlow } from './ReinforcementFlow';
@@ -207,13 +207,7 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
         )}
         {started && phase !== 'intro' && phase !== 'done' && v2 && <SubtitleLog controller={v2} learnerId={learnerId} />}
         {started && !transitionRetry && phase === 'done' && (
-          <DoneCelebrateFrame
-            starsEarned={Math.min(5, clearedWordCount)}
-            totalStars={5}
-            wordsLearned={clearedWordCount}
-            onHome={() => router.push('/')}
-            onAgain={handleRestart}
-          />
+          <DoneLesson courseId={course.id} learnerId={learnerId} onAgain={handleRestart} />
         )}
       </div>
     </main>

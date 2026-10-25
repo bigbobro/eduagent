@@ -81,9 +81,8 @@
 | `src/components/lesson/QuizPickWordFrame.tsx` | quiz:静态 TTS 播 prompt + 正确英文词,播完前锁选词卡选择 |
 | `src/components/lesson/ReinforceFrame.tsx` | quiz:静态 TTS 播 targetText,播完前锁 repeat-after-me 录音 |
 | `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes,错答时播静态 retry hint |
-| `src/components/lesson/DoneCelebrateFrame.tsx` | 下课庆祝页,星星 + 数据 + 双 CTA |
-| `src/components/journal/JournalPage.tsx` | 魔法书双页,展示 progress 聚合的词卡 |
-| `src/components/parents/ParentsPage.tsx` | 按当前孩子展示学习统计与课次记录 |
+| `src/components/lesson/DoneCelebrateFrame.tsx` | G 下课页:逐词掌握、最近课次时长、建议下一课,课堂内与独立路由共用 |
+| `src/components/records/RecordsPage.tsx` | 按当前孩子展示 91 天热力图、课程进度、逐词掌握、课次与待练词 |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/index.ts` | SQLite 连接持有者。`getDb()` **每次调用时**解析 `DATABASE_PATH`(相对 `process.cwd()`),路径与已开连接不同则 close 旧的重开——正常运行路径恒定,行为仍是进程内单连接;开库前 `mkdirSync(dirname, {recursive:true})`(better-sqlite3 只建文件不建目录,而 `db/` 不在 git 里,fresh checkout 没有该目录);导出 `closeDb()` 供测试在切临时 DB 前后显式释放,堵住"模块加载期捕获路径"导致的跨测试文件泄漏 |
 | `src/lib/db/learners.ts` | 孩子档案 CRUD 与单事务连带删除 |
@@ -569,16 +568,15 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ---
 
-## 12. 前端架构（2026-10 G 外壳，页面内容仍沿用 CC 版）
+## 12. 前端架构（2026-10 G 外壳与课程、课堂、学习记录）
 
-课程、学习记录与设置页面沿用麻吉小猫组件:
+课程、课堂与学习记录使用 G 组件与水彩麻吉;设置保留原表单功能:
 
 ```
 /                          课程列表与详情 · CourseHome
 /lesson/[id]               魔法课堂  · IntroFrame / LessonMandalaV2 / ReinforcementFlow
 /lesson/[id]/done          下课庆祝  · DoneCelebrateFrame
-/journal                   魔法书    · JournalPage
-/parents                   学习记录  · ParentsPage(当前孩子)
+/records                   学习记录  · RecordsPage(当前孩子)
 /settings                  通用设置  · 服务配置 + 孩子档案管理
 /microphone                独立首次麦克风引导 · MicOnboarding
 ```
@@ -591,15 +589,15 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
 | `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/{CourseHome,LearnerPicker}.tsx` | 分组课程列表与详情图片墙、孩子选择和读取状态 |
-| `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | G 课堂四段与暂留的下课 view 层，保留控制器与 phase 状态机 |
+| `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | G 课堂四段与共享的下课 view 层，保留控制器与 phase 状态机 |
 | `src/components/lesson/{LessonToolbar,LessonCard,SubtitleLog}.tsx` | 独立课堂工具栏、共用大卡片、视图层累积字幕 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
-| `src/components/journal/JournalPage.tsx` | 魔法书双页,按 progress 聚合展示词卡 |
-| `src/components/parents/ParentsPage.tsx` | 当前孩子的学习记录 dashboard |
+| `src/components/records/{RecordsPage,useLearningRecords,WordMastery}.tsx` | 当前孩子学习记录、并行读取与请求隔离、可展开逐词掌握 |
+| `src/components/lesson/DoneLesson.tsx` | 课堂内和独立下课路由共用的数据加载与导航 |
 | `src/components/ui/{ErrorBoundary,SVGDefs}.tsx` | root 兜底与全局 SVG defs |
 | `src/lib/progress.ts` / `stats.ts` | 纯聚合(SQL 全部下沉到 `db/queries.ts`,这里只对返回行做 JS 整形) |
 | `src/app/api/{progress,sessions,stats}/route.ts` | 三个只读聚合 API;请求开始先 `ensureDatabaseInitialized()` 支持 fresh DB |
-| `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 5 页面 + 4 API |
+| `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 4 页面 + 4 API |
 | `scripts/lesson-smoke.ts` | `pnpm smoke:lesson` 先用 Chrome 验证 push-to-talk 按钮 / Space 持按保持 recording,再用 `/api/chat` 文本脚本验证 teacher agent 状态机与 speech/show_card 一致性 |
 
 ### Design tokens
@@ -625,9 +623,9 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ```
 fetch /api/courses    → 首页 CourseHome 分组列表与 6×2 单词图片墙(返回 registry `allCourses` 全部课程,数量见 index.ts)
-fetch /api/progress?learnerId   → CourseHome / JournalPage / 总结页(首页已会按 masteryStars ≥ 2 计算，列表进度保持断点比例)
-fetch /api/sessions?learnerId   → ParentsPage 最近课堂列表(默认 limit=10)
-fetch /api/stats?learnerId      → ParentsPage 数据卡(总分钟 + 掌握词数;streak/accuracy 暂显示占位)
+fetch /api/progress?learnerId   → CourseHome / RecordsPage / DoneLesson(首页与下课已会按 masteryStars ≥ 2 计算，列表进度保持断点比例)
+fetch /api/sessions?learnerId   → RecordsPage 最近课次与下课页本课时长(记录页和下课页请求 limit=50，接口默认仍为 10)
+fetch /api/stats?learnerId      → RecordsPage 总时长/课次、lastDays 91 天热力图、last7Days 最近七天分钟
 voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonController)
 ```
 
@@ -720,7 +718,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 ### UI 重构 P1 基础层（2026-10-25）
 
-P0 临时 ShellSpike、shell-spike 路由与 native 材质开关已由正式 CSS 外壳替代。`src/app/(main)/layout.tsx` 常驻 Toolbar（52px，红绿灯 x16/y19）、SegmentedControl、LearnerSwitcher，路由包含首页、现有 `/journal`、设置以及暂留的 `/parents`。切 tab 只由组内 template 对内容做 150ms 淡入和 4px 位移，课堂及下课独立全窗口。首页由 P3 替换为列表/详情，记录与设置暂留旧内容；首页原右上浮层由工具栏替代；现有麦克风首次引导移至独立 `/microphone` 路由，不挂主工具栏；完整三步引导留 P5。
+P0 临时 ShellSpike、shell-spike 路由与 native 材质开关已由正式 CSS 外壳替代。`src/app/(main)/layout.tsx` 常驻 Toolbar（52px，红绿灯 x16/y19）、SegmentedControl、LearnerSwitcher，路由包含首页、`/records` 与设置，旧 `/journal`、`/parents` 已删除。切 tab 只由组内 template 对内容做 150ms 淡入和 4px 位移，课堂及下课独立全窗口。首页由 P3 替换为列表/详情，记录由 P4 合并重做，设置暂留原表单；首页原右上浮层由工具栏替代；现有麦克风首次引导移至独立 `/microphone` 路由，不挂主工具栏；完整三步引导留 P5。
 
 G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体，英文词汇使用已打包 Fredoka，旧字体文件留待 P6 清理。新组件使用 lucide-react 线性图标。UI primitives 包括 Button、GlassPanel、Tag、ProgressBar、Banner、Skeleton、EmptyState、六状态 PushToTalkPill。全局限制拖选、图片拖动、回弹、网页右键菜单，输入和说明可复制；输入右键保留原生编辑菜单，键盘焦点紫色环，降低透明度时工具栏和玻璃面板使用不透明浅色底。
 
@@ -741,7 +739,7 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 `PushToTalkPill` 由 LessonStateName 映射六状态，idle/greeting 为 preparing、speaking/quiz-speaking 为 speaking，其余同名。只在 awaiting 开始，listening 保留释放语义；句子仍等待静态提示播完后启用，并沿用 routeToChat:false 与候选句。持按 Space 共用 useSpacebar，pointer capture 不因移出而结束，blur 清除按键锁并释放一次。可访问名称固定为「按住空格说话」，可见文案随状态变化。recorder 未暴露实时音量，声波采用固定动画，不改语音链路。
 
-课堂错误在工具栏下显示 Banner，配置类保留去设置，其他沿用 4 秒消失；transitionRetry 在舞台中显示 EmptyState 和用户触发的再试一次，字幕栏保留。断点 initialCardId/initialClearedCardIds/passedQuizIds、show_card 对已通过词及其句子卡的过滤、controller 推进与保存行为均保持。phase=done 暂用原 DoneCelebrateFrame。
+课堂错误在工具栏下显示 Banner，配置类保留去设置，其他沿用 4 秒消失；transitionRetry 在舞台中显示 EmptyState 和用户触发的再试一次，字幕栏保留。断点 initialCardId/initialClearedCardIds/passedQuizIds、show_card 对已通过词及其句子卡的过滤、controller 推进与保存行为均保持。phase=done 使用 DoneLesson / DoneCelebrateFrame，与独立下课路由共用。
 
 ### P3 首页（2026-10-25）
 
@@ -750,3 +748,12 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 显式选课保存为 `eduagent.selectedCourse.<learnerId>`，无有效记忆时优先接着学首课；切换孩子重新挂载并读取该孩子的进度，取消旧请求结果。多档案未选时显示具名选择面板，无档案保持设置建档入口。课程/进度未完成读取显示骨架，任一读取失败显示可重试错误，空目录单独显示空状态。新课按钮为开始上课，上过为继续上课，均复用既有 learnerId 路由和续课能力。没有跳过有效断点的现有入口，因此不提供从头复习按钮，也不改 controller；已完成课程原有 start 自动开启复习的行为保持。
 
 原生菜单监听根 Menu 的 menu-will-show：Electron 45 的 Cocoa controller 在应用子菜单打开时向根 model 发事件。与加载/导航/聚焦刷新共用固定本地读取，无新增 IPC。macOS tracking 期间结构重建会延迟到菜单关闭，所以额外观察当前 renderer 的固定 /api/learners 请求完成事件，提前同步同页档案和选择变化；只读 Node fetch 不经过该 session，不产生循环。异步读取失败保留旧菜单供下次恢复。
+
+
+## P4 下课与学习记录（2026-10-25）
+
+`/records` 合并旧魔法书与家长页，主工具栏及原生 nav:records / Cmd+2 指向它。`/journal`、`/parents` 路由和旧组件已移除。学习记录只列 timesStarted > 0 的课程，以最近课次和词级 lastPracticed 降序排列，课程条可在卡内展开逐词掌握墙；热力图为包含今天的滚动 91 天（13 列、7 行），使用本地日期，按每日 0 / 1–9 / 10–19 / >=20 分钟四档紫色。只展示现有时长、课次、会说单词、最近课次与 attempts > 0 且 masteryStars <= 1 的待练词，不显示占位准确率、连续天数等指标。
+
+`buildStatsSnapshot` / `/api/stats` 向后兼容新增 `lastDays: { date, minutes }[]`，始终 91 条且按日期升序补零；`last7Days` 保留原有聚合语义，等于 lastDays 最后七条。累计总数包含窗口外课次，日期按 startTime 的本地日期归属、每课次分钟先四舍五入，维持旧行为，不改 schema。
+
+下课页不再自动跳转；两列六行逐词表按持久 masteryStars 呈现（3 很好、2 好、1 再练练、0 没练到）。标题与今天学会数量使用 >=2 星，与首页一致；时长取 `/api/sessions?limit=50` 中本课最近课次，无课次时不造时长。建议下一课排除当前课与已学会全部词的课，优先有断点，其次未上过的新课；带最多四张未掌握词图。课堂内继续使用原 handleRestart，独立路由进入本课；现有控制器自动恢复有效断点，不新增强制清除断点行为。独立路由使用主工具栏替代旧 52px 留位，课堂内保留课堂工具栏。数据加载失败显示重试，孩子切换与重试忽略过期请求，不把失败当零值。

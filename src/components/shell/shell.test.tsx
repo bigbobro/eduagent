@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Toolbar } from './Toolbar';
 import { DesktopEvents } from './DesktopEvents';
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
-vi.mock('next/navigation', () => ({ usePathname: () => '/journal', useRouter: () => ({ push }) }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/records', useRouter: () => ({ push }) }));
 beforeEach(() => {
   const values = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
@@ -35,6 +35,7 @@ describe('shell', () => {
       getMicStatus: async () => 'granted', requestMic: async () => 'granted', getAppInfo: async () => ({ version: '0.1.0' }), openMicSettings: async () => {}, openLogsFolder: async () => {},
     };
     const { unmount } = render(<DesktopEvents />);
+    listener('nav:records'); expect(push).toHaveBeenLastCalledWith('/records');
     listener('nav:settings'); expect(push).toHaveBeenLastCalledWith('/settings');
     listener('learner:new'); expect(push).toHaveBeenLastCalledWith('/settings#learner-name');
     listener('learner:b'); expect(localStorage.getItem('eduagent.currentLearnerId')).toBe('b');

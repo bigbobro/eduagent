@@ -47,5 +47,6 @@ export interface StatsSnapshot {
   totalMinutes: number;
   totalSessions: number;
   totalWordsMastered: number;
+  lastDays?: Array<{ date: string; minutes: number }>;
   last7Days: Array<{ date: string; minutes: number }>;
 }

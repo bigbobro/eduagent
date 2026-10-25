@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CourseProgress } from '@/types/progress';
 import { foodCourse } from '@/data/courses/food';
 import { PhasedLessonView } from './PhasedLessonView';
 
@@ -136,6 +137,8 @@ vi.mock('@/lib/voice/phased-lesson-controller', () => {
 
 describe('PhasedLessonView', () => {
   beforeEach(() => {
+    const course: CourseProgress = { courseId:'food',courseTitle:'食物 Food',courseTone:'peach',totalWords:12,masteredWords:0,timesStarted:1,progressPercent:100,completed:true,hasResume:false,words:foodCourse.cards.filter(c=>c.kind==='word').map((c,i)=>({word:c.english,zh:c.chinese,imageUrl:c.imageUrl,attempts:1,correct:1,masteryStars:i===0?2:0,lastPracticed:null})) };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(url.includes('/api/learners') ? [{id:'test-learner',name:'宝宝'}] : url.includes('/api/progress') ? {courses:[course]} : url.includes('/api/sessions') ? [] : {totalSessions:1,totalMinutes:1,last7Days:[]}))));
     lessonInstances.length = 0;
     phasedInstances.length = 0;
     phasedStartQueue.length = 0;
@@ -191,13 +194,13 @@ describe('PhasedLessonView', () => {
       await phasedInstances[0].completeReinforcement();
     });
 
-    fireEvent.click(await screen.findByRole('button', { name: '再来一节' }));
+    fireEvent.click(await screen.findByRole('button', { name: '再上一遍' }));
     expect(screen.getByRole('button', { name: /我们开始吧/ })).toBeTruthy();
     expect(routerPush).not.toHaveBeenCalledWith('/lesson/food');
     await waitFor(() => expect(lessonInstances.length).toBe(2));
   });
 
-  it('uses cleared progress instead of total course words on the done frame', async () => {
+  it('uses durable mastery instead of session cleared count on the done frame', async () => {
     render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
@@ -210,7 +213,7 @@ describe('PhasedLessonView', () => {
       await phasedInstances[0].completeReinforcement();
     });
 
-    expect(await screen.findByText('2 个词')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: '食物课,过关 1 个词' })).toBeTruthy();
   });
 
   it('R1 (2026-07-20): resumed interactive session skips IntroFrame and positions on the breakpoint card', async () => {

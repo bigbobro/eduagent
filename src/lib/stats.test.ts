@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from './db/sqlite';
 import { buildStatsSnapshot, buildSessionList } from './stats';
 import { allCourses } from '@/data/courses';
@@ -13,6 +13,7 @@ function makeDb() {
 }
 
 describe('buildStatsSnapshot', () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-05-13T12:00:00'));
@@ -23,7 +24,22 @@ describe('buildStatsSnapshot', () => {
     expect(s.totalMinutes).toBe(0);
     expect(s.totalSessions).toBe(0);
     expect(s.last7Days).toHaveLength(7);
+    expect(s.lastDays).toHaveLength(91);
+    expect(s.lastDays?.slice(-7)).toEqual(s.last7Days);
     expect(s.last7Days.every((d) => d.minutes === 0)).toBe(true);
+  });
+
+  it('keeps the inclusive 91-day boundary and excludes other learners', () => {
+    const db = makeDb();
+    for (const [id, date, learner] of [['edge','2026-02-12','test-learner'],['old','2026-02-11','test-learner'],['other','2026-05-13','other']]) {
+      db.prepare('INSERT INTO lesson_logs (id,course_id,start_time,end_time,learner_id) VALUES (?,?,?,?,?)').run(id,'food',`${date}T10:00:00`,`${date}T10:20:00`,learner);
+    }
+    const s = buildStatsSnapshot(db, 'test-learner');
+    expect(s.lastDays?.[0]).toEqual({date:'2026-02-12',minutes:20});
+    expect(s.lastDays?.at(-1)).toEqual({date:'2026-05-13',minutes:0});
+    expect(s.lastDays?.reduce((n,d)=>n+d.minutes,0)).toBe(20);
+    expect(s.totalSessions).toBe(2);
+    expect(s.totalMinutes).toBe(40);
   });
 
   it('distributes minutes across 7 days by startTime local date', () => {

@@ -1,49 +1,22 @@
 'use client';
-
-import { Cat, PaperBg, PaperButton, Star } from '@/components/magic';
-
-interface DoneCelebrateFrameProps {
-  starsEarned: number;
-  totalStars: number;
-  wordsLearned: number;
-  duration?: string;
-  accuracy?: number | null;
-  onHome: () => void;
-  onAgain: () => void;
+import Image from 'next/image';
+import maji from '../../../desktop/build-resources/icon-source.png';
+import type { CourseProgress, SessionSummary } from '@/types/progress';
+import { Button } from '@/components/ui/Button';
+import { ProgressBar } from '@/components/ui/ProgressBar';
+import { Tag } from '@/components/ui/Tag';
+import { WordMastery } from '@/components/records/WordMastery';
+import '@/components/records/records.css';
+import './done.css';
+interface Props { course: CourseProgress; session?: SessionSummary; next?: CourseProgress; onHome: () => void; onAgain: () => void; onNext: () => void }
+export function DoneCelebrateFrame({ course, session, next, onHome, onAgain, onNext }: Props) {
+  const learned = course.words.filter(w => w.masteryStars >= 2).length;
+  const remaining = course.totalWords - learned;
+  const nextLearned = next?.words.filter(w => w.masteryStars >= 2).length ?? 0;
+  const title = course.courseTitle.split(/\s+[A-Za-z]/)[0];
+  return <div className="done-page"><section className="done-left"><header className="done-heading"><Image src={maji} alt="麻吉" width={88} height={88} /><div><Tag tone="mint">课堂完成</Tag><h1>{title}课,{remaining === 0 ? `${learned} 个词全部过关` : `过关 ${learned} 个词`}</h1><p>{session && `用时 ${Math.round(session.durationMs / 60000)} 分钟`}{session && remaining > 0 && ' · '}{remaining > 0 && `还有 ${remaining} 个词下次再练`}</p></div></header><div className="done-table">{course.words.map(w => <WordMastery key={w.word} word={w} />)}</div></section><aside className="done-right"><section className="done-kpi"><span>今天学会</span><div>{learned}<small>个词</small></div><ProgressBar value={learned / course.totalWords * 100} label="本课学会单词" /></section>{next ? <section className="done-next"><span>建议下一课</span><div className="done-next-title">{next.words[0]?.imageUrl && <Image src={next.words[0].imageUrl} width={72} height={72} alt="" />}<div><b>{next.courseTitle}</b><small>已会 {nextLearned} 个 · 还剩 {next.totalWords-nextLearned} 个</small></div></div><div className="done-preview">{next.words.filter(w => w.masteryStars < 2).slice(0,4).map(w => w.imageUrl && <Image key={w.word} src={w.imageUrl} width={160} height={160} alt={w.word} />)}</div><Button size="lg" onClick={onNext}>开始下一课</Button></section> : <section className="done-next"><p>暂无建议的下一课</p></section>}<div className="done-actions"><Button variant="glass" onClick={onAgain}>再上一遍</Button><Button variant="glass" onClick={onHome}>回到课程</Button></div></aside></div>;
 }
-export function DoneCelebrateFrame({
-  starsEarned,
-  totalStars,
-  wordsLearned,
-  duration = '—',
-  accuracy = null,
-  onHome,
-  onAgain,
-}: DoneCelebrateFrameProps) {
-  return (
-    <PaperBg tone="paperDeep" className="h-full w-full">
-      <div className="flex h-full flex-col items-center justify-center gap-6 text-ink">
-        <div className="rotate-[-1deg] rounded-paper-lg border-[2.4px] border-ink bg-butter px-10 py-4 text-center font-display text-5xl shadow-paper-hero">
-          今天太棒啦!
-        </div>
-        <Cat size={300} mood="cheer" />
-        <div className="flex gap-4">
-          {Array.from({ length: totalStars }).map((_, index) => (
-            <Star key={index} size={52} filled={index < starsEarned} />
-          ))}
-        </div>
-        <div className="flex gap-4 rounded-paper-pill border-2 border-ink bg-paper px-6 py-3 font-zh text-lg shadow-paper">
-          <span>{wordsLearned} 个词</span>
-          <span>·</span>
-          <span>{duration}</span>
-          <span>·</span>
-          <span>{accuracy === null ? '准确率 —' : `准确率 ${accuracy}%`}</span>
-        </div>
-        <div className="flex gap-4">
-          <PaperButton color="mint" onClick={onHome}>回大厅</PaperButton>
-          <PaperButton color="butter" onClick={onAgain}>再来一节</PaperButton>
-        </div>
-      </div>
-    </PaperBg>
-  );
+export function suggestedCourse(courses: CourseProgress[], currentId: string) {
+  const other = courses.filter(c => c.courseId !== currentId && c.words.some(w => w.masteryStars < 2));
+  return other.find(c => c.hasResume) ?? other.find(c => c.timesStarted === 0);
 }

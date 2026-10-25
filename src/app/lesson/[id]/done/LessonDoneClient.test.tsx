@@ -6,6 +6,7 @@ import { LessonDoneClient } from './LessonDoneClient';
 const routerPush = vi.hoisted(() => vi.fn());
 
 vi.mock('next/navigation', () => ({
+  usePathname: () => '/lesson/food/done',
   useRouter: () => ({ push: routerPush }),
 }));
 
@@ -36,6 +37,8 @@ describe('LessonDoneClient', () => {
     routerPush.mockClear();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/learners') return Promise.resolve(new Response(JSON.stringify([{ id: 'test-learner', name: '宝宝' }])));
+      if (url.startsWith('/api/sessions')) return new Response('[]');
+      if (url.startsWith('/api/stats')) return new Response(JSON.stringify({ totalSessions:1,totalMinutes:15,last7Days:[] }));
       if (url !== '/api/progress?learnerId=test-learner') throw new Error(`unexpected fetch: ${url}`);
       return new Response(JSON.stringify(progress), { status: 200 });
     }));
@@ -48,8 +51,8 @@ describe('LessonDoneClient', () => {
   it('loads progress without depending on the course catalog request', async () => {
     render(<LessonDoneClient courseId="food" />);
 
-    expect(await screen.findByText('2 个词')).toBeTruthy();
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('heading', { name: '食物课,过关 2 个词' })).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalledWith('/api/courses');
     expect(fetch).toHaveBeenCalledWith('/api/progress?learnerId=test-learner');
   });
 });

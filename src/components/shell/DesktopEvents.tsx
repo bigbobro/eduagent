@@ -13,7 +13,7 @@ export function DesktopEvents() {
     document.addEventListener('dragstart', drag);
     const unsubscribe = window.eduagentDesktop?.onMenuCommand?.((command) => {
       if (command === 'nav:courses') router.push('/');
-      else if (command === 'nav:records') router.push('/journal');
+      else if (command === 'nav:records') router.push('/records');
       else if (command === 'nav:settings') router.push('/settings');
       else if (command === 'learner:new') router.push('/settings#learner-name');
       else if (command.startsWith('learner:')) { saveCurrentLearnerId(command.slice(8)); router.push('/'); }

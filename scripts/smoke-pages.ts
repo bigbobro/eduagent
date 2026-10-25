@@ -141,12 +141,11 @@ async function main() {
       await fetchOk(`${BASE}/`),
       await fetchOk(`${BASE}/lesson/food`),
       await fetchOk(`${BASE}/lesson/food/done`),
-      await fetchOk(`${BASE}/journal`),
-      await fetchOk(`${BASE}/parents`),
+      await fetchOk(`${BASE}/records`),
       await fetchCoursesCatalog(),
       await fetchOk(`${BASE}/api/progress?learnerId=${learnerId}`, { jsonHas: ['courses', 'totalWordsMastered'] }),
       await fetchOk(`${BASE}/api/sessions?learnerId=${learnerId}`),
-      await fetchOk(`${BASE}/api/stats?learnerId=${learnerId}`, { jsonHas: ['totalMinutes', 'last7Days'] }),
+      await fetchOk(`${BASE}/api/stats?learnerId=${learnerId}`, { jsonHas: ['totalMinutes', 'last7Days', 'lastDays'] }),
     ];
 
     const allOk = checks.every(Boolean);

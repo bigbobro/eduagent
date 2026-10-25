@@ -19,7 +19,7 @@ export function buildStatsSnapshot(db: Database, learnerId: string): StatsSnapsh
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const days: Array<{ date: string; minutes: number }> = [];
-  for (let i = 6; i >= 0; i--) {
+  for (let i = 90; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     days.push({
@@ -42,7 +42,8 @@ export function buildStatsSnapshot(db: Database, learnerId: string): StatsSnapsh
     totalMinutes: Math.round(totalMs / 60_000),
     totalSessions: rows.length,
     totalWordsMastered: 0,
-    last7Days: days,
+    last7Days: days.slice(-7),
+    lastDays: days,
   };
 }
 
