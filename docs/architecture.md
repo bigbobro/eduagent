@@ -570,15 +570,15 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ## 12. 前端架构（2026-10 G 外壳与课程、课堂、学习记录）
 
-课程、课堂与学习记录使用 G 组件与水彩麻吉;设置保留原表单功能:
+课程、课堂、学习记录、设置与首次引导使用 G 组件与水彩麻吉:
 
 ```
 /                          课程列表与详情 · CourseHome
 /lesson/[id]               魔法课堂  · IntroFrame / LessonMandalaV2 / ReinforcementFlow
 /lesson/[id]/done          下课庆祝  · DoneCelebrateFrame
 /records                   学习记录  · RecordsPage(当前孩子)
-/settings                  通用设置  · 服务配置 + 孩子档案管理
-/microphone                独立首次麦克风引导 · MicOnboarding
+/settings                  设置      · AI 老师与语音 / 麦克风 / 孩子 / 关于
+/onboarding                首次引导  · 独立全窗口,不挂主工具栏
 ```
 
 ### 关键模块
@@ -589,6 +589,8 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
 | `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/{CourseHome,LearnerPicker,HomeWordCard}.tsx` | 分组课程列表、详情图片墙、可复用单词卡、孩子选择和读取状态 |
+| `src/components/settings/{VoiceSettingsPanel,useSettingsDraft,MicSection,LearnersSection,AboutSection}` | 设置四分区、凭据草稿、连接测试和保存后的退出码 75 |
+| `src/components/onboarding/OnboardingScreen.tsx` / `src/lib/onboarding-entry.ts` | 三步首次引导和首页进入条件 |
 | `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | G 课堂四段与共享的下课 view 层，保留控制器与 phase 状态机 |
 | `src/components/lesson/{LessonToolbar,LessonCard,SubtitleLog}.tsx` | 独立课堂工具栏、共用大卡片、视图层累积字幕 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
@@ -676,7 +678,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 **未配置状态**
 - `config.ts` 的 `isConfigured()` 直接读 `process.env`:`VOICE_MOCK=true` 视为已配置;否则要求 LLM key(`LLM_API_KEY` 或旧 `MIMO_API_KEY`)、`DOUBAO_APP_ID`、`DOUBAO_ACCESS_KEY`、两个 Resource ID 齐全。`getConfig()` 缺凭据不再抛错,server 照常启动。
-- 未配置时 `POST /api/chat` 返回 HTTP 503 + `{ code: 'NOT_CONFIGURED' }`;语音 WS upgrade 在 `guardUpgrade()`(`voice/upgrade-guard.ts`,先验 Origin 再验配置)里直接回 HTTP 503 并关闭 socket。前端:首页加载时 `GET /api/settings` 发现 `configured=false` 跳 `/settings`;`LessonController.start` 收到 NOT_CONFIGURED 也跳 `/settings`。
+- 未配置时 `POST /api/chat` 返回 HTTP 503 + `{ code: 'NOT_CONFIGURED' }`;语音 WS upgrade 在 `guardUpgrade()`(`voice/upgrade-guard.ts`,先验 Origin 再验配置)里直接回 HTTP 503 并关闭 socket。前端:首页加载时 `GET /api/settings` 发现未配置且没有跳过,进入 `/onboarding` 第 1 步;设置读取失败时首页照常打开。`LessonController.start` 收到 NOT_CONFIGURED 仍跳 `/settings`。
 
 **Settings API**(`src/app/api/settings/`)
 - `GET /api/settings` -> `{ mode: 'app'|'web', configured, mock, values }`;`llmApiKey / doubaoAppId / doubaoAccessKey` 打码(末 4 位,长度 ≤8 只给 `••••`),其余原样。
@@ -697,11 +699,11 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 **preload 暴露面**:`desktop/preload.js` 在 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` 下暴露 `window.eduagentDesktop` 的五个无参数原生方法及下述只读菜单订阅:`getMicStatus()`、`requestMic()`、`openMicSettings()`、`getAppInfo()`、`openLogsFolder()`。main 验证调用来自当前窗口的主 frame 和本地 origin。版本由 `app.getVersion()` 提供,设置路径、任意 URL、文件系统和原始 IPC 均不传给 renderer。新增只读 `onMenuCommand(callback)` 订阅，返回取消订阅函数，仅允许 `nav:courses / nav:records / nav:settings / learner:new / learner:<id>`；preload 校验枚举与 ID，回调不暴露 IPC event。main 从实际 loopback server 读取孩子档案，以固定代码读取本地选中 ID，加载/导航/聚焦、renderer 档案请求完成与应用菜单打开事件同步孩子菜单，无定时轮询；列表变化重建菜单，只有选择变化时就地更新勾选。
 
-**麦克风授权**:启动仅调用 `getMediaAccessStatus`,不申请授权。首页在 Key 已配置、权限为 `not-determined` 且尚未完成或跳过引导时,先显示 `MicOnboarding`;首页在配置与麦克风检查完成前保持准备状态,完成或跳过后再进入 Phase 2 的孩子档案选择/新建流程。跳过标记只存在当前 origin 的 localStorage。设置页的独立 `MicSection` 常驻显示「已允许 / 未询问 / 已拒绝」,只有明确点击「允许使用麦克风」才调用 `askForMediaAccess`。已拒绝时,「打开系统设置」经 `shell.openExternal` 打开固定 URL `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`;macOS 修改拒绝状态后可能需要退出重开 App。`restricted` / `unknown` 保守归为已拒绝。
+**麦克风授权**:启动仅调用 `getMediaAccessStatus`,不申请授权。首页在配置和只读麦克风检查完成前保持准备状态。未配置且未跳过进入 `/onboarding` 第 1 步;引导里保存会先写 `eduagent:onboarding-resume=2`,退出码 75 后窗口仍先加载 `/`,首页再进入第 2 步。权限为 `not-determined` 且尚未完成或跳过时也进入第 2 步;没有孩子档案且未跳过、档案可读时进入第 3 步。引导是独立全窗口,不挂主工具栏,旧 `/microphone` 已删除。跳过标记只存在当前 origin 的 localStorage。设置页的 `MicSection` 常驻显示「已允许 / 未询问 / 已拒绝」,只有明确点击「允许使用麦克风」才调用 `askForMediaAccess`。已拒绝时,「打开系统设置」经 `shell.openExternal` 打开固定 URL `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`;macOS 修改拒绝状态后可能需要退出重开 App。`restricted` / `unknown` 保守归为已拒绝。
 
 「试录一下」复用 `LessonRecorder` 的 16k AudioContext、AudioWorklet 与 PCM 输出计算 RMS 音量,最多 10 秒,停止或离开页面即 dispose,不保存音频、不连接 ASR。课堂入口 `LessonClient` 仅在权限为 granted 时挂载 `PhasedLessonView`,其他状态显示设置入口,因此不会开始 server session 或预热录音。授权通过后保留 Phase 2 的档案解析,将选定 `learnerId` 传给课堂。回到窗口时重新检查状态。Electron 的 media permission handler 也只对本地 origin、已允许的音频请求放行。Web 无 preload 时使用 `navigator.permissions.query({ name: 'microphone' })` 读取状态,设置页的明确授权按钮才调用 `getUserMedia` 并立即释放 stream;隐藏系统设置和日志文件夹按钮。
 
-**服务重启与退出**:server 保存设置后以 75 退出,main 显示包内 `restarting.html`「正在重启…」,重新启动服务并等待 `/api/settings` 返回 200,再加载首页。非 0 且非 75 退出在本次 App 生命周期内自动重启一次;第二次崩溃、正常意外退出或就绪超过 30 秒,显示错误页与日志位置。旧进程的就绪轮询在新进程接管后取消,避免旧回调覆盖新窗口。退出 App 时先终止 server,等待退出事件,3 秒未退出则强制清理。单实例锁防止重复进程;站外 http(s) 链接用系统浏览器,renderer 导航和 redirect 不能离开本地 origin,保留编辑菜单的复制粘贴快捷键。
+**服务重启与退出**:server 保存设置后以 75 退出,main 显示包内 `restarting.html`「正在重启…」,重新启动服务并等待 `/api/settings` 返回 200,再加载首页。首页随后按引导标记决定留在首页或进入 `/onboarding`。非 0 且非 75 退出在本次 App 生命周期内自动重启一次;第二次崩溃、正常意外退出或就绪超过 30 秒,显示错误页与日志位置。旧进程的就绪轮询在新进程接管后取消,避免旧回调覆盖新窗口。退出 App 时先终止 server,等待退出事件,3 秒未退出则强制清理。单实例锁防止重复进程;站外 http(s) 链接用系统浏览器,renderer 导航和 redirect 不能离开本地 origin,保留编辑菜单的复制粘贴快捷键。
 
 **数据与日志**:`app.getPath('userData')`(通常 `~/Library/Application Support/EduAgent/`)下保存 `settings.json`、`eduagent.db` 和 `logs/server.log`;日志启动时超过 5 MiB 轮转为 `server.log.1`,保留一份。关于区块与 App 菜单均可经 `shell.openPath` 打开日志目录。Key 仍由 server 从 settings 文件映射到 env,见上方 Phase 1 节。
 
@@ -757,3 +759,9 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 `buildStatsSnapshot` / `/api/stats` 向后兼容新增 `lastDays: { date, minutes }[]`，始终 91 条且按日期升序补零；`last7Days` 保留原有聚合语义，等于 lastDays 最后七条。累计总数包含窗口外课次，日期按 startTime 的本地日期归属、每课次分钟先四舍五入，维持旧行为，不改 schema。
 
 下课页不再自动跳转；两列六行逐词表按持久 masteryStars 呈现（3 很好、2 好、1 再练练、0 没练到）。标题与今天学会数量使用 >=2 星，与首页一致；时长取 `/api/sessions?limit=50` 中本课最近课次，无课次时不造时长。建议下一课排除当前课与已学会全部词的课，优先有断点，其次未上过的新课；带最多四张未掌握词图。课堂内继续使用原 handleRestart，独立路由进入本课；现有控制器自动恢复有效断点，不新增强制清除断点行为。独立路由使用主工具栏替代旧 52px 留位，课堂内保留课堂工具栏。数据加载失败显示重试，孩子切换与重试忽略过期请求，不把失败当零值。
+
+## P5 设置与首次引导（2026-10-25）
+
+`/settings` 仍在主外壳内，左侧 232px 分区为「AI 老师与语音」「麦克风」「孩子」「关于」，右侧内容最宽 760px。页内不再放「回首页」和「设置」大标题。凭据表单、打码、空值保留、Web 只读、`POST /api/settings` 与退出码 75 的语义不变。连接测试结果按 AI 老师 / 听写 / 发音 显示「未测试」「正常」或失败原因，不回显 Key。ASR/TTS Resource ID 和音色收在「高级」里。删除孩子仍是页内输入名字确认，不用浏览器 `confirm()`。
+
+`/onboarding` 是主外壳之外的全窗口三步引导，自带 52px 标题栏。第 1 步填写 LLM API Key、服务地址、豆包 App ID 和 Access Key，模型和资源 ID 继续用服务端默认值。引导中的保存会在 POST 之前写 `eduagent:onboarding-resume=2`，失败则清掉；Electron 重启后仍 `loadURL` 到 `/`，首页读到标记后进入第 2 步。第 2 步复用 `MicSection` 的试录和音量条。第 3 步标题是「建第一个孩子档案」。每步都可以「以后再说」。`VOICE_MOCK` 或已配置时第 1 步视为完成。首页在未配置、麦克风尚未询问、或没有孩子档案时分别进入对应步骤；设置读取失败则直接显示首页。旧 `/microphone` 路由已删除。孩子选择器底部不再放「设置」，空档案标题为「还没有孩子档案」。原生菜单「新建孩子档案」仍打开 `/settings#learner-name`。preload 没有新增方法。

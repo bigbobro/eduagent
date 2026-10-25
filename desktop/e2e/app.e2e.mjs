@@ -32,11 +32,11 @@ async function snapshot(page, name) {
 // Keep desktop integration fixtures on the real settings/profile UI.
 async function createFirstLearner(page, name) {
   const base = new URL(page.url()).origin;
-  await page.goto(`${base}/settings`);
+  await page.goto(`${base}/settings#learner-name`);
   await page.getByLabel('孩子名字', { exact: true }).fill(name);
   await page.getByRole('button', { name: '新建孩子档案', exact: true }).click();
   await page.locator('section[aria-label="孩子档案"]').getByText(name, { exact: true }).waitFor();
-  await page.getByRole('button', { name: '回首页', exact: true }).click();
+  await page.goto(`${base}/`);
   await page.getByRole('button', { name: '动物 Animals', exact: true }).waitFor({ timeout: 30000 });
 }
 
@@ -53,7 +53,7 @@ try {
   page.on('console', (m) => m.type() === 'error' && console.log('[renderer error]', m.text()));
 
   // 1. 首页(默认端口可能已被本机另一个 EduAgent 占用,app 会换端口,这里不写死)
-  await page.waitForURL(/127\.0\.0\.1:\d+\/$/, { timeout: 60000 });
+  await page.waitForURL(/127\.0\.0\.1:\d+\/($|onboarding)/, { timeout: 60000 });
   await page.getByRole('heading', { name: '建第一个孩子档案', exact: true }).waitFor();
   await createFirstLearner(page, '桌面测试孩子');
   check('home page loads with course list', true, page.url());
@@ -183,44 +183,47 @@ try {
   const page = await appB.firstWindow();
   page.on('console', (m) => m.type() === 'error' && console.log('[renderer error]', m.text()));
 
-  // B1. 空 userData + 非 mock -> 首页跳转设置页
-  await page.waitForURL(/\/settings$/, { timeout: 60000 });
+  // B1. 空 userData + 非 mock -> 首页进入引导第 1 步
+  await page.waitForURL(/\/onboarding/, { timeout: 60000 });
   await page.getByTestId('config-status').waitFor({ timeout: 30000 });
-  check('empty userData, non-mock: opens the settings page', (await page.getByTestId('config-status').innerText()).includes('还没有配置'), page.url());
+  check('empty userData, non-mock: opens onboarding', (await page.getByTestId('config-status').innerText()).includes('还没有配置'), page.url());
 
   // B2. 填假 key,测试连接成功
-  await page.getByLabel('Base URL').fill(llmUrl);
+  await page.getByLabel('服务地址').fill(llmUrl);
   await page.getByLabel(/^API Key/).fill(GOOD_LLM);
   await page.getByLabel('App ID').fill(FAKE_APP_ID);
   await page.getByLabel('Access Key').fill('wrong-access-key-0000');
   await page.getByRole('button', { name: '测试连接' }).click();
-  await page.getByTestId('result-语音合成(TTS)').waitFor({ timeout: 20000 });
+  await page.waitForFunction(() => {
+    const text = document.querySelector('main')?.innerText ?? '';
+    return text.includes('鉴权失败') && text.includes('401');
+  }, undefined, { timeout: 20000 });
   const failText = await page.locator('main').innerText();
   check('test connection: wrong key shows readable auth failure (fake server)', /鉴权失败/.test(failText) && failText.includes('401') && !failText.includes('wrong-access-key-0000'));
   await page.getByLabel('Access Key').fill(GOOD_ACCESS);
   await page.getByRole('button', { name: '测试连接' }).click();
-  await page.waitForFunction(() => document.body.innerText.includes('语音识别(ASR):'), undefined, { timeout: 20000 });
+  await page.waitForFunction(() => ['AI 老师 正常', '听写 正常', '发音 正常'].every((name) => document.body.innerText.includes(name)), undefined, { timeout: 20000 });
   const okText = await page.locator('main').innerText();
-  check('test connection: correct fake key -> LLM/TTS/ASR all ok', ['LLM', '语音合成(TTS)', '语音识别(ASR)'].every((n) => okText.includes(`✓ ${n}`)), okText.split('\n').filter((l) => /[✓✗]/.test(l)).join(' | '));
+  check('test connection: correct fake key -> AI, dictation, and speech all ok', ['AI 老师 正常', '听写 正常', '发音 正常'].every((name) => okText.includes(name)), okText.split('\n').filter((line) => /正常|鉴权失败/.test(line)).join(' | '));
 
   // B3. 外链走系统浏览器(stub shell.openExternal)
   await appB.evaluate(({ shell }) => { globalThis.__opened = []; shell.openExternal = (u) => { globalThis.__opened.push(u); return Promise.resolve(); }; });
   await page.getByRole('link', { name: /火山引擎豆包语音控制台/ }).click();
   await page.waitForTimeout(500);
   const opened = await appB.evaluate(() => globalThis.__opened);
-  check('external guide link opens in system browser, window stays on settings', opened.length === 1 && opened[0].startsWith('https://console.volcengine.com/') && /\/settings$/.test(page.url()), JSON.stringify(opened));
+  check('external guide link opens in system browser, window stays on onboarding', opened.length === 1 && opened[0].startsWith('https://console.volcengine.com/') && /\/onboarding/.test(page.url()), JSON.stringify(opened));
 
-  // B4. 保存 -> server 重启 -> 窗口 reload -> configured=true
+  // B4. 保存 -> server 重启 -> 窗口 reload -> 回到引导第 2 步
   const restartNavigations = [];
   page.on('framenavigated', (frame) => { if (frame === page.mainFrame()) restartNavigations.push(frame.url()); });
-  await page.getByRole('button', { name: '保存' }).click();
+  await page.getByRole('button', { name: '保存并继续' }).click();
   await page.getByRole('status').waitFor({ timeout: 10000 });
-  await page.getByRole('heading', { name: '建第一个孩子档案', exact: true }).waitFor({ timeout: 60000 });
+  await page.getByRole('heading', { name: '允许使用麦克风', exact: true }).waitFor({ timeout: 60000 });
   const info = JSON.parse((await nodeRequest('/api/settings')).text);
   const logPath2 = join(userData2, 'logs/server.log');
   const log2 = readFileSync(logPath2, 'utf8');
   const restarts = (log2.match(/server requested restart/g) || []).length;
-  check('save: server restarted once, window reloaded to home, configured=true', info.configured === true && info.mode === 'app' && restarts === 1 && /127\.0\.0\.1:38427\/$/.test(page.url()), `restarts=${restarts} url=${page.url()}`);
+  check('save: server restarted once, window reloaded to onboarding step 2, configured=true', info.configured === true && info.mode === 'app' && restarts === 1 && /\/onboarding/.test(page.url()), `restarts=${restarts} url=${page.url()}`);
 
   check('saving settings displays the local restarting page before returning home', restartNavigations.some((u) => u.endsWith('/restarting.html')));
 
@@ -265,13 +268,13 @@ for (const status of ['granted', 'denied', 'not-determined']) {
   try {
     instance = await electron.launch({ executablePath: exe, env: { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_TEST_MIC_STATUS: status, EDUAGENT_USER_DATA: dir, VOICE_MOCK: 'true' }, timeout: 60000 });
     const page = await instance.firstWindow();
-    await page.waitForURL(/127\.0\.0\.1:\d+\/$/, { timeout: 60000 });
+    await page.waitForURL(/127\.0\.0\.1:\d+\/($|onboarding)/, { timeout: 60000 });
     if (status === 'not-determined') {
       await page.getByTestId('mic-onboarding').waitFor({ timeout: 15000 });
       check('first-run microphone step appears when not-determined', true);
       check('first-run onboarding stays outside the main toolbar', await page.getByTestId('main-toolbar').count() === 0);
       await snapshot(page, 'mic-onboarding.png');
-      await page.getByRole('button', { name: '稍后设置' }).click();
+      await page.getByRole('button', { name: '以后再说' }).click();
       await page.reload();
       await page.getByRole('heading', { name: '建第一个孩子档案', exact: true }).waitFor();
       // Query the bridge as well, so this asserts skip did not grant access.
@@ -285,16 +288,19 @@ for (const status of ['granted', 'denied', 'not-determined']) {
     check(`profile flow follows microphone setup (${status})`, true);
     const base = new URL(page.url()).origin;
     await page.goto(`${base}/settings`);
+    const nav = page.getByRole('navigation', { name: '设置分区' });
     const label = { granted: '已允许', denied: '已拒绝', 'not-determined': '未询问' }[status];
+    await nav.getByRole('button', { name: '麦克风' }).click();
     await page.getByTestId('mic-status').filter({ hasText: label }).waitFor();
     check(`settings microphone state: ${status}`, true);
     await page.getByTestId('mic-status').scrollIntoViewIfNeeded();
     await snapshot(page, `mic-${status}.png`);
     if (status === 'granted') {
-      const headings = await page.locator('h2').allTextContents();
-      check('settings sections keep microphone, profiles, About in order', headings.indexOf('麦克风') < headings.indexOf('孩子档案') && headings.indexOf('孩子档案') < headings.indexOf('关于'));
+      const labels = await nav.getByRole('button').allTextContents();
+      check('settings sections keep microphone, profiles, About in order', labels.findIndex((item) => item.includes('麦克风')) < labels.findIndex((item) => item.includes('孩子')) && labels.findIndex((item) => item.includes('孩子')) < labels.findIndex((item) => item.includes('关于')));
     }
     const version = await instance.evaluate(({ app }) => app.getVersion());
+    await nav.getByRole('button', { name: '关于' }).click();
     await page.getByTestId('app-version').filter({ hasText: version }).waitFor();
     check('About shows packaged application version', true, version);
     const bridgeKeys = await page.evaluate(() => Object.keys(window.eduagentDesktop).sort().join(','));
@@ -317,6 +323,7 @@ for (const status of ['granted', 'denied', 'not-determined']) {
     await page.waitForTimeout(100);
     check('open logs uses the current userData logs folder', await instance.evaluate((_e, expected) => globalThis.__paths.includes(expected), join(dir, 'logs')));
     if (status === 'denied') {
+      await nav.getByRole('button', { name: '麦克风' }).click();
       await page.getByRole('button', { name: '打开系统设置' }).click();
       await page.waitForTimeout(100);
       check('denied: opens the exact macOS microphone settings URL', await instance.evaluate((_e, expected) => globalThis.__opened.includes(expected), micSettingsUrl));
@@ -330,10 +337,12 @@ for (const status of ['granted', 'denied', 'not-determined']) {
       await page.getByRole('link', { name: '去设置' }).waitFor();
       check('denied: lesson prompts settings without recording or starting a session', chatCalls === 0 && await page.evaluate(() => window.__micCalls) === 0);
     } else if (status === 'not-determined') {
+      await nav.getByRole('button', { name: '麦克风' }).click();
       await page.getByRole('button', { name: '允许使用麦克风' }).click();
       await page.getByTestId('mic-status').filter({ hasText: '已允许' }).waitFor();
       check('only the explicit Allow button requests microphone access', readFileSync(join(dir, 'logs/server.log'), 'utf8').includes('askForMediaAccess requested by microphone UI'));
     } else {
+      await nav.getByRole('button', { name: '麦克风' }).click();
       await page.getByRole('button', { name: '试录一下' }).click();
       await page.getByRole('meter', { name: '麦克风音量' }).waitFor();
       await page.waitForFunction(() => Number(document.querySelector('[role="meter"]').getAttribute('aria-valuenow')) > 0);
@@ -354,7 +363,7 @@ try {
   const preferred = blocker.address().port;
   collisionApp = await electron.launch({ executablePath: exe, env: { ...process.env, EDUAGENT_TEST: '1', EDUAGENT_TEST_MIC_STATUS: 'granted', EDUAGENT_USER_DATA: collisionDir, EDUAGENT_PORT: String(preferred), VOICE_MOCK: 'true' }, timeout: 60000 });
   const page = await collisionApp.firstWindow();
-  await page.waitForURL(/127\.0\.0\.1:\d+\/$/, { timeout: 60000 });
+  await page.waitForURL(/127\.0\.0\.1:\d+\/($|onboarding)/, { timeout: 60000 });
   await createFirstLearner(page, '端口恢复测试孩子');
   const base = new URL(page.url()).origin;
   check('occupied preferred port: app selects a free loopback port and logs it', Number(new URL(base).port) !== preferred && readFileSync(join(collisionDir, 'logs/server.log'), 'utf8').includes(`preferred port ${preferred} occupied`));

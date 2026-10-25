@@ -1,0 +1,22 @@
+.onboarding-window{height:100dvh;display:grid;grid-template-rows:52px minmax(0,1fr);color:var(--ui-ink);font-size:14px;line-height:1.45}
+.onboarding-title{grid-template-columns:1fr;justify-items:center;padding-left:86px;font-size:13px;font-weight:600}
+.onboarding{display:grid;grid-template-columns:400px minmax(0,1fr);min-height:0}
+.onboarding-side{background:linear-gradient(160deg,rgba(104,66,255,.92),rgba(83,52,232,.95));color:#fff;padding:48px 32px;display:flex;flex-direction:column;gap:24px;min-height:0}
+.onboarding-side img{width:104px;height:104px;border-radius:26px;box-shadow:0 0 0 3px rgba(255,255,255,.6)}
+.onboarding-side h1{font-size:30px;line-height:1.3;font-weight:700}
+.onboarding-side p{font-size:14px;line-height:1.6;color:rgba(255,255,255,.82)}
+.onboarding-steps{display:grid;gap:12px;margin-top:12px;padding:0;list-style:none}
+.onboarding-step{display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:14px;background:rgba(255,255,255,.1);font-size:15px}
+.onboarding-step.on{background:#fff;color:var(--ui-ink);font-weight:600;box-shadow:0 10px 24px -12px rgba(0,0,0,.35)}
+.onboarding-step.later{opacity:.6}
+.onboarding-num{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;background:rgba(255,255,255,.2);flex:none}
+.onboarding-step.ok .onboarding-num{background:#2DD4BF;color:#fff}
+.onboarding-step.on .onboarding-num{background:var(--purple);color:#fff}
+.onboarding-main{min-width:0;min-height:0;overflow:auto;display:flex;flex-direction:column;padding:32px 96px}
+.onboarding-panel{margin:auto 0;display:flex;flex-direction:column;gap:24px;width:min(640px,100%)}
+.onboarding-panel>.ui-tag{align-self:flex-start}
+.onboarding-panel h2{font-size:36px;font-weight:700;line-height:1.2}
+.onboarding-panel p{font-size:16px;line-height:1.75;color:var(--ui-secondary);max-width:560px}
+.onboarding-actions{display:flex;flex-wrap:wrap;gap:12px}
+.onboarding-child{display:grid;gap:8px;font-size:14px;max-width:420px}
+.onboarding-error{color:#B45309}

@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MicSection } from './MicSection';
 import { AboutSection } from './AboutSection';
-import { MicOnboarding } from '@/app/microphone/MicOnboarding';
 
 const permission = vi.hoisted(() => ({ status: vi.fn(), request: vi.fn() }));
 vi.mock('@/lib/audio/microphone', () => ({ getMicStatus: permission.status, requestMic: permission.request }));
@@ -23,16 +22,17 @@ describe('microphone settings', () => {
     expect(screen.queryByRole('button', { name: '打开日志文件夹' })).toBeNull();
     expect(permission.request).not.toHaveBeenCalled();
   });
-  it('onboarding completes only after an explicit grant or skip', async () => {
+  it('requests access only from the allow button', async () => {
     permission.status.mockResolvedValue('not-determined');
     permission.request.mockResolvedValue('granted');
     const done = vi.fn();
-    render(<MicOnboarding onDone={done} />);
+    render(<MicSection onAllowed={done} />);
     await screen.findByRole('button', { name: '允许使用麦克风' });
     expect(done).not.toHaveBeenCalled();
+    expect(permission.request).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '允许使用麦克风' }));
     await waitFor(() => expect(done).toHaveBeenCalledOnce());
-    expect(localStorage.getItem('eduagent:mic-setup-complete')).toBe('1');
+    expect(permission.request).toHaveBeenCalledOnce();
   });
   it('disposes the existing recorder when leaving during a pending test recording', async () => {
     permission.status.mockResolvedValue('granted');

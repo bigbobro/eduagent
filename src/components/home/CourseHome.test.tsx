@@ -67,18 +67,37 @@ describe('CourseHome', () => {
   });
 });
 describe('LearnerPicker', () => {
-  it('offers named profiles and settings without assuming a selected child', () => {
-    const select = vi.fn(), settings = vi.fn();
-    render(<LearnerPicker learners={[{ id: 'a', name: '赞赞', avatar: null, createdAt: '' }, { id: 'b', name: '安安', avatar: null, createdAt: '' }]} error={false} onSelect={select} onSettings={settings} onRetry={() => {}} />);
+  it('offers named profiles without assuming a selected child', () => {
+    const select = vi.fn();
+    const add = vi.fn();
+    render(
+      <LearnerPicker
+        learners={[{ id: 'a', name: '赞赞', avatar: null, createdAt: '' }, { id: 'b', name: '安安', avatar: null, createdAt: '' }]}
+        error={false}
+        onSelect={select}
+        onAdd={add}
+        onRetry={() => {}}
+      />,
+    );
     expect(screen.getByRole('heading', { name: '今天谁来学英语？' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '设置' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '安安' }));
     expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
-    fireEvent.click(screen.getByRole('button', { name: '设置' }));
-    expect(settings).toHaveBeenCalledOnce();
+    expect(add).not.toHaveBeenCalled();
   });
-  it('keeps the first-profile entry', () => {
-    render(<LearnerPicker learners={[]} error={false} onSelect={() => {}} onSettings={() => {}} onRetry={() => {}} />);
-    expect(screen.getByRole('heading', { name: '建第一个孩子档案' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '建第一个孩子档案' })).toBeTruthy();
+  it('offers to add a child after the first-run step was skipped', () => {
+    const add = vi.fn();
+    render(
+      <LearnerPicker
+        learners={[]}
+        error={false}
+        onSelect={() => {}}
+        onAdd={add}
+        onRetry={() => {}}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: '还没有孩子档案' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '添加第一个孩子' }));
+    expect(add).toHaveBeenCalledOnce();
   });
 });

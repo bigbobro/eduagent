@@ -139,6 +139,8 @@ async function main() {
     const learnerId = encodeURIComponent((await learnerRes.json()).id);
     const checks = [
       await fetchOk(`${BASE}/`),
+      await fetchOk(`${BASE}/settings`),
+      await fetchOk(`${BASE}/onboarding`),
       await fetchOk(`${BASE}/lesson/food`),
       await fetchOk(`${BASE}/lesson/food/done`),
       await fetchOk(`${BASE}/records`),
