@@ -1,8 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Image from 'next/image';
-import { Check } from 'lucide-react';
 import type { Course } from '@/types/course';
 import type { CourseProgress } from '@/types/progress';
 import { Button } from '@/components/ui/Button';
@@ -10,6 +8,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ProgressBar } from '@/components/ui/ProgressBar';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tag } from '@/components/ui/Tag';
+import { HomeWordCard } from './HomeWordCard';
 import './home.css';
 
 interface CourseHomeProps {
@@ -69,6 +68,15 @@ export function CourseHome({ courses, progress, learnerId, error, onRetry, onCou
   })}</section>)}</nav><main className="home-detail"><header className="home-hero"><div className="home-heading"><Tag tone={group === '学完了' ? 'mint' : group === '新课' ? 'grey' : 'purple'}>{group === '学完了' ? '已学完' : group}</Tag><h1>{name.zh}<span>{name.en}</span></h1><p>{course.description}</p><div className="home-progress"><ProgressBar label="单词掌握进度" value={words.length ? learned / words.length * 100 : 0} /><span>已会 {learned} 个 · 还剩 {words.length - learned} 个{last && ` · 上次 ${last}`}</span></div></div><div className="home-actions"><Button size="lg" onClick={() => onCourseStart(course.id)}>{group === '新课' ? '开始上课' : '继续上课'}</Button></div></header><div className="home-wall" aria-label="本课单词">{words.map(word => {
     const result = mastery.get(word.english);
     const stars = result?.masteryStars ?? 0;
-    return <article key={word.id} className={`home-word ${!result?.attempts ? 'home-unpracticed' : ''}`}>{stars >= 2 && <span className="home-check" aria-label="已掌握"><Check size={13} strokeWidth={3} aria-hidden="true" /></span>}<Image src={word.imageUrl} alt="" width={512} height={512} draggable={false} /><div className="home-word-label"><b title={word.english}>{word.english}</b><small>{word.chinese}</small></div><div className="home-mastery" aria-label={`${word.english}掌握 ${stars} 星`}>{[0, 1, 2].map(i => <i key={i} className={i < stars ? 'on' : ''} />)}</div></article>;
+    return (
+      <HomeWordCard
+        key={word.id}
+        english={word.english}
+        chinese={word.chinese}
+        imageUrl={word.imageUrl}
+        stars={stars}
+        attempts={result?.attempts ?? 0}
+      />
+    );
   })}</div></main></div>;
 }

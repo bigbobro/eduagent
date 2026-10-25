@@ -82,7 +82,7 @@
 | `src/components/lesson/ReinforceFrame.tsx` | quiz:静态 TTS 播 targetText,播完前锁 repeat-after-me 录音 |
 | `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes,错答时播静态 retry hint |
 | `src/components/lesson/DoneCelebrateFrame.tsx` | G 下课页:逐词掌握、最近课次时长、建议下一课,课堂内与独立路由共用 |
-| `src/components/records/RecordsPage.tsx` | 按当前孩子展示 91 天热力图、课程进度、逐词掌握、课次与待练词 |
+| `src/components/records/RecordsPage.tsx` | 按当前孩子展示 91 天正方形热力图、课程进度浮层、课次与待练词 |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/index.ts` | SQLite 连接持有者。`getDb()` **每次调用时**解析 `DATABASE_PATH`(相对 `process.cwd()`),路径与已开连接不同则 close 旧的重开——正常运行路径恒定,行为仍是进程内单连接;开库前 `mkdirSync(dirname, {recursive:true})`(better-sqlite3 只建文件不建目录,而 `db/` 不在 git 里,fresh checkout 没有该目录);导出 `closeDb()` 供测试在切临时 DB 前后显式释放,堵住"模块加载期捕获路径"导致的跨测试文件泄漏 |
 | `src/lib/db/learners.ts` | 孩子档案 CRUD 与单事务连带删除 |
@@ -588,11 +588,11 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
 | `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
 | `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
-| `src/components/home/{CourseHome,LearnerPicker}.tsx` | 分组课程列表与详情图片墙、孩子选择和读取状态 |
+| `src/components/home/{CourseHome,LearnerPicker,HomeWordCard}.tsx` | 分组课程列表、详情图片墙、可复用单词卡、孩子选择和读取状态 |
 | `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | G 课堂四段与共享的下课 view 层，保留控制器与 phase 状态机 |
 | `src/components/lesson/{LessonToolbar,LessonCard,SubtitleLog}.tsx` | 独立课堂工具栏、共用大卡片、视图层累积字幕 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
-| `src/components/records/{RecordsPage,useLearningRecords,WordMastery}.tsx` | 当前孩子学习记录、并行读取与请求隔离、可展开逐词掌握 |
+| `src/components/records/{RecordsPage,CourseWordsSheet,Heatmap,useLearningRecords,WordMastery}.tsx` | 当前孩子学习记录、居中课程单词墙浮层、正方形热力图、并行读取与请求隔离；下课页逐词表仍用 WordMastery |
 | `src/components/lesson/DoneLesson.tsx` | 课堂内和独立下课路由共用的数据加载与导航 |
 | `src/components/ui/{ErrorBoundary,SVGDefs}.tsx` | root 兜底与全局 SVG defs |
 | `src/lib/progress.ts` / `stats.ts` | 纯聚合(SQL 全部下沉到 `db/queries.ts`,这里只对返回行做 JS 整形) |
@@ -752,7 +752,7 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 ## P4 下课与学习记录（2026-10-25）
 
-`/records` 合并旧魔法书与家长页，主工具栏及原生 nav:records / Cmd+2 指向它。`/journal`、`/parents` 路由和旧组件已移除。学习记录只列 timesStarted > 0 的课程，以最近课次和词级 lastPracticed 降序排列，课程条可在卡内展开逐词掌握墙；热力图为包含今天的滚动 91 天（13 列、7 行），使用本地日期，按每日 0 / 1–9 / 10–19 / >=20 分钟四档紫色。只展示现有时长、课次、会说单词、最近课次与 attempts > 0 且 masteryStars <= 1 的待练词，不显示占位准确率、连续天数等指标。
+`/records` 合并旧魔法书与家长页，主工具栏及原生 nav:records / Cmd+2 指向它。`/journal`、`/parents` 路由和旧组件已移除。学习记录只列 timesStarted > 0 的课程，以最近课次和词级 lastPracticed 降序排列。点课程条打开居中玻璃浮层（Esc、遮罩、关闭按钮可关，焦点进入后回到该行，遮罩下 `.shell-content` 与课程列表不滚动），墙为 6 列，复用首页 `HomeWordCard`（图片、中英、三段掌握、≥2 星打勾、未练淡化）。热力图为包含今天的滚动 91 天（13 列、7 行），格子边长取可用宽高减去间距后的较小值并居中，不随窗口压成扁矩形；使用本地日期，按每日 0 / 1–9 / 10–19 / >=20 分钟四档紫色。只展示现有时长、课次、会说单词、最近课次与 attempts > 0 且 masteryStars <= 1 的待练词，不显示占位准确率、连续天数等指标。
 
 `buildStatsSnapshot` / `/api/stats` 向后兼容新增 `lastDays: { date, minutes }[]`，始终 91 条且按日期升序补零；`last7Days` 保留原有聚合语义，等于 lastDays 最后七条。累计总数包含窗口外课次，日期按 startTime 的本地日期归属、每课次分钟先四舍五入，维持旧行为，不改 schema。
 
