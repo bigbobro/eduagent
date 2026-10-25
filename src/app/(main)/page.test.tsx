@@ -74,3 +74,15 @@ it('opens the microphone step when the key is ready and access is undecided', as
   render(<HomePage />);
   await waitFor(() => expect(replace).toHaveBeenCalledWith('/onboarding?step=2'));
 });
+it('opens a fresh review lesson with fresh=1 for a course that has a breakpoint', async () => {
+  const resumable = { courseId: 'food', courseTitle: foodCourse.title, courseTone: 'peach', totalWords: 12, masteredWords: 0, timesStarted: 1, progressPercent: 25, hasResume: true, completed: false, words: [] };
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === '/api/settings') return response({ configured: true });
+    if (url === '/api/courses') return response([foodCourse]);
+    if (url === '/api/learners') return response(profiles);
+    return response({ ...snapshot, courses: [resumable] });
+  }));
+  render(<HomePage />);
+  fireEvent.click(await screen.findByRole('button', { name: '从头复习' }));
+  expect(push).toHaveBeenCalledWith('/lesson/food?learnerId=a&fresh=1');
+});

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { loadLearners, selectedLearner, saveCurrentLearnerId } from '@/lib/current-learner';
 import Link from 'next/link';
 import { getMicStatus, type MicStatus } from '@/lib/audio/microphone';
@@ -15,6 +15,9 @@ interface LessonClientProps {
 
 export function LessonClient({ course, requestedLearnerId: requested }: LessonClientProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const fresh = searchParams.get('fresh') === '1';
   const [learnerId, setLearnerId] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [status, setStatus] = useState<MicStatus | null>(null);
@@ -37,6 +40,13 @@ export function LessonClient({ course, requestedLearnerId: requested }: LessonCl
     }).catch(() => { if (active) setError(true); });
     return () => { active = false; };
   }, [requested, router, status]);
+  // One-shot flag: once the lesson started, drop it so a page refresh resumes instead of restarting.
+  const clearFresh = () => {
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete('fresh');
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  };
   // Do not mount the controller (or prewarm the recorder) until access is allowed.
   if (status !== 'granted') return (
     <main className="grid h-screen place-items-center p-8">
@@ -60,6 +70,6 @@ export function LessonClient({ course, requestedLearnerId: requested }: LessonCl
     </main>
   );
   if (!learnerId) return <p role="status">{error ? '暂时读不到孩子档案，请返回首页重试。' : '正在读取孩子档案…'}</p>;
-  return <PhasedLessonView course={course} learnerId={learnerId} />;
+  return <PhasedLessonView course={course} learnerId={learnerId} fresh={fresh} onStarted={fresh ? clearFresh : undefined} />;
 
 }

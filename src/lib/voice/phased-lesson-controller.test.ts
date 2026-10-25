@@ -40,6 +40,11 @@ describe('PhasedLessonController phase transitions', () => {
     ctrl = new PhasedLessonController(v2 as any, foodCourse);
   });
 
+  it('forwards the fresh option to the underlying lesson controller', async () => {
+    await ctrl.startLesson('test-learner', { fresh: true });
+    expect(v2.startLesson).toHaveBeenLastCalledWith(foodCourse.id, 'test-learner', { fresh: true });
+  });
+
   it('keeps a rejected transition on the original phase and retries once on request', async () => {
     await ctrl.startLesson('test-learner');
     v2.sendCustomAction.mockResolvedValueOnce({ ok: false });

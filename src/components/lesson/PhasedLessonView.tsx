@@ -20,10 +20,14 @@ import { Button } from '@/components/ui/Button';
 interface PhasedLessonViewProps {
   course: Course;
   learnerId: string;
+  /** Home "从头复习": ask the server to ignore the breakpoint and start over. */
+  fresh?: boolean;
+  /** Called once startLesson succeeds, e.g. to drop the one-shot fresh flag from the URL. */
+  onStarted?: () => void;
 }
 
 
-export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
+export function PhasedLessonView({ course, learnerId, fresh, onStarted }: PhasedLessonViewProps) {
   const router = useRouter();
   const v2Ref = useRef<LessonController | null>(null);
   const phasedRef = useRef<PhasedLessonController | null>(null);
@@ -119,13 +123,15 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     setStarted(true);
     const phased = phasedRef.current;
-    const startedOk = await phased?.startLesson(learnerId);
+    const startedOk = await phased?.startLesson(learnerId, fresh ? { fresh: true } : undefined);
     if (phasedRef.current !== phased) return;
     if (startedOk === false) {
       setStarted(false);
       setPhase('intro');
       setIntroBusy(false);
       setIntroActiveCardId(null);
+    } else {
+      onStarted?.();
     }
     // Resume info (if any) is applied by onPhaseChange, in the same tick as the resumed
     // phase's 'phase-change' event — see the useEffect above.

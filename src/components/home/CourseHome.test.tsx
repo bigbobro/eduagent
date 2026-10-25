@@ -48,6 +48,13 @@ describe('CourseHome', () => {
     expect(screen.getByRole('button', { name: '继续上课' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '从头复习' })).toBeNull();
   });
+  it('offers a fresh review only for courses with a resumable breakpoint', () => {
+    render(<CourseHome {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: '从头复习' }));
+    expect(props.onCourseStart).toHaveBeenCalledWith('food', { fresh: true });
+    fireEvent.click(screen.getByRole('button', { name: animalsCourse.title }));
+    expect(screen.queryByRole('button', { name: '从头复习' })).toBeNull();
+  });
   it('distinguishes loading, errors and an empty catalog', () => {
     const view = render(<CourseHome {...props} progress={null} />);
     expect(screen.getByLabelText('正在读取课程详情')).toBeTruthy();

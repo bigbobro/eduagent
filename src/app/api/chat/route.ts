@@ -57,7 +57,14 @@ async function handleChatAction(body: LessonRequest) {
     let session;
     let resumeHeader: string | undefined;
     const progress = getCourseProgress(course.id, body.learnerId);
-    if (progress && isResumableProgress(progress)) {
+    // fresh=true (home "从头复习"): skip the breakpoint and start a new session. The breakpoint is
+    // deliberately NOT deleted: the new session's first turn overwrites course_progress through the
+    // normal commitTurn upsert, and per-word mastery (word_performance) is untouched either way.
+    const skipResume = body.fresh === true;
+    if (skipResume) {
+      session = createSession(course, body.learnerId);
+      console.log('[chat] fresh start (requested)', { courseId: course.id, hadProgress: !!progress });
+    } else if (progress && isResumableProgress(progress)) {
       session = createSessionFromSnapshot(course, progress, body.learnerId);
       const resumeCardId = resolveResumeCardId(course, session.memory);
       console.log('[chat] resume hit', {

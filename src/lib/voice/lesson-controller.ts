@@ -124,16 +124,16 @@ export class LessonController {
 
   // ─── 课堂生命周期 ─────────────────────────────────────────────────
 
-  async startLesson(courseId: string, learnerId: string): Promise<boolean> {
+  async startLesson(courseId: string, learnerId: string, options?: { fresh?: boolean }): Promise<boolean> {
     if (this.starting && !this.run.signal.aborted) return this.starting;
     if (!this.ending && this.state !== 'idle') return false;
-    const pending = this.startRun(courseId, learnerId);
+    const pending = this.startRun(courseId, learnerId, options);
     this.starting = pending;
     try { return await pending; }
     finally { if (this.starting === pending) this.starting = null; }
   }
 
-  private async startRun(courseId: string, learnerId: string): Promise<boolean> {
+  private async startRun(courseId: string, learnerId: string, options?: { fresh?: boolean }): Promise<boolean> {
     let failureMessage = '课堂暂时没准备好,再试一次吧';
     const run = new AbortController();
     this.run = run;
@@ -169,7 +169,7 @@ export class LessonController {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: encodeLessonRequest({ action: 'start', courseId, learnerId }),
+        body: encodeLessonRequest({ action: 'start', courseId, learnerId, ...(options?.fresh ? { fresh: true } : {}) }),
         signal: run.signal,
       });
       if (!this.isCurrent(run)) {

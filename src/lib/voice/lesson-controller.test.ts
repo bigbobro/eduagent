@@ -297,6 +297,17 @@ describe('R1 (2026-07-20 session persistence): resume info from X-Resume-Info he
     });
   }
 
+  it('sends fresh:true in the start request only when asked', async () => {
+    const fetchMock = vi.fn(async () => resumeSseResponse(null));
+    vi.stubGlobal('fetch', fetchMock);
+    const startBody = () => JSON.parse((fetchMock.mock.calls as any[][]).find(([url]) => url === '/api/chat')![1].body);
+    await new LessonController().startLesson('animals', 'test-learner', { fresh: true });
+    expect(startBody()).toMatchObject({ action: 'start', courseId: 'animals', learnerId: 'test-learner', fresh: true });
+    fetchMock.mockClear();
+    await new LessonController().startLesson('animals', 'test-learner');
+    expect(startBody()).not.toHaveProperty('fresh');
+  });
+
   it('exposes parsed resume info after a resumed start', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => resumeSseResponse({
       resumed: true,

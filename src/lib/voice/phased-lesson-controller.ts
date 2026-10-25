@@ -68,7 +68,7 @@ export class PhasedLessonController {
     return this.resumeInfo;
   }
 
-  async startLesson(learnerId: string): Promise<boolean> {
+  async startLesson(learnerId: string, options?: { fresh?: boolean }): Promise<boolean> {
     const generation = ++this.generation;
     this.closed = false;
     this.currentPhase = 'intro';
@@ -85,7 +85,7 @@ export class PhasedLessonController {
     this.setIntroBusy(true);
     this.armIntroStartupUnlockTimer();
     try {
-      const started = await this.v2.startLesson(this.course.id, learnerId);
+      const started = await this.v2.startLesson(this.course.id, learnerId, options);
       if (this.closed || generation !== this.generation) return false;
       if (started === false) {
         this.clearIntroStartupUnlockTimer();

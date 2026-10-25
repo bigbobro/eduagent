@@ -123,6 +123,7 @@ PhasedLessonView mount → new LessonController → new PhasedLessonController
 `POST /api/chat?action=start` 必填 `learnerId`，档案不存在返回 404；按 `(learner_id, course_id)` 查 `course_progress`，会话保存 `learnerId`，后续动作只传 `sessionId`:
 - `isResumableProgress` 为真(未完成 + 非空 intro 断点)→ `createSessionFromSnapshot` 用断点重建 memory(messages 清空,**不回放对话**),`currentPhase` 恢复到断点阶段,响应头 `X-Resume-Info`(JSON:`{resumed,phase,clearedCardIds,resumeCardId,passedQuizIds}`);前端据此从断点阶段起播、老师"欢迎回来"、reinforcement 从第一个未过 quiz 起。
 - 否则(新课 / 已完成 / 空 intro 断点)→ 现状 `createSession`,无 `X-Resume-Info`,响应字节同旧版(PRD"否则现状")。
+- 可选请求字段 `fresh: true`(首页"从头复习",仅有断点的课显示)→ 跳过断点直接 `createSession`,无 `X-Resume-Info`,日志 `[chat] fresh start (requested)`。不删旧断点:新会话第一轮 `commitTurn` 按原逻辑覆盖 `course_progress`;`word_performance` 逐词掌握不受影响。前端经 URL `?fresh=1` → `LessonClient` → `PhasedLessonView(fresh)` → `startLesson(..., {fresh})` 透传,开课成功后 `router.replace` 去掉该参数(刷新页面不会再次从头开始)。
 
 每轮 `commitTurn` / `recordQuizAnswer` 用 `serializeProgress` upsert 断点(`isCourseComplete` 判 `completed`)。**完成 = 全 word cleared + 全 quiz passed**(quiz 答对累积 `passedQuizIds`)。**不过期**(PRD R4)——断点一直有效到该课完成;完成后行仍保留但不再恢复(下次是复习式全新开始)。「空 intro 断点」判据(`isResumableProgress`)专门挡住"进课只听开场白就退→误判续课、老师错误地说欢迎回来"。
 

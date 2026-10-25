@@ -155,7 +155,7 @@ export default function HomePage() {
       progress={snapshot?.learnerId === learner.id ? snapshot.data.courses : null}
       error={courseError || progressError === learner.id}
       onRetry={reload}
-      onCourseStart={(id) => router.push(`/lesson/${id}?learnerId=${encodeURIComponent(learner.id)}`)}
+      onCourseStart={(id, options) => router.push(`/lesson/${id}?learnerId=${encodeURIComponent(learner.id)}${options?.fresh ? '&fresh=1' : ''}`)}
     />
   );
 }
