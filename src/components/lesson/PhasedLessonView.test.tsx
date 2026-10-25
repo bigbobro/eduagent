@@ -155,18 +155,18 @@ describe('PhasedLessonView', () => {
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /按住 Space 跟我读/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /按住空格说话/ })).toBeTruthy();
     });
   });
 
   it('offers a working retry control when the phase controller reports a failed transition', async () => {
     render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
-    await screen.findByRole('button', { name: /按住 Space 跟我读/ });
+    await screen.findByRole('button', { name: /按住空格说话/ });
     act(() => phasedInstances[0].emit('transition-retry-change', true));
-    expect(screen.queryByRole('button', { name: /按住 Space 跟我读/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /按住空格说话/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '再试一次' }));
-    expect(await screen.findByRole('button', { name: /按住 Space 跟我读/ })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /按住空格说话/ })).toBeTruthy();
   });
 
   it('returns to the start screen when lesson startup fails', async () => {
@@ -178,7 +178,7 @@ describe('PhasedLessonView', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /我们开始吧/ })).toBeTruthy();
     });
-    expect(screen.queryByRole('button', { name: /按住 Space 跟我读/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /按住空格说话/ })).toBeNull();
   });
 
   it('restarts the current course from the in-lesson done frame', async () => {
@@ -225,7 +225,7 @@ describe('PhasedLessonView', () => {
     fireEvent.click(screen.getByRole('button', { name: /我们开始吧/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /按住 Space 跟我读/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /按住空格说话/ })).toBeTruthy();
     });
     expect(screen.queryByText(/餐桌上摆着各种食物/)).toBeNull();
     const hero = container.querySelector('[data-picture-card-size="hero"]');
@@ -251,7 +251,7 @@ describe('PhasedLessonView', () => {
   it.each(['LLM_INSUFFICIENT_BALANCE', 'LLM_AUTH_FAILED', 'LLM_MODEL_UNAVAILABLE'])('renders a specific reason and settings link for %s', (code) => {
     render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
     act(() => lessonInstances[0].emit('error', { code, message: '余额不足:请到模型服务商控制台充值后再试' }));
-    const notice = screen.getByRole('status');
+    const notice = screen.getByRole('alert');
     expect(notice.textContent).toContain('余额不足');
     expect(within(notice).getByRole('link', { name: '去设置' }).getAttribute('href')).toBe('/settings');
   });
@@ -259,7 +259,7 @@ describe('PhasedLessonView', () => {
   it('keeps generic failures free of a configuration action', () => {
     render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
     act(() => lessonInstances[0].emit('error', { message: '课堂暂时没准备好,再试一次吧' }));
-    expect(screen.getByRole('status').textContent).toContain('课堂暂时没准备好');
+    expect(screen.getByRole('alert').textContent).toContain('课堂暂时没准备好');
     expect(screen.queryByRole('link', { name: '去设置' })).toBeNull();
   });
 
@@ -271,7 +271,7 @@ describe('PhasedLessonView', () => {
       act(() => vi.advanceTimersByTime(5000));
       expect(screen.getByRole('link', { name: '去设置' })).toBeTruthy();
       act(() => lessonInstances[0].emitProgress(['apple']));
-      expect(screen.queryByRole('status')).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
     } finally {
       vi.useRealTimers();
     }

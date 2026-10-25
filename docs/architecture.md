@@ -71,14 +71,14 @@
 | `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
-| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条（P2 接课堂） |
+| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
 | `src/components/magic/*` | CC 绘本风原子组件:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/HomeStudy.tsx` | 首页魔法书房,课程书本入口 + journal/parents CTA |
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
 | `src/components/lesson/IntroFrame.tsx` | 主题导入:麻吉 + 锁定 chip 网格,不再依赖 scene.svg |
 | `src/components/lesson/LessonMandalaV2.tsx` | 跟读练习法阵,保留 `LessonController` ASR/TTS 管线 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS gate:等待 `awaiting`,调用 `speakStatic`,短暂失败重试,播完后解锁 UI |
-| `src/components/lesson/QuizPickWordFrame.tsx` | quiz:静态 TTS 播 prompt + 正确英文词,播完前锁 PictureCard 选择 |
+| `src/components/lesson/QuizPickWordFrame.tsx` | quiz:静态 TTS 播 prompt + 正确英文词,播完前锁选词卡选择 |
 | `src/components/lesson/ReinforceFrame.tsx` | quiz:静态 TTS 播 targetText,播完前锁 repeat-after-me 录音 |
 | `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes,错答时播静态 retry hint |
 | `src/components/lesson/DoneCelebrateFrame.tsx` | 下课庆祝页,星星 + 数据 + 双 CTA |
@@ -187,7 +187,7 @@ ASR final 到达 client
               ◀── TTSSentenceStart (event=350) → tts.on('subtitle') → emit subtitle
             actions:
               **缓冲到 TTS session-finished 再 emit**(`pendingActions` in LessonController)
-              → LessonMandalaV2 从最后一条有效 show_card 提取 card_id → PictureCard 切换当前卡片(word 或 sentence_* 均可;已通过 word/sentence 回跳会被 UI 忽略)
+              → LessonMandalaV2 从最后一条有效 show_card 提取 card_id → LessonCard 切换当前卡片(word 或 sentence_* 均可;已通过 word/sentence 回跳会被 UI 忽略)
               server 同步使用归一化后的 show_card 作为 currentCardId 的事实来源
             done → tts.finishSession (event=102) + armSpeechFinishFallback(1.5s)
               ◀── SessionFinished (event=152) → flushPendingActions + setState('awaiting')
@@ -588,10 +588,11 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | 文件 | 职责 |
 |------|------|
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
-| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条（P2 接课堂） |
+| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
 | `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/HomeStudy.tsx` | 魔法书房首页,课程以书本卡呈现 |
-| `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | 课中六屏 view 层,保留控制器与 phase 状态机 |
+| `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | G 课堂四段与暂留的下课 view 层，保留控制器与 phase 状态机 |
+| `src/components/lesson/{LessonToolbar,LessonCard,SubtitleLog}.tsx` | 独立课堂工具栏、共用大卡片、视图层累积字幕 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
 | `src/components/journal/JournalPage.tsx` | 魔法书双页,按 progress 聚合展示词卡 |
 | `src/components/parents/ParentsPage.tsx` | 当前孩子的学习记录 dashboard |
@@ -721,10 +722,23 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 P0 临时 ShellSpike、shell-spike 路由与 native 材质开关已由正式 CSS 外壳替代。`src/app/(main)/layout.tsx` 常驻 Toolbar（52px，红绿灯 x16/y19）、SegmentedControl、LearnerSwitcher，路由包含首页、现有 `/journal`、设置以及暂留的 `/parents`。切 tab 只由组内 template 对内容做 150ms 淡入和 4px 位移，课堂及下课独立全窗口。旧页面内容保留，首页原右上浮层由工具栏替代；现有麦克风首次引导移至独立 `/microphone` 路由，不挂主工具栏；完整三步引导留 P5。
 
-G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体，英文词汇使用已打包 Fredoka，旧字体文件留待 P6 清理。新组件使用 lucide-react 线性图标。UI primitives 包括 Button、GlassPanel、Tag、ProgressBar、Banner、Skeleton、EmptyState、六状态 PushToTalkPill（P2 接课堂控制器）。全局限制拖选、图片拖动、回弹、网页右键菜单，输入和说明可复制；输入右键保留原生编辑菜单，键盘焦点紫色环，降低透明度时工具栏和玻璃面板使用不透明浅色底。
+G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体，英文词汇使用已打包 Fredoka，旧字体文件留待 P6 清理。新组件使用 lucide-react 线性图标。UI primitives 包括 Button、GlassPanel、Tag、ProgressBar、Banner、Skeleton、EmptyState、六状态 PushToTalkPill。全局限制拖选、图片拖动、回弹、网页右键菜单，输入和说明可复制；输入右键保留原生编辑菜单，键盘焦点紫色环，降低透明度时工具栏和玻璃面板使用不透明浅色底。
 
 孩子选择仍存 localStorage；同页切换通过 `eduagent:learner-change` 通知首页/记录/工具栏更新，档案写入成功通过 `eduagent:profiles-change` 更新工具栏。原生菜单支持 ⌘, 与 ⌘1/2/3、孩子切换、新建档案、日志目录、全屏和标准编辑/窗口操作。About 面板由 `app.setAboutPanelOptions` 设置名称/版本/介绍，macOS 图标来自 bundle。
 
 窗口 normal bounds 和全屏状态存 userData/window-state.json，200ms 合并 move/resize/fullscreen 写入，close 同步原子替换；启动验证数字、最小尺寸和显示器可见性，损坏或离屏回到默认居中。未改变 origin、权限申请、崩溃恢复和语音/agent/chat 契约。
 
-课堂/下课独立 `lesson/layout.tsx` 保留 52px 原生拖动留位并约束旧内容高度，避免红绿灯覆盖旧课堂「离开」按钮；P2 再替换课堂自身工具栏，不显示主 tab。
+课堂在 P2 使用自身 52px `LessonToolbar`，不显示主 tab；独立下课路由由 `lesson/[id]/done/layout.tsx` 暂留 P1 原生拖动留位，内容留给 P4。
+
+
+### UI 重构 P2 课堂视图（2026-10-25）
+
+`PhasedLessonView` 使用独立 `LessonToolbar`：下课按钮和 Esc 回首页，课程名与阶段分段进度居中，右侧显示本课孩子头像。开场进度为预告；逐词进度按当前 cleared word 数显示；巩固由 `ReinforcementFlow.onQuizChange` 传实际 quiz 下标和课程题数。原生拖动区仅覆盖工具栏，控件 no-drag。
+
+`IntroFrame` 为全宽麻吉水彩头像、当前老师字幕气泡和 6×2 图片墙；开始后的卡片点击沿用 `requestIntroCard` 和 introBusy 锁。逐词 `LessonMandalaV2` 与句子 `ReinforceFrame` 共用 `LessonCard`：左侧方图以容器高度和最小文字宽度计算尺寸，Fredoka 单词随容器缩放且长词降档（原型 6/8 字符档，另为现有长词组补 11/14 字符档），显示中文和多段 drillParts；逐词保留 awaiting 才能使用的老师重讲。选词用 2×2 图左字右卡，答对薄荷勾，答错轻微晃动。换卡旧图淡出、新图右侧滑入 250ms，reduced-motion 关闭位移。大卡保留 data-picture-card-size=hero 和 data-picture-card-state，供真实持按 smoke 定位。
+
+右栏 `SubtitleLog` 在逐词及巩固之间常驻，订阅现有 subtitle/subtitle-clear/asr-final，视图层最多累积 50 条。老师白底左对齐，孩子浅紫右对齐；partial 替换同轮识别文本，asr-final 或 clear 结束识别中样式，不把字幕写入控制器或持久数据。开场直接订阅老师当前字幕，不显示右栏。
+
+`PushToTalkPill` 由 LessonStateName 映射六状态，idle/greeting 为 preparing、speaking/quiz-speaking 为 speaking，其余同名。只在 awaiting 开始，listening 保留释放语义；句子仍等待静态提示播完后启用，并沿用 routeToChat:false 与候选句。持按 Space 共用 useSpacebar，pointer capture 不因移出而结束，blur 清除按键锁并释放一次。可访问名称固定为「按住空格说话」，可见文案随状态变化。recorder 未暴露实时音量，声波采用固定动画，不改语音链路。
+
+课堂错误在工具栏下显示 Banner，配置类保留去设置，其他沿用 4 秒消失；transitionRetry 在舞台中显示 EmptyState 和用户触发的再试一次，字幕栏保留。断点 initialCardId/initialClearedCardIds/passedQuizIds、show_card 对已通过词及其句子卡的过滤、controller 推进与保存行为均保持。phase=done 暂用原 DoneCelebrateFrame。

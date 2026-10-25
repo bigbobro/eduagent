@@ -16,14 +16,16 @@ interface ReinforcementFlowProps {
   // this list instead of always at quiz 0. Omitted/empty for a fresh lesson (today's default).
   passedQuizIds?: string[];
   onAllDone: () => void;
+  onQuizChange?: (index: number) => void;
 }
 
-export function ReinforcementFlow({ course, controller, passedQuizIds = [], onAllDone }: ReinforcementFlowProps) {
+export function ReinforcementFlow({ course, controller, passedQuizIds = [], onAllDone, onQuizChange }: ReinforcementFlowProps) {
   const quizzes = course.phases.reinforcement.quizzes;
   const [idx, setIdx] = useState(() => {
     const firstUnpassed = quizzes.findIndex((quiz) => !passedQuizIds.includes(quiz.id));
     return firstUnpassed === -1 ? quizzes.length : firstUnpassed;
   });
+  useEffect(() => { onQuizChange?.(idx); }, [idx, onQuizChange]);
   const [retries, setRetries] = useState(0);
   const [saving, setSaving] = useState(false);
   const [failedAnswer, setFailedAnswer] = useState<Answer | null>(null);
@@ -78,14 +80,11 @@ export function ReinforcementFlow({ course, controller, passedQuizIds = [], onAl
   }
 
   return (
-    <div className="relative h-full w-full bg-paperDeep">
-      <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-paper-pill border-2 border-ink bg-paper px-4 py-2 font-zh text-sm text-inkSoft shadow-paper">
-        {idx + 1} / {quizzes.length}
-      </div>
+    <div className="p2-flow">
       {failedAnswer && (
-        <div role="alert" className="absolute bottom-6 left-1/2 z-20 -translate-x-1/2 rounded-paper-lg border-2 border-ink bg-paper p-4 text-ink shadow-paper">
+        <div role="alert" className="p2-save-error ui-glass ui-banner">
           答案还没保存好,再试一次吧
-          <button type="button" disabled={saving} onClick={() => void handleAnswer(failedAnswer)} className="ml-3 rounded-paper-md bg-butter px-4 py-2 focus-visible:outline">
+          <button type="button" disabled={saving} onClick={() => void handleAnswer(failedAnswer)} className="ui-button ui-button-glass ui-button-sm">
             {saving ? '保存中…' : '重试保存'}
           </button>
         </div>

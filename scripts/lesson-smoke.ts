@@ -218,7 +218,7 @@ async function assertRecordingHeld(page: Page, name: string, start: () => Promis
     const stillRecording = await page.locator('[data-picture-card-size="hero"][data-picture-card-state="recording"]').count();
     const debugState = await page.evaluate(() => {
       const hero = document.querySelector('[data-picture-card-size="hero"]');
-      const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('按住 Space')) as HTMLButtonElement | undefined;
+      const button = Array.from(document.querySelectorAll('button')).find((item) => item.getAttribute('aria-label') === '按住空格说话') as HTMLButtonElement | undefined;
       return {
         heroState: hero?.getAttribute('data-picture-card-state') ?? '(none)',
         buttonDisabled: Boolean(button?.disabled),
@@ -253,10 +253,10 @@ async function runPushToTalkSmoke(): Promise<InteractionResult[]> {
     await installBrowserMocks(page);
     await page.goto(`${BASE}/lesson/${COURSE_ID}?learnerId=${encodeURIComponent(smokeLearnerId)}`);
     await page.getByRole('button', { name: /我们开始吧/ }).click();
-    const button = page.getByRole('button', { name: /按住 Space 跟我读/ });
+    const button = page.getByRole('button', { name: /按住空格说话/ });
     await button.waitFor({ state: 'visible', timeout: 10000 });
     await page.waitForFunction(() => {
-      const candidate = Array.from(document.querySelectorAll('button')).find((item) => item.textContent?.includes('按住 Space'));
+      const candidate = Array.from(document.querySelectorAll('button')).find((item) => item.getAttribute('aria-label') === '按住空格说话');
       return Boolean(candidate && !(candidate as HTMLButtonElement).disabled);
     }, undefined, { timeout: 10000 });
 

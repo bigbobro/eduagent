@@ -64,15 +64,15 @@ try {
   const startRequest = page.waitForRequest((req) => req.url().endsWith('/api/chat') && req.postDataJSON()?.action === 'start');
   await page.getByRole('button', { name: /我们开始吧/ }).click();
   check('entered lesson', true);
-  const leaveBounds = await page.getByRole('button', { name: '离开', exact: true }).boundingBox();
-  check('independent lesson frame clears native traffic lights and has no main tabs', leaveBounds?.y >= 52 && await page.getByTestId('main-toolbar').count() === 0);
+  const leaveBounds = await page.getByRole('button', { name: '下课', exact: true }).boundingBox();
+  check('independent lesson frame clears native traffic lights and has no main tabs', leaveBounds?.y >= 0 && leaveBounds?.y < 52 && leaveBounds?.x >= 86 && await page.getByTestId('main-toolbar').count() === 0);
   check('lesson start preserves the selected learnerId', (await startRequest).postDataJSON().learnerId === await page.evaluate(() => localStorage.getItem('eduagent.currentLearnerId')));
 
   // 3. 按住说话 -> recording
-  const button = page.getByRole('button', { name: /按住 Space 跟我读/ });
+  const button = page.getByRole('button', { name: /按住空格说话/ });
   await button.waitFor({ state: 'visible', timeout: 30000 });
   await page.waitForFunction(() => {
-    const b = Array.from(document.querySelectorAll('button')).find((x) => x.textContent?.includes('按住 Space'));
+    const b = Array.from(document.querySelectorAll('button')).find((x) => x.getAttribute('aria-label') === '按住空格说话');
     return Boolean(b && !b.disabled);
   }, undefined, { timeout: 30000 });
   const hero = '[data-picture-card-size="hero"][data-picture-card-state="recording"]';

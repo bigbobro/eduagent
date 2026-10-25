@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Course, Quiz, WordCard } from '@/types/course';
 import type { LessonController } from '@/lib/voice/lesson-controller';
-import { Cat, PictureCard } from '@/components/magic';
-import { toPictureCardData } from '@/components/magic/cardData';
+import Image from 'next/image';
+import { Check } from 'lucide-react';
 import { useStaticPromptSpeech } from './useStaticPromptSpeech';
 
 interface QuizPickWordFrameProps {
@@ -32,42 +32,20 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer, disabled
     answeredRef.current = false;
   }, [quiz.id, attempt]);
 
-  return (
-    <div className="grid h-full w-full grid-cols-[1fr_320px] gap-7 bg-paperDeep px-8 py-8 text-ink">
-      <section className="grid grid-cols-2 gap-5">
-        {options.map((card) => {
-          const selected = selectedId === card.id;
-          const correct = selected && card.id === quiz.correctCardId;
-          const wrong = selected && card.id !== quiz.correctCardId;
-          return (
-            <PictureCard
-              key={card.id}
-              card={toPictureCardData(card, course.tone)}
-              size="tile"
-              state={correct ? 'correct' : wrong ? 'wrong' : selected ? 'selected' : 'idle'}
-              disabled={locked}
-              onClick={() => {
-                if (locked || answeredRef.current) return;
-                answeredRef.current = true;
-                setSelectedId(card.id);
-                onAnswer({ correct: card.id === quiz.correctCardId, picked: card.id });
-              }}
-              className="min-h-[230px]"
-            />
-          );
-        })}
-      </section>
-      <aside className="flex flex-col gap-4">
-        <div className="rounded-paper-lg border-2 border-ink bg-paper p-4 shadow-paper">
-          <Cat size={150} mood={locked ? 'speaking' : 'happy'} />
-          <div className="mt-2 rounded-paper-lg border-2 border-ink bg-butter p-3 font-zh text-base leading-snug">{quiz.prompt}</div>
-        </div>
-        <div className="rounded-paper-lg border-2 border-ink bg-paper p-4 font-zh text-sm text-inkSoft shadow-paper">
-          看一看,选出老师说的那张卡。
-        </div>
-      </aside>
-    </div>
-  );
+  return <section className="p2-quiz">
+    <div className="p2-ask"><b>{quiz.prompt}</b><span>听一听,点出老师说的那张卡</span></div>
+    <div className="p2-options">{options.map(card => {
+      const selected = selectedId === card.id;
+      const correct = selected && card.id === quiz.correctCardId;
+      const wrong = selected && !correct;
+      return <button key={card.id} type="button" aria-label={`${card.english} ${card.chinese}`} disabled={locked} data-picture-card-size="tile" data-picture-card-state={correct ? 'correct' : wrong ? 'wrong' : 'idle'} className={`p2-option p2-card ${card.english.length >= 14 ? 'p2-extra-long' : card.english.length >= 11 ? 'p2-long' : ''} ${correct ? 'p2-right' : ''} ${wrong ? 'p2-wrong' : ''}`} onClick={() => {
+        if (locked || answeredRef.current) return;
+        answeredRef.current = true;
+        setSelectedId(card.id);
+        onAnswer({ correct: card.id === quiz.correctCardId, picked: card.id });
+      }}><div className="p2-option-pic"><Image src={card.imageUrl} alt="" fill sizes="280px" unoptimized /></div><div><b>{card.english}</b><small>{card.chinese}</small>{correct && <span className="p2-check" aria-label="答对了"><Check size={16} strokeWidth={3} /></span>}</div></button>;
+    })}</div>
+  </section>;
 }
 
 export function buildPickWordPromptText(quiz: Extract<Quiz, { type: 'pick-word' }>, course: Course): string {

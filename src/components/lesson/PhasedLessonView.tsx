@@ -11,6 +11,11 @@ import { DoneCelebrateFrame } from './DoneCelebrateFrame';
 import { IntroFrame } from './IntroFrame';
 import { LessonMandalaV2 } from './LessonMandalaV2';
 import { ReinforcementFlow } from './ReinforcementFlow';
+import { LessonToolbar } from './LessonToolbar';
+import { SubtitleLog } from './SubtitleLog';
+import { Banner } from '@/components/ui/Banner';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Button } from '@/components/ui/Button';
 
 interface PhasedLessonViewProps {
   course: Course;
@@ -22,6 +27,8 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
   const router = useRouter();
   const v2Ref = useRef<LessonController | null>(null);
   const phasedRef = useRef<PhasedLessonController | null>(null);
+  const [introSubtitle, setIntroSubtitle] = useState('');
+  const [quizIndex, setQuizIndex] = useState(0);
   const [phase, setPhase] = useState<PhaseName>('intro');
   const [transitionRetry, setTransitionRetry] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -84,6 +91,8 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
     };
     v2Ref.current = v2;
     phasedRef.current = phased;
+    const onSubtitle = (next: { text: string; source: string }) => { if (next.source === 'ai') setIntroSubtitle(next.text); };
+    v2.on('subtitle', onSubtitle);
     v2.on('progress', onProgress);
     v2.on('error', onError);
     phased.on('phase-change', onPhaseChange);
@@ -93,6 +102,7 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
     return () => {
       if (phasedRef.current === phased) phasedRef.current = null;
       if (v2Ref.current === v2) v2Ref.current = null;
+      v2.off('subtitle', onSubtitle);
       v2.off('progress', onProgress);
       v2.off('error', onError);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
@@ -144,45 +154,20 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
   const v2 = v2Ref.current;
 
   return (
-    <main className="w-screen h-screen relative">
-      <header className="absolute top-0 left-0 right-0 h-14 px-6 flex items-center justify-between z-30">
-        <button
-          type="button"
-          onClick={handleLeave}
-          className="rounded-paper-md px-3 py-2 text-ink hover:bg-butter/70"
-        >
-          离开
-        </button>
-        <h1 className="font-zh text-xl text-ink">{course.title}</h1>
-        <div className="w-20" />
-      </header>
-
+    <main className="p2-app">
+      <LessonToolbar course={course} learnerId={learnerId} phase={phase} cleared={clearedWordCount} quizIndex={quizIndex} onLeave={handleLeave} />
       {lessonError && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="absolute left-1/2 top-16 z-40 max-w-[90vw] -translate-x-1/2 rounded-paper-pill border-2 border-ink bg-butter px-5 py-2.5 text-center font-zh text-base text-ink shadow-paper"
-        >
-          {lessonError.message}
-          {llmFailureNeedsSettings(lessonError.code) && (
-            <a href="/settings" className="ml-3 underline underline-offset-4">去设置</a>
-          )}
-        </div>
+        <div className="p2-error"><Banner action={llmFailureNeedsSettings(lessonError.code) ? <a href="/settings" className="ui-button ui-button-glass ui-button-sm">去设置</a> : undefined}>{lessonError.message}</Banner></div>
       )}
 
-      <div className="absolute inset-0 top-14">
+      <div className={`p2-content ${started && phase !== 'intro' && phase !== 'done' ? 'p2-lesson' : ''}`}>
         {transitionRetry && (
-          <div role="alert" className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-paper text-ink">
-            <p>老师还没准备好下一步,再试一次吧</p>
-            <button type="button" disabled={retrying} className="rounded-paper-md border-2 border-ink bg-butter px-5 py-3 focus-visible:outline" onClick={async () => {
+          <div role="alert" className="p2-retry"><EmptyState title="老师还没准备好下一步,再试一次吧" action={<Button disabled={retrying} onClick={async () => {
               const phased = phasedRef.current;
               setLessonError(null);
               setRetrying(true);
               try { await phased?.retryTransition(); } finally { if (phasedRef.current === phased) setRetrying(false); }
-            }}>
-              {retrying ? '准备中…' : '再试一次'}
-            </button>
-          </div>
+            }}>{retrying ? '准备中…' : '再试一次'}</Button>} /></div>
         )}
         {!started && (
           <IntroFrame
@@ -200,6 +185,7 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
             activeCardId={introActiveCardId}
             onWordClick={handleHotspotClick}
             started
+            subtitle={introSubtitle}
           />
         )}
         {started && !transitionRetry && phase === 'interactive' && v2 && (
@@ -215,9 +201,11 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
             course={course}
             controller={v2}
             passedQuizIds={resumePassedQuizIds}
+            onQuizChange={setQuizIndex}
             onAllDone={() => phasedRef.current?.completeReinforcement()}
           />
         )}
+        {started && phase !== 'intro' && phase !== 'done' && v2 && <SubtitleLog controller={v2} />}
         {started && !transitionRetry && phase === 'done' && (
           <DoneCelebrateFrame
             starsEarned={Math.min(5, clearedWordCount)}

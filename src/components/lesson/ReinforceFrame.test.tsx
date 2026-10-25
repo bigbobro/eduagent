@@ -45,9 +45,9 @@ describe('ReinforceFrame', () => {
     render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
 
     await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith(expectedSpokenPrompt));
-    await waitFor(() => expect(screen.getByRole('button', { name: '按住 Space' })).toHaveProperty('disabled', false));
+    await waitFor(() => expect(screen.getByRole('button', { name: '按住空格说话' })).toHaveProperty('disabled', false));
 
-    fireEvent.pointerDown(screen.getByRole('button', { name: '按住 Space' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: '按住空格说话' }), { button: 0 });
     expect(controller.startListening).toHaveBeenCalledWith({
       routeToChat: false,
       asrSentenceTexts: expectedAsrSentenceTexts,
@@ -58,13 +58,13 @@ describe('ReinforceFrame', () => {
     const controller = mockController('awaiting');
     render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '按住 Space' })).toHaveProperty('disabled', false));
-    const button = screen.getByRole('button', { name: '按住 Space' });
+    await waitFor(() => expect(screen.getByRole('button', { name: '按住空格说话' })).toHaveProperty('disabled', false));
+    const button = screen.getByRole('button', { name: '按住空格说话' });
     button.setPointerCapture = vi.fn();
     button.hasPointerCapture = vi.fn(() => true);
     button.releasePointerCapture = vi.fn();
 
-    fireEvent.pointerDown(button, { pointerId: 1 });
+    fireEvent.pointerDown(button, { pointerId: 1, button: 0 });
     fireEvent.pointerLeave(button, { pointerId: 1 });
 
     expect(controller.startListening).toHaveBeenCalledWith({
@@ -86,7 +86,7 @@ describe('ReinforceFrame', () => {
     }));
     render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
 
-    const button = screen.getByRole('button', { name: '按住 Space' });
+    const button = screen.getByRole('button', { name: '按住空格说话' });
     expect(button).toHaveProperty('disabled', true);
     fireEvent.pointerDown(button);
     expect(controller.startListening).not.toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe('ReinforceFrame', () => {
     const controller = mockController('speaking');
     render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
 
-    const button = screen.getByRole('button', { name: '按住 Space' });
+    const button = screen.getByRole('button', { name: '按住空格说话' });
     expect(button).toHaveProperty('disabled', true);
     fireEvent.pointerDown(button);
     expect(controller.startListening).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
 import type { LessonStateName } from '@/lib/voice/lesson-controller';
@@ -18,6 +18,28 @@ function mockController(initialState: LessonStateName): any {
 }
 
 describe('LessonMandalaV2', () => {
+  it.each(['idle', 'greeting', 'speaking', 'quiz-speaking', 'awaiting', 'listening', 'thinking', 'ending'] as const)('only allows teacher repeat and recording in awaiting: %s', state => {
+    const controller = mockController(state);
+    render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
+    const repeat = screen.getByRole('button', { name: '老师再讲一遍' }) as HTMLButtonElement;
+    expect(repeat.disabled).toBe(state !== 'awaiting');
+    fireEvent.click(repeat);
+    expect(controller.sendCustomAction).toHaveBeenCalledTimes(state === 'awaiting' ? 1 : 0);
+    const pill = screen.getByRole('button', { name: '按住空格说话' }) as HTMLButtonElement;
+    expect(pill.disabled).toBe(state !== 'awaiting' && state !== 'listening');
+  });
+  it('holds Space through controller state updates and stops only on release', () => {
+    const controller = mockController('awaiting');
+    render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
+    fireEvent.keyDown(document, { code: 'Space' });
+    act(() => controller.handlers.get('state')?.('listening'));
+    fireEvent.keyDown(document, { code: 'Space', repeat: true });
+    expect(controller.startListening).toHaveBeenCalledTimes(1);
+    expect(controller.stopListening).not.toHaveBeenCalled();
+    fireEvent.keyUp(document, { code: 'Space' });
+    expect(controller.stopListening).toHaveBeenCalledTimes(1);
+  });
+
   it('maps the live listening state to the recording card state', () => {
     const controller = mockController('listening');
     const { container } = render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
@@ -59,7 +81,7 @@ describe('LessonMandalaV2', () => {
     expect(screen.getByText('This is an apple.')).toBeTruthy();
   });
 
-  it('ignores show_card actions for already cleared word cards', () => {
+  it('ignores show_card actions for already cleared word cards', async () => {
     const controller = mockController('awaiting');
     const { container } = render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
 
@@ -71,7 +93,7 @@ describe('LessonMandalaV2', () => {
 
     const hero = container.querySelector('[data-picture-card-size="hero"]');
     expect(hero).toBeTruthy();
-    expect(within(hero as HTMLElement).getByText('banana')).toBeTruthy();
+    await waitFor(() => expect(within(container.querySelector('[data-picture-card-size="hero"]:last-child') as HTMLElement).getByText('banana')).toBeTruthy());
   });
 
   it('R1 (2026-07-20): positions on initialCardId instead of the first word card', () => {
@@ -89,16 +111,15 @@ describe('LessonMandalaV2', () => {
       <LessonMandalaV2 course={foodCourse} controller={controller} initialCardId="milk" initialClearedCardIds={['apple']} />,
     );
 
-    const chips = container.querySelectorAll('[data-picture-card-size="chip"]');
-    const appleChip = Array.from(chips).find((chip) => within(chip as HTMLElement).queryByText('apple'));
-    expect(appleChip?.getAttribute('data-picture-card-state')).toBe('correct');
+    act(() => controller.handlers.get('actions')?.([{ tool: 'show_card', params: { card_id: 'sentence_apple' } }]));
+    expect(within(container.querySelector('[data-picture-card-size="hero"]') as HTMLElement).getByText('milk')).toBeTruthy();
   });
 
   it('asks the teacher to repeat the current visible card', () => {
     const controller = mockController('awaiting');
     render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '请老师再说一遍' }));
+    fireEvent.click(screen.getByRole('button', { name: '老师再讲一遍' }));
 
     expect(controller.sendCustomAction).toHaveBeenCalledWith(expect.objectContaining({
       action: 'message',
@@ -110,12 +131,12 @@ describe('LessonMandalaV2', () => {
     const controller = mockController('awaiting');
     render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
 
-    const button = screen.getByRole('button', { name: /按住 Space 跟我读/ });
+    const button = screen.getByRole('button', { name: /按住空格说话/ });
     button.setPointerCapture = vi.fn();
     button.hasPointerCapture = vi.fn(() => true);
     button.releasePointerCapture = vi.fn();
 
-    fireEvent.pointerDown(button, { pointerId: 1 });
+    fireEvent.pointerDown(button, { pointerId: 1, button: 0 });
     fireEvent.pointerLeave(button, { pointerId: 1 });
 
     expect(controller.startListening).toHaveBeenCalledTimes(1);

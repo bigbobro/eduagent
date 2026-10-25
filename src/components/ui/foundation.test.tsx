@@ -24,7 +24,8 @@ describe('foundation', () => {
   it.each<[PushToTalkState, string, boolean]>([['preparing', '麻吉准备中…', true], ['speaking', '麻吉在说话', true], ['awaiting', '按住空格说话', false], ['listening', '正在听…', false], ['thinking', '麻吉在想…', true], ['ending', '下课啦', true]])('%s has the expected label and availability', (state, label, disabled) => {
     const onPress = vi.fn();
     render(<PushToTalkPill state={state} onPress={onPress} onRelease={vi.fn()} />);
-    const button = screen.getByRole('button', { name: label });
+    const button = screen.getByRole('button', { name: '按住空格说话' });
+    expect(button).toHaveTextContent(label);
     expect((button as HTMLButtonElement).disabled).toBe(disabled);
     fireEvent.keyDown(document, { code: 'Space' });
     fireEvent.keyUp(document, { code: 'Space' });

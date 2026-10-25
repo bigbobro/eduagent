@@ -40,6 +40,15 @@ describe('attachSpacebarHandlers', () => {
     expect(onUp).toHaveBeenCalledTimes(1);
   });
 
+  it('releases on blur and permits the next press even if keyup was lost', () => {
+    teardown = attach();
+    fireKey('keydown', 'Space');
+    window.dispatchEvent(new Event('blur'));
+    expect(onUp).toHaveBeenCalledTimes(1);
+    fireKey('keydown', 'Space');
+    expect(onDown).toHaveBeenCalledTimes(2);
+  });
+
   it('ignores repeat keydowns', () => {
     teardown = attach();
     fireKey('keydown', 'Space');

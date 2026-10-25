@@ -48,7 +48,7 @@ describe('QuizPickWordFrame', () => {
 
     expect(onAnswer).toHaveBeenCalledWith({ correct: false, picked: 'milk' });
     expect(container.querySelector('[data-picture-card-state="wrong"]')).toBeTruthy();
-    expect(screen.getByLabelText('wrong')).toBeTruthy();
+    expect(screen.queryByLabelText('wrong')).toBeNull();
   });
 
   it('marks a correct pick with the correct visual state', async () => {
@@ -62,7 +62,7 @@ describe('QuizPickWordFrame', () => {
 
     expect(onAnswer).toHaveBeenCalledWith({ correct: true, picked: 'apple' });
     expect(container.querySelector('[data-picture-card-state="correct"]')).toBeTruthy();
-    expect(screen.getByText('+1')).toBeTruthy();
+    expect(screen.getByLabelText('答对了')).toBeTruthy();
   });
 
   it('waits for awaiting state before speaking and unlocking cards', async () => {

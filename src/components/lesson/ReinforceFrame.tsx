@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { useSpacebar } from '@/hooks/useSpacebar';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Course, Quiz } from '@/types/course';
 import type { LessonController } from '@/lib/voice/lesson-controller';
-import { Cat, PaperButton, PictureCard } from '@/components/magic';
-import { toPictureCardData } from '@/components/magic/cardData';
+import { LessonCard } from './LessonCard';
+import { PushToTalkPill } from '@/components/ui/PushToTalkPill';
+import { talkState } from './talkState';
 import { useStaticPromptSpeech } from './useStaticPromptSpeech';
 
 type RepeatAfterMeQuiz = Extract<Quiz, { type: 'repeat-after-me' }>;
@@ -40,7 +40,6 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer, disabled = 
     return [quiz.targetText, ...siblings];
   }, [course, quiz.targetText]);
   const canHold = !disabled && (state === 'awaiting' || state === 'listening') && hasHeardPrompt && !promptPlaying;
-  const catMood = promptPlaying || state === 'quiz-speaking' ? 'speaking' : heardSentence ? 'cheer' : 'happy';
 
   // Keep the asr-final subscription tied to `controller` only. The parent passes a fresh
   // onAnswer every render (it closes over quiz index / retries), so depending on it here would
@@ -78,62 +77,10 @@ export function ReinforceFrame({ quiz, course, controller, onAnswer, disabled = 
     setListening(false);
     controller.stopListening();
   };
-  const onPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!canHold) return;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    start();
-  };
-  const onPointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    stop();
-  };
-
-  useSpacebar({ enabled: canHold, onDown: start, onUp: stop });
-
-  return (
-    <div className="grid h-full w-full grid-cols-[1fr_320px] gap-7 bg-paperDeep px-8 py-8 text-ink">
-      <section className="flex flex-col justify-center gap-7">
-        <div className="rounded-paper-lg border-[2.4px] border-ink bg-paper p-8 text-center shadow-paper-hero">
-          <div className="font-en text-[54px] font-bold leading-tight">{quiz.targetText}</div>
-          <div className="mt-4 font-display text-3xl text-inkSoft">{card?.chinese ?? '跟读这个短句'}</div>
-        </div>
-        {card && (
-          <PictureCard
-            card={toPictureCardData(card, course.tone)}
-            state={heardSentence ? 'correct' : 'listening'}
-          />
-        )}
-        <div className="grid grid-cols-4 gap-3">
-          {course.cards.filter((item) => item.kind === 'sentence').map((item) => (
-            <PictureCard
-              key={item.id}
-              card={toPictureCardData(item, course.tone)}
-              size="chip"
-              state={item.id === card?.id ? (heardSentence ? 'correct' : 'selected') : 'idle'}
-            />
-          ))}
-        </div>
-      </section>
-      <aside className="flex flex-col gap-4">
-        <div className="rounded-paper-lg border-2 border-ink bg-paper p-4 shadow-paper">
-          <Cat size={150} mood={catMood} />
-          <div className="mt-2 rounded-paper-lg border-2 border-ink bg-butter p-3 font-zh text-base leading-snug">跟着图片说出这个短句</div>
-        </div>
-        <PaperButton
-          color={listening ? 'mint' : 'butter'}
-          disabled={!canHold}
-          aria-pressed={listening}
-          onPointerDown={onPointerDown}
-          onPointerUp={onPointerEnd}
-          onPointerCancel={onPointerEnd}
-        >
-          按住 Space
-        </PaperButton>
-      </aside>
-    </div>
-  );
+  return <section className="p2-stage">
+    {card && <LessonCard card={{ ...card, english: quiz.targetText }} state={listening ? 'recording' : heardSentence ? 'correct' : 'listening'} />}
+    <div className="p2-dock"><PushToTalkPill state={canHold ? listening ? 'listening' : talkState(state) : state === 'awaiting' ? 'preparing' : talkState(state)} onPress={start} onRelease={stop} /></div>
+  </section>;
 }
 
 export function buildRepeatAfterMePrompt(targetText: string): string {

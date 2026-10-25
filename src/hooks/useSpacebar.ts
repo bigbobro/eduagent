@@ -47,9 +47,17 @@ export function attachSpacebarHandlers(opts: {
     onUp();
   };
 
+  const onBlur = () => {
+    if (!pressedRef.current) return;
+    pressedRef.current = false;
+    onUp();
+  };
+
+  window.addEventListener('blur', onBlur);
   document.addEventListener('keydown', onKeyDown, true);
   document.addEventListener('keyup', onKeyUp, true);
   return () => {
+    window.removeEventListener('blur', onBlur);
     document.removeEventListener('keydown', onKeyDown, true);
     document.removeEventListener('keyup', onKeyUp, true);
   };
