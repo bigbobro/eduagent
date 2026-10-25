@@ -42,7 +42,7 @@ Records: practiced words, grouped by course.
 使用时需要联网，并使用你自己的模型和豆包语音服务 Key，服务费用由你承担。
 没有登录账号，孩子档案只用于分开保存学习记录，资料和 Key 都保存在这台 Mac 上。
 
-1. 从维护者提供的下载链接下载 `EduAgent-版本号-arm64.dmg`。在「关于本机」里可查看是否为 Apple 芯片。
+1. 从 [GitHub Releases](https://github.com/bigbobro/eduagent/releases/latest) 下载最新的 `EduAgent-版本号-arm64.dmg`。在「关于本机」里可查看是否为 Apple 芯片。
 2. 双击打开 dmg，把 **EduAgent** 拖进「应用程序」，再从「应用程序」打开它。
 3. 安装包使用自签名证书。首次打开如果被 macOS 拦住，先关闭提示，再到「系统设置 → 隐私与安全性」，找到 EduAgent，点击「仍要打开」，按系统提示确认。
 4. 首次引导先填写模型和豆包语音服务的 Key，点击「测试连接」，成功后保存。页面内提供申请指引，遇到服务未开通或鉴权失败时按提示检查。
