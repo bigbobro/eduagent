@@ -1,14 +1,22 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Mic } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { Tag } from '@/components/ui/Tag';
 import { getMicStatus, requestMic, type MicStatus } from '@/lib/audio/microphone';
 import { LessonRecorder } from '@/lib/audio/recorder';
 
 const LABELS: Record<MicStatus, string> = {
   granted: '已允许',
-  'not-determined': '未询问',
+  'not-determined': '未决定',
   denied: '已拒绝',
+};
+
+const TONES: Record<MicStatus, 'mint' | 'grey' | 'amber'> = {
+  granted: 'mint',
+  'not-determined': 'grey',
+  denied: 'amber',
 };
 
 export function MicSection({
@@ -114,73 +122,116 @@ export function MicSection({
   };
 
   const desktop = typeof window !== 'undefined' && Boolean(window.eduagentDesktop);
+  const embedded = variant === 'embedded';
+  const actionSize = embedded ? 'lg' : 'md';
+  const allowButton = status === 'not-determined' ? (
+    <Button
+      size={actionSize}
+      disabled={busy}
+      onClick={() => { void allow(); }}
+    >
+      允许使用麦克风
+    </Button>
+  ) : null;
+  const settingsButton = status === 'denied' && desktop ? (
+    <Button
+      variant="glass"
+      size={actionSize}
+      onClick={() => {
+        void window.eduagentDesktop?.openMicSettings().catch(() => {
+          setError('无法打开系统设置,请手动进入隐私与安全性中的麦克风。');
+        });
+      }}
+    >
+      打开系统设置
+    </Button>
+  ) : null;
+  const continueButton = status === 'granted' && onAllowed ? (
+    <Button
+      size="lg"
+      onClick={onAllowed}
+    >
+      继续
+    </Button>
+  ) : null;
+
   return (
     <section
-      className={variant === 'embedded' ? 'mic-embedded settings-section' : 'settings-section'}
+      className={embedded ? 'mic-embedded settings-section' : 'settings-section'}
       aria-label="麦克风"
     >
       {variant === 'panel' && <h1>麦克风</h1>}
-      <p>
-        当前状态:
-        <span data-testid="mic-status">{status ? LABELS[status] : '读取中…'}</span>
-      </p>
-      <div className="ui-glass mic-trial">
-        <Button
-          size="sm"
-          disabled={busy || status !== 'granted'}
-          onClick={() => { void test(); }}
-        >
-          {recording ? '停止试录' : '试录一下'}
-        </Button>
-        {recording && (
-          <div
-            role="meter"
-            aria-label="麦克风音量"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(level)}
-            className="settings-meter"
+      <div className="settings-card mic-card">
+        <div className="mic-status-row">
+          <i
+            className="mic-badge"
+            aria-hidden="true"
           >
-            <span style={{ width: `${level}%` }} />
+            <Mic
+              size={16}
+              strokeWidth={2}
+            />
+          </i>
+          <div className="mic-status-copy">
+            <span>麦克风权限</span>
+            <Tag
+              tone={status ? TONES[status] : 'grey'}
+              data-testid="mic-status"
+            >
+              {status ? LABELS[status] : '读取中…'}
+            </Tag>
           </div>
+          {!embedded && (
+            <div className="mic-status-action">
+              {allowButton}
+              {settingsButton}
+            </div>
+          )}
+        </div>
+        {status === 'denied' && (
+          <p className="settings-lead">
+            {desktop
+              ? '在系统设置里允许后,需要退出 EduAgent 再重新打开'
+              : '请在浏览器的网站权限中允许麦克风,然后刷新页面。'}
+          </p>
         )}
-      </div>
-      {recording && <p>说句话,看看音量条是否变化。试录会在 10 秒后停止。</p>}
-      <div className="mic-actions">
-        {status === 'not-determined' && (
+        <div className="mic-trial-row">
           <Button
-            size={variant === 'embedded' ? 'lg' : 'md'}
-            disabled={busy}
-            onClick={() => { void allow(); }}
+            size="sm"
+            disabled={busy || status !== 'granted'}
+            onClick={() => { void test(); }}
           >
-            允许使用麦克风
+            {recording ? '停止试录' : '试录一下'}
           </Button>
-        )}
-        {status === 'granted' && onAllowed && (
-          <Button
-            size="lg"
-            onClick={onAllowed}
-          >
-            继续
-          </Button>
-        )}
-        {status === 'denied' && desktop && (
-          <Button
-            variant="glass"
-            onClick={() => {
-              void window.eduagentDesktop?.openMicSettings().catch(() => setError('无法打开系统设置,请手动进入隐私与安全性中的麦克风。'));
-            }}
-          >
-            打开系统设置
-          </Button>
-        )}
-        {extra}
-      </div>
-      {status === 'denied' && (
-        <p>
-          请在{desktop ? '系统设置' : '浏览器的网站权限'}中允许麦克风。
-          {desktop ? '更改后请退出并重新打开 EduAgent。' : '然后刷新页面。'}
+          {recording && (
+            <div
+              role="meter"
+              aria-label="麦克风音量"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(level)}
+              className="settings-meter"
+            >
+              <span style={{ width: `${level}%` }} />
+            </div>
+          )}
+          <p>
+            {recording
+              ? '说句话,看看音量条是否变化。试录会在 10 秒后停止。'
+              : '试录最长 10 秒。'}
+          </p>
+        </div>
+        <p className="settings-lead">
+          只有孩子按住空格或按钮时才录音,声音发送到豆包识别。
         </p>
+      </div>
+      {embedded && (
+        <div className="mic-actions onboarding-actions">
+          {extra}
+          {allowButton}
+          {continueButton}
+          {settingsButton}
+        </div>
       )}
       {error && <p role="alert">{error}</p>}
     </section>

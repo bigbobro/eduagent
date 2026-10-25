@@ -17,6 +17,9 @@
 .onboarding-panel>.ui-tag{align-self:flex-start}
 .onboarding-panel h2{font-size:36px;font-weight:700;line-height:1.2}
 .onboarding-panel p{font-size:16px;line-height:1.75;color:var(--ui-secondary);max-width:560px}
-.onboarding-actions{display:flex;flex-wrap:wrap;gap:12px}
+.onboarding-actions{display:flex;flex-wrap:wrap;align-items:center;gap:12px;width:100%}
+.onboarding-actions .settings-spacer{flex:1;min-width:12px}
+.onboarding .settings-panel{max-width:100%;min-width:0}
+.onboarding .settings-card{min-width:0}
 .onboarding-child{display:grid;gap:8px;font-size:14px;max-width:420px}
 .onboarding-error{color:#B45309}

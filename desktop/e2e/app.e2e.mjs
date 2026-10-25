@@ -289,7 +289,7 @@ for (const status of ['granted', 'denied', 'not-determined']) {
     const base = new URL(page.url()).origin;
     await page.goto(`${base}/settings`);
     const nav = page.getByRole('navigation', { name: '设置分区' });
-    const label = { granted: '已允许', denied: '已拒绝', 'not-determined': '未询问' }[status];
+    const label = { granted: '已允许', denied: '已拒绝', 'not-determined': '未决定' }[status];
     await nav.getByRole('button', { name: '麦克风' }).click();
     await page.getByTestId('mic-status').filter({ hasText: label }).waitFor();
     check(`settings microphone state: ${status}`, true);

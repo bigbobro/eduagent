@@ -146,10 +146,11 @@ function ConnectStep({ onSkip }: { onSkip: () => void }) {
     <>
       <span className="ui-tag">第 1 步 · 共 3 步</span>
       <h2>连上 AI 老师和语音服务</h2>
-      <VoiceSettingsPanel draft={draft} variant="onboarding" />
-      <div className="onboarding-actions">
-        <Button variant="glass" size="lg" onClick={onSkip}>以后再说</Button>
-      </div>
+      <VoiceSettingsPanel
+        draft={draft}
+        variant="onboarding"
+        onSkip={onSkip}
+      />
     </>
   );
 }
@@ -220,11 +221,21 @@ function ChildStep({ onSkip }: { onSkip: () => void }) {
       </label>
       {error && <p role="alert">{error}</p>}
       <div className="onboarding-actions">
-        <Button size="lg" disabled={busy || !name.trim()} onClick={() => { void finish(); }}>
-          完成
-        </Button>
-        <Button variant="glass" size="lg" disabled={busy} onClick={onSkip}>
+        <Button
+          variant="glass"
+          size="lg"
+          disabled={busy}
+          onClick={onSkip}
+        >
           以后再说
+        </Button>
+        <span className="settings-spacer" />
+        <Button
+          size="lg"
+          disabled={busy || !name.trim()}
+          onClick={() => { void finish(); }}
+        >
+          完成
         </Button>
       </div>
     </>

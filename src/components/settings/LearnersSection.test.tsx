@@ -18,11 +18,11 @@ describe('LearnersSection', () => {
     await screen.findByText('还没有孩子档案，先建第一个吧。');
     fireEvent.change(screen.getByLabelText('孩子名字'), { target: { value: 'A' } });
     fireEvent.click(screen.getByRole('button', { name: '新建孩子档案' }));
-    await screen.findByText('A');
+    await screen.findByText('A', { selector: '.learner-name' });
     fireEvent.click(screen.getByRole('button', { name: '改名' }));
     fireEvent.change(screen.getByLabelText('新名字'), { target: { value: 'B' } });
     fireEvent.click(screen.getByRole('button', { name: '保存名字' }));
-    await screen.findByText('B');
+    await screen.findByText('B', { selector: '.learner-name' });
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
     const confirm = screen.getByRole('button', { name: '确认删除' }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);

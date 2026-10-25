@@ -44,9 +44,11 @@ const STATUS: { key: keyof TestReport; label: string }[] = [
 export function VoiceSettingsPanel({
   draft,
   variant,
+  onSkip,
 }: {
   draft: SettingsDraft;
   variant: 'settings' | 'onboarding';
+  onSkip?: () => void;
 }) {
   const [advanced, setAdvanced] = useState(false);
   const busy = draft.phase !== 'idle';
@@ -163,9 +165,18 @@ export function VoiceSettingsPanel({
       {draft.phase === 'restarting' && (
         <p role="status">正在重启…保存成功,窗口马上刷新。</p>
       )}
-      <div className="settings-actions">
+      <div className={onSkip ? 'settings-actions onboarding-actions' : 'settings-actions'}>
+        {onSkip && (
+          <Button
+            variant="glass"
+            size="lg"
+            onClick={onSkip}
+          >
+            以后再说
+          </Button>
+        )}
         <a
-          className="ui-button ui-button-glass"
+          className={onSkip ? 'ui-button ui-button-glass ui-button-lg' : 'ui-button ui-button-glass'}
           href="https://console.volcengine.com/speech/app"
           target="_blank"
           rel="noreferrer"
@@ -178,12 +189,14 @@ export function VoiceSettingsPanel({
           <>
             <Button
               variant="glass"
+              size={onSkip ? 'lg' : 'md'}
               onClick={() => { void draft.runTest(); }}
               disabled={draft.testing || busy}
             >
               {draft.testing ? '测试中…' : '测试连接'}
             </Button>
             <Button
+              size={onSkip ? 'lg' : 'md'}
               onClick={() => { void draft.save({ resumeMicrophone: variant === 'onboarding' }); }}
               disabled={draft.testing || busy}
             >
