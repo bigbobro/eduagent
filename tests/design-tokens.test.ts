@@ -61,19 +61,16 @@ describe('design tokens', () => {
   it('defines global web fonts and CSS font variables', () => {
     const globals = readFileSync(join(process.cwd(), 'src/app/globals.css'), 'utf8');
     const layout = readFileSync(join(process.cwd(), 'src/app/layout.tsx'), 'utf8');
-    // All 5 fonts loaded via next/font/local with self-hosted woff2 files
+    // Only English display text loads a bundled font; Chinese uses the system.
     expect(layout).toContain("from 'next/font/local'");
-    expect(layout).toContain('ZCOOLKuaiLe');
     expect(layout).toContain('Fredoka');
-    expect(layout).toContain('Caveat');
-    expect(layout).toContain('JetBrainsMono');
-    expect(layout).toContain('LXGWWenKaiTC');
+    expect(globals).toContain('--font-zh: -apple-system, BlinkMacSystemFont');
     // globals.css should NOT have the render-blocking @import
     expect(globals).not.toContain('@import url(');
     // CSS variables still declared in globals.css
     expect(globals).toContain('--font-zh:');
     expect(globals).toContain('--font-display:');
-    expect(globals).toContain('--font-en:');
+    expect(layout).toContain("variable: '--font-en'");
     expect(globals).toContain('--font-en-script:');
     expect(globals).toContain('--font-mono:');
   });

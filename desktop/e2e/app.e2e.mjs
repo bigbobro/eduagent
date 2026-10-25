@@ -35,7 +35,7 @@ async function createFirstLearner(page, name) {
   await page.goto(`${base}/settings`);
   await page.getByLabel('孩子名字', { exact: true }).fill(name);
   await page.getByRole('button', { name: '新建孩子档案', exact: true }).click();
-  await page.getByText(name, { exact: true }).waitFor();
+  await page.locator('section[aria-label="孩子档案"]').getByText(name, { exact: true }).waitFor();
   await page.getByRole('button', { name: '回首页', exact: true }).click();
   await page.getByText('动物 Animals').first().waitFor({ timeout: 30000 });
 }
@@ -64,6 +64,8 @@ try {
   const startRequest = page.waitForRequest((req) => req.url().endsWith('/api/chat') && req.postDataJSON()?.action === 'start');
   await page.getByRole('button', { name: /我们开始吧/ }).click();
   check('entered lesson', true);
+  const leaveBounds = await page.getByRole('button', { name: '离开', exact: true }).boundingBox();
+  check('independent lesson frame clears native traffic lights and has no main tabs', leaveBounds?.y >= 52 && await page.getByTestId('main-toolbar').count() === 0);
   check('lesson start preserves the selected learnerId', (await startRequest).postDataJSON().learnerId === await page.evaluate(() => localStorage.getItem('eduagent.currentLearnerId')));
 
   // 3. 按住说话 -> recording
@@ -266,6 +268,7 @@ for (const status of ['granted', 'denied', 'not-determined']) {
     if (status === 'not-determined') {
       await page.getByTestId('mic-onboarding').waitFor({ timeout: 15000 });
       check('first-run microphone step appears when not-determined', true);
+      check('first-run onboarding stays outside the main toolbar', await page.getByTestId('main-toolbar').count() === 0);
       await snapshot(page, 'mic-onboarding.png');
       await page.getByRole('button', { name: '稍后设置' }).click();
       await page.reload();
@@ -294,7 +297,16 @@ for (const status of ['granted', 'denied', 'not-determined']) {
     await page.getByTestId('app-version').filter({ hasText: version }).waitFor();
     check('About shows packaged application version', true, version);
     const bridgeKeys = await page.evaluate(() => Object.keys(window.eduagentDesktop).sort().join(','));
-    check('preload exposes exactly the five native methods', bridgeKeys === 'getAppInfo,getMicStatus,openLogsFolder,openMicSettings,requestMic');
+    check('preload exposes five native methods and a read-only menu subscription', bridgeKeys === 'getAppInfo,getMicStatus,onMenuCommand,openLogsFolder,openMicSettings,requestMic');
+    await page.evaluate(() => { window.__menuCommands = []; window.__unsubscribeMenu = window.eduagentDesktop.onMenuCommand((command) => window.__menuCommands.push(command)); });
+    await instance.evaluate(({ BrowserWindow }) => { const wc = BrowserWindow.getAllWindows()[0].webContents; for (const command of ['open:arbitrary', 'learner:bad/id', { command: 'nav:settings' }, 'nav:settings']) wc.send('menu:command', command); });
+    await page.waitForFunction(() => window.__menuCommands.length === 1);
+    check('menu subscription filters invalid commands and exposes only the command string', JSON.stringify(await page.evaluate(() => window.__menuCommands)) === '["nav:settings"]');
+    await page.evaluate(() => window.__unsubscribeMenu());
+    await instance.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('menu:command', 'nav:settings'));
+    await page.waitForTimeout(100);
+    check('menu subscription unsubscribe removes its listener', await page.evaluate(() => window.__menuCommands.length) === 1);
+
     await instance.evaluate(({ shell }) => {
       globalThis.__opened = []; globalThis.__paths = [];
       shell.openExternal = async (url) => { globalThis.__opened.push(url); };

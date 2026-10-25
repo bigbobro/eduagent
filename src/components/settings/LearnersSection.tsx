@@ -21,6 +21,7 @@ export function LearnersSection() {
       if (method === 'DELETE' && deleting?.id === readCurrentLearnerId()) saveCurrentLearnerId(null);
       setName(''); setEditing(null); setDeleting(null); setConfirmation('');
       await load();
+      window.dispatchEvent(new Event('eduagent:profiles-change'));
     } catch (err) { setError((err as Error).message); }
     finally { setBusy(false); }
   };

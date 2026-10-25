@@ -7,6 +7,12 @@ import type { StatsSnapshot, SessionSummary } from '@/types/progress';
 
 export function ParentsClient() {
   const router = useRouter();
+  const [selectionRevision, setSelectionRevision] = useState(0);
+  useEffect(() => {
+    const changed = () => setSelectionRevision((value) => value + 1);
+    window.addEventListener('eduagent:learner-change', changed);
+    return () => window.removeEventListener('eduagent:learner-change', changed);
+  }, []);
   const [name, setName] = useState('');
   const [stats, setStats] = useState<StatsSnapshot | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
@@ -14,6 +20,7 @@ export function ParentsClient() {
   const [errSessions, setErrSessions] = useState(false);
   useEffect(() => {
     let active = true;
+    setStats(null); setSessions(null); setErrStats(false); setErrSessions(false);
     resolveCurrentLearner().then((learner) => {
       if (!active) return;
       if (!learner) { router.replace('/'); return; }
@@ -23,6 +30,6 @@ export function ParentsClient() {
       fetch(`/api/sessions?limit=10&${query}`).then((r) => r.ok ? r.json() : Promise.reject()).then((s) => { if (active) setSessions(s); }).catch(() => { if (active) setErrSessions(true); });
     }).catch(() => { if (active) { setErrStats(true); setErrSessions(true); } });
     return () => { active = false; };
-  }, [router]);
+  }, [router, selectionRevision]);
   return <ParentsPage stats={stats} sessions={sessions} errStats={errStats} errSessions={errSessions} learnerName={name} onBack={() => router.push('/')} />;
 }

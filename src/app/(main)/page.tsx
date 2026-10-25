@@ -1,5 +1,5 @@
 'use client';
-import { MicOnboarding, MIC_SETUP_COMPLETE } from './microphone/MicOnboarding';
+import { MIC_SETUP_COMPLETE } from '../microphone/MicOnboarding';
 import { getMicStatus } from '@/lib/audio/microphone';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -40,7 +40,11 @@ export default function HomePage() {
       saveCurrentLearnerId(current?.id ?? null);
     }).catch(() => setProfileError(true));
   };
-  useEffect(loadProfiles, []);
+  useEffect(() => {
+    loadProfiles();
+    window.addEventListener('eduagent:learner-change', loadProfiles);
+    return () => window.removeEventListener('eduagent:learner-change', loadProfiles);
+  }, []);
   useEffect(() => {
     setProgress({});
     if (!learner) return;
@@ -80,7 +84,9 @@ export default function HomePage() {
       .catch(() => setNeedsMic(false));
   }, [router]);
 
-  if (needsMic !== false) return needsMic ? <MicOnboarding onDone={() => setNeedsMic(false)} /> : (
+  useEffect(() => { if (needsMic) router.replace('/microphone'); }, [needsMic, router]);
+
+  if (needsMic !== false) return (
     <PaperBg tone="paper" className="h-screen w-screen"><main role="status" className="grid h-full place-items-center font-zh text-ink">正在准备…</main></PaperBg>
   );
 
@@ -97,11 +103,6 @@ export default function HomePage() {
 
   return (
     <>
-    <div className="fixed right-4 top-2 z-50 flex items-center gap-2 rounded-paper-md border border-ink bg-paper px-3 py-1 font-zh text-sm">
-      <span className="max-w-52 truncate" title={learner.name}>当前孩子：{learner.name}</span>
-      {learners && learners.length > 1 && <button onClick={() => { setLearner(null); saveCurrentLearnerId(null); }}>切换孩子</button>}
-      <button onClick={() => router.push('/settings')}>设置</button>
-    </div>
     <HomeStudy
       courses={courses}
       progress={progress}

@@ -1,5 +1,5 @@
 // Electron owns native permissions and the lifetime of the loopback-only server.
-const { app, BrowserWindow, ipcMain, Menu, session, shell, systemPreferences, utilityProcess } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, screen, session, shell, systemPreferences, utilityProcess } = require('electron');
 const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
@@ -9,8 +9,6 @@ const HOST = '127.0.0.1';
 const PREFERRED_PORT = Number(process.env.EDUAGENT_PORT) || 38417;
 const TEST_MODE = process.env.EDUAGENT_TEST === '1';
 const DEV_MODE = !app.isPackaged && process.env.EDUAGENT_DEV_URL;
-// P0 comparison only: opt in to native material during development.
-const NATIVE_MATERIAL = DEV_MODE && process.env.EDUAGENT_SHELL_MATERIAL === 'native';
 const MIC_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
 const RESTART_EXIT_CODE = 75;
 let port = PREFERRED_PORT;
@@ -176,12 +174,11 @@ function setupPermissions() {
 }
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1280, height: 800, show: false,
+    ...restoreWindowState(), show: false,
     minWidth: 1100, minHeight: 720,
     title: 'EduAgent', titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 19 },
-    backgroundColor: NATIVE_MATERIAL ? '#00000000' : '#FFF6EE',
-    ...(NATIVE_MATERIAL ? { vibrancy: 'under-window', visualEffectState: 'followWindow' } : {}),
+    backgroundColor: '#FFF6EE',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), nodeIntegration: false, contextIsolation: true, sandbox: true },
   });
   const contents = mainWindow.webContents;
@@ -193,7 +190,24 @@ function createWindow() {
       event.preventDefault();
     }
   });
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+    if (restoreWindowState().fullScreen) mainWindow.setFullScreen(true);
+  });
+  let saveTimer;
+  const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveWindowState, 200); };
+  for (const event of ['resize', 'move', 'enter-full-screen', 'leave-full-screen']) mainWindow.on(event, persist);
+  mainWindow.on('close', () => { clearTimeout(saveTimer); saveWindowState(); });
+  // Inputs retain the native edit menu; ordinary content has no browser menu.
+  contents.on('context-menu', (_event, params) => {
+    if (params.isEditable) Menu.buildFromTemplate([{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }]).popup({ window: mainWindow });
+  });
+  contents.on('did-finish-load', () => { void refreshLearnerMenu(); });
+  contents.on('did-navigate-in-page', () => { void refreshLearnerMenu(); });
+  mainWindow.on('focus', () => { void refreshLearnerMenu(); });
+  const menuTimer = setInterval(() => { void refreshLearnerMenu(); }, 2000);
+  menuTimer.unref();
+  mainWindow.on('closed', () => clearInterval(menuTimer));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { openExternalSafely(url); return { action: 'deny' }; });
   const guardNavigation = (e, url) => {
     if (isLocalOrigin(url)) return;
@@ -204,12 +218,72 @@ function createWindow() {
   mainWindow.webContents.on('will-redirect', guardNavigation);
   mainWindow.on('closed', () => { mainWindow = null; });
 }
+// Only fixed commands or IDs read from our own learner endpoint reach the renderer.
+let menuProfiles = [];
+let menuSelection = null;
+let refreshingMenu = false;
+function sendMenuCommand(command) {
+  if (mainWindow && !mainWindow.isDestroyed() && isLocalOrigin(mainWindow.webContents.getURL())) {
+    mainWindow.webContents.send('menu:command', command);
+  }
+}
+async function refreshLearnerMenu() {
+  if (refreshingMenu || !mainWindow || mainWindow.isDestroyed() || !isLocalOrigin(mainWindow.webContents.getURL())) return;
+  refreshingMenu = true;
+  try {
+    const response = await fetch(`${origin}/api/learners`, { signal: AbortSignal.timeout(1500), redirect: 'error' });
+    if (!response.ok) return;
+    const profiles = await response.json();
+    if (!Array.isArray(profiles) || !profiles.every((p) => typeof p.id === 'string' && /^[a-zA-Z0-9-]+$/.test(p.id) && typeof p.name === 'string')) return;
+    // Fixed source, no renderer-provided code, URL, or paths.
+    const selection = await mainWindow.webContents.executeJavaScript("localStorage.getItem('eduagent.currentLearnerId')");
+    const current = profiles.length === 1 ? profiles[0].id : selection;
+    if (JSON.stringify(profiles.map(({ id, name }) => ({ id, name }))) !== JSON.stringify(menuProfiles) || current !== menuSelection) {
+      menuProfiles = profiles.map(({ id, name }) => ({ id, name }));
+      menuSelection = current;
+      buildMenu();
+    }
+  } catch { /* Startup/restart may temporarily make the endpoint unavailable. */ }
+  finally { refreshingMenu = false; }
+}
 function buildMenu() {
+  const navigate = (label, accelerator, command) => ({ label, accelerator, click: () => sendMenuCommand(command) });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu', submenu: [{ role: 'about' }, { label: '打开日志文件夹', click: () => { void shell.openPath(logsDir()).then((err) => { if (err) log(`open logs failed: ${err}`); }); } }, { type: 'separator' }, { role: 'quit' }] },
-    { role: 'editMenu' },
-    { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'close' }] },
+    { label: 'EduAgent', submenu: [
+      { label: '关于 EduAgent', role: 'about' },
+      navigate('设置…', 'CommandOrControl+,', 'nav:settings'),
+      { label: '打开日志文件夹', click: () => { void shell.openPath(logsDir()).then((err) => { if (err) log(`open logs failed: ${err}`); }); } },
+      { type: 'separator' }, { label: '隐藏 EduAgent', role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+      { type: 'separator' }, { label: '退出 EduAgent', role: 'quit' },
+    ] },
+    { label: '编辑', role: 'editMenu' },
+    { label: '显示', submenu: [navigate('课程', 'CommandOrControl+1', 'nav:courses'), navigate('学习记录', 'CommandOrControl+2', 'nav:records'), navigate('设置', 'CommandOrControl+3', 'nav:settings'), { type: 'separator' }, { label: '进入全屏', role: 'togglefullscreen' }] },
+    { label: '孩子', submenu: [
+      ...menuProfiles.map((profile) => ({ label: profile.name.replace(/&/g, '&&'), type: 'checkbox', checked: profile.id === menuSelection, click: () => { menuSelection = profile.id; sendMenuCommand(`learner:${profile.id}`); buildMenu(); } })),
+      ...(menuProfiles.length ? [{ type: 'separator' }] : []),
+      { label: '新建孩子档案…', click: () => sendMenuCommand('learner:new') },
+    ] },
+    { label: '窗口', submenu: [{ label: '最小化', role: 'minimize' }, { label: '缩放', role: 'zoom' }, { label: '关闭', role: 'close' }] },
+    { label: '帮助', submenu: [{ label: '怎样获取 Key', click: () => sendMenuCommand('nav:settings') }] },
   ]));
+}
+function restoreWindowState() {
+  const fallback = { width: 1280, height: 800 };
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'window-state.json'), 'utf8'));
+    if (!['x', 'y', 'width', 'height'].every((key) => Number.isSafeInteger(state[key])) || state.width < 1100 || state.height < 720) return fallback;
+    const visible = screen.getAllDisplays().some(({ workArea: a }) => state.x >= a.x && state.y >= a.y && state.x + state.width <= a.x + a.width && state.y + 52 <= a.y + a.height);
+    if (!visible) return fallback;
+    return { x: state.x, y: state.y, width: state.width, height: state.height, fullScreen: state.fullScreen === true };
+  } catch { return fallback; }
+}
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    const file = path.join(app.getPath('userData'), 'window-state.json');
+    fs.writeFileSync(`${file}.tmp`, JSON.stringify({ ...mainWindow.getNormalBounds(), fullScreen: mainWindow.isFullScreen() }));
+    fs.renameSync(`${file}.tmp`, file);
+  } catch (error) { log(`window state save failed: ${error.message}`); }
 }
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -228,6 +302,7 @@ if (!app.requestSingleInstanceLock()) {
       origin = `http://${HOST}:${port}`;
     }
     log(`local origin=${origin}`);
+    app.setAboutPanelOptions({ applicationName: 'EduAgent', applicationVersion: app.getVersion(), credits: '麻吉陪孩子一起练习英语。' });
     buildMenu(); setupBridge(); setupPermissions(); createWindow();
     if (DEV_MODE) { await showPending(); await waitForServer(null); await mainWindow.loadURL(origin); log(`dev window loaded origin=${origin}`); }
     else await startServer();

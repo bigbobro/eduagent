@@ -5,10 +5,12 @@ export function readCurrentLearnerId(): string | null {
   try { return localStorage.getItem(CURRENT_LEARNER_KEY) || null; } catch { return null; }
 }
 export function saveCurrentLearnerId(id: string | null): void {
+  if (readCurrentLearnerId() === id) return;
   try {
     if (id) localStorage.setItem(CURRENT_LEARNER_KEY, id);
     else localStorage.removeItem(CURRENT_LEARNER_KEY);
   } catch { /* The in-page selection still works when storage is unavailable. */ }
+  window.dispatchEvent(new Event('eduagent:learner-change'));
 }
 export async function loadLearners(): Promise<LearnerProfile[]> {
   const res = await fetch('/api/learners');

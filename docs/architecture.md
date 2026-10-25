@@ -70,6 +70,8 @@
 | `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,使用 `tone` 驱动 CC 调色 |
 | `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
+| `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
+| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条（P2 接课堂） |
 | `src/components/magic/*` | CC 绘本风原子组件:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/HomeStudy.tsx` | 首页魔法书房,课程书本入口 + journal/parents CTA |
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
@@ -567,7 +569,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ---
 
-## 12. 前端架构(麻吉魔法学院,2026-05 CC 重构)
+## 12. 前端架构（2026-10 G 外壳，页面内容仍沿用 CC 版）
 
 课程、学习记录与设置页面沿用麻吉小猫组件:
 
@@ -578,12 +580,15 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 /journal                   魔法书    · JournalPage
 /parents                   学习记录  · ParentsPage(当前孩子)
 /settings                  通用设置  · 服务配置 + 孩子档案管理
+/microphone                独立首次麦克风引导 · MicOnboarding
 ```
 
 ### 关键模块
 
 | 文件 | 职责 |
 |------|------|
+| `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
+| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条（P2 接课堂） |
 | `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
 | `src/components/home/HomeStudy.tsx` | 魔法书房首页,课程以书本卡呈现 |
 | `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | 课中六屏 view 层,保留控制器与 phase 状态机 |
@@ -598,8 +603,10 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ### Design tokens
 
-- 调色:`tailwind.config.ts` 中 `paper / ink / rose / butter / mint / sky / lilac / peach / cat* / ember` 以及 Deep / Shadow 变体。
-- 字体:全局 `globals.css` 加载 LXGW WenKai TC / ZCOOL KuaiLe / Fredoka / Caveat / JetBrains Mono,并通过 `font-zh` / `font-display` / `font-en` / `font-en-script` / `font-mono` 使用。
+- 新外壳使用 G 的 primary/success/accent/text、glass/surface、4/8/12/16/24/32/48 间距、control/panel/card（10/16/24px）圆角与 rim/lift 阴影；具体值在 `tailwind.config.ts` 与 `globals.css`。
+
+- 旧页面调色（P6 清理前保留）:`tailwind.config.ts` 中 `paper / ink / rose / butter / mint / sky / lilac / peach / cat* / ember` 以及 Deep / Shadow 变体。
+- 字体:中文/界面标题使用系统字体，英文词汇由 `next/font/local` 加载 Fredoka 并提供 `--font-en`，旧 `font-en-script` 暂时别名到它；等宽使用系统字体。旧字体文件留待 P6 清理。
 - 圆角阶:`rounded-paper-sm/md/lg/pill`。
 - 阴影:`shadow-paper` / `shadow-paper-hero`,均为绘本纸张的实心偏移阴影。
 
@@ -689,7 +696,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 **进程与端口**:Electron main(`desktop/main.js`)持有窗口和唯一 `utilityProcess` server。打包版优先监听 `127.0.0.1:38417`(`EDUAGENT_PORT` 可覆盖),启动前探测端口,被占用则向系统申请空闲端口并写日志。实际端口通过 `PORT` 注入 server;HTTP Settings CSRF 和语音 WS Origin 白名单均按该值校验,窗口导航、权限和 IPC 校验也只接受实际本地 origin。端口变化会改变 localStorage 的 origin,但 SQLite 和系统麦克风授权不受影响。
 
-**preload 暴露面**:`desktop/preload.js` 在 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` 下只暴露 `window.eduagentDesktop` 的五个无参数方法:`getMicStatus()`、`requestMic()`、`openMicSettings()`、`getAppInfo()`、`openLogsFolder()`。main 验证调用来自当前窗口的主 frame 和本地 origin。版本由 `app.getVersion()` 提供,设置路径、任意 URL、文件系统和原始 IPC 均不传给 renderer。
+**preload 暴露面**:`desktop/preload.js` 在 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` 下暴露 `window.eduagentDesktop` 的五个无参数原生方法及下述只读菜单订阅:`getMicStatus()`、`requestMic()`、`openMicSettings()`、`getAppInfo()`、`openLogsFolder()`。main 验证调用来自当前窗口的主 frame 和本地 origin。版本由 `app.getVersion()` 提供,设置路径、任意 URL、文件系统和原始 IPC 均不传给 renderer。新增只读 `onMenuCommand(callback)` 订阅，返回取消订阅函数，仅允许 `nav:courses / nav:records / nav:settings / learner:new / learner:<id>`；preload 校验枚举与 ID，回调不暴露 IPC event。main 从实际 loopback server 读取孩子档案，以固定代码读取本地选中 ID，加载/导航/聚焦与 2 秒轮询同步孩子菜单，列表或选中项变化才重建，关闭窗口取消轮询。
 
 **麦克风授权**:启动仅调用 `getMediaAccessStatus`,不申请授权。首页在 Key 已配置、权限为 `not-determined` 且尚未完成或跳过引导时,先显示 `MicOnboarding`;首页在配置与麦克风检查完成前保持准备状态,完成或跳过后再进入 Phase 2 的孩子档案选择/新建流程。跳过标记只存在当前 origin 的 localStorage。设置页的独立 `MicSection` 常驻显示「已允许 / 未询问 / 已拒绝」,只有明确点击「允许使用麦克风」才调用 `askForMediaAccess`。已拒绝时,「打开系统设置」经 `shell.openExternal` 打开固定 URL `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`;macOS 修改拒绝状态后可能需要退出重开 App。`restricted` / `unknown` 保守归为已拒绝。
 
@@ -708,3 +715,16 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 **架构产物**:2026-10-24 用户决定只交付 Apple 芯片 arm64 版,Intel 版按需再做,不生成 universal 包。SQLite 无 ABI 重编译需求,但 Next 构建工具依赖宿主架构的 SWC。Phase 0 曾认为 standalone 会携带该 SWC;本轮实际 staging 未发现 `@next/swc-*` 或 `.node` 二进制,因此不把旧推断当作本轮包内容事实。将来制作 x64 时需要在 x64 环境重新 `next build`,确认 SWC/esbuild 构建依赖可用,再完成 x64 App 冒烟和 Intel Mac 真机验收。当前 release 只接受 arm64 Node,且始终重新构建,不接受 `SKIP_NEXT_BUILD` 跳过。
 
 实现依据:采用 Electron 原生 [systemPreferences](https://www.electronjs.org/docs/latest/api/system-preferences) 和固定方法的 [contextBridge / IPC](https://www.electronjs.org/docs/latest/tutorial/ipc),不新增原生依赖或自制授权协议。真实 TCC 弹窗、系统设置页跳转、覆盖安装后授权保留及实体麦克风音质仍需真机验证。
+
+
+### UI 重构 P1 基础层（2026-10-25）
+
+P0 临时 ShellSpike、shell-spike 路由与 native 材质开关已由正式 CSS 外壳替代。`src/app/(main)/layout.tsx` 常驻 Toolbar（52px，红绿灯 x16/y19）、SegmentedControl、LearnerSwitcher，路由包含首页、现有 `/journal`、设置以及暂留的 `/parents`。切 tab 只由组内 template 对内容做 150ms 淡入和 4px 位移，课堂及下课独立全窗口。旧页面内容保留，首页原右上浮层由工具栏替代；现有麦克风首次引导移至独立 `/microphone` 路由，不挂主工具栏；完整三步引导留 P5。
+
+G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体，英文词汇使用已打包 Fredoka，旧字体文件留待 P6 清理。新组件使用 lucide-react 线性图标。UI primitives 包括 Button、GlassPanel、Tag、ProgressBar、Banner、Skeleton、EmptyState、六状态 PushToTalkPill（P2 接课堂控制器）。全局限制拖选、图片拖动、回弹、网页右键菜单，输入和说明可复制；输入右键保留原生编辑菜单，键盘焦点紫色环，降低透明度时工具栏和玻璃面板使用不透明浅色底。
+
+孩子选择仍存 localStorage；同页切换通过 `eduagent:learner-change` 通知首页/记录/工具栏更新，档案写入成功通过 `eduagent:profiles-change` 更新工具栏。原生菜单支持 ⌘, 与 ⌘1/2/3、孩子切换、新建档案、日志目录、全屏和标准编辑/窗口操作。About 面板由 `app.setAboutPanelOptions` 设置名称/版本/介绍，macOS 图标来自 bundle。
+
+窗口 normal bounds 和全屏状态存 userData/window-state.json，200ms 合并 move/resize/fullscreen 写入，close 同步原子替换；启动验证数字、最小尺寸和显示器可见性，损坏或离屏回到默认居中。未改变 origin、权限申请、崩溃恢复和语音/agent/chat 契约。
+
+课堂/下课独立 `lesson/layout.tsx` 保留 52px 原生拖动留位并约束旧内容高度，避免红绿灯覆盖旧课堂「离开」按钮；P2 再替换课堂自身工具栏，不显示主 tab。

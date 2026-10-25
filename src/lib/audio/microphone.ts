@@ -1,6 +1,9 @@
 export type MicStatus = 'granted' | 'not-determined' | 'denied';
 
+export type MenuCommand = 'nav:courses' | 'nav:records' | 'nav:settings' | 'learner:new' | `learner:${string}`;
+
 interface DesktopBridge {
+  onMenuCommand?(callback: (command: MenuCommand) => void): () => void;
   getMicStatus(): Promise<MicStatus>;
   requestMic(): Promise<MicStatus>;
   openMicSettings(): Promise<void>;
