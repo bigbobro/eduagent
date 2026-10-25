@@ -2,6 +2,7 @@
 // 用法:node desktop/e2e/app.e2e.mjs [path-to-EduAgent.app]
 import { mkdirSync, mkdtempSync, existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import http from 'node:http';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron as electron } from 'playwright-core';
@@ -396,6 +397,10 @@ try {
   await closeAndCheck(collisionApp, collisionDir); collisionApp = null;
 } catch (err) { console.log('[e2e] ERROR (port/crash)', err); exitCode = 1; }
 finally { if (collisionApp) await collisionApp.close().catch(() => {}); blocker.close(); rmSync(collisionDir, { recursive: true, force: true }); }
+// Running the app must never write into its own signed bundle (e.g. a runtime cache under
+// Resources/server/.next). A modified bundle fails codesign and loses the microphone grant.
+const signature = spawnSync('codesign', ['--verify', '--deep', '--strict', appPath], { encoding: 'utf8' });
+check('app bundle signature still verifies after all runs', signature.status === 0, signature.stderr.trim().split('\n').slice(0, 3).join(' | '));
 if (results.some((r) => !r.ok)) exitCode = 1;
 console.log(`[e2e] ${exitCode === 0 ? 'ALL PASS' : 'FAILED'} (${results.filter((r) => r.ok).length}/${results.length})`);
 process.exit(exitCode);
