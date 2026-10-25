@@ -205,9 +205,14 @@ function createWindow() {
   contents.on('did-finish-load', () => { void refreshLearnerMenu(); });
   contents.on('did-navigate-in-page', () => { void refreshLearnerMenu(); });
   mainWindow.on('focus', () => { void refreshLearnerMenu(); });
-  const menuTimer = setInterval(() => { void refreshLearnerMenu(); }, 2000);
-  menuTimer.unref();
-  mainWindow.on('closed', () => clearInterval(menuTimer));
+  // Warm the application menu after real renderer profile reads/writes. macOS
+  // defers a structurally rebuilt application menu until native tracking ends,
+  // so menu-open alone cannot display a newly added/renamed profile on first open.
+  const menuSession = contents.session;
+  menuSession.webRequest.onCompleted({ urls: [`${origin}/api/learners`] }, (details) => {
+    if (details.webContentsId === contents.id) void refreshLearnerMenu();
+  });
+  mainWindow.on('closed', () => menuSession.webRequest.onCompleted(null));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => { openExternalSafely(url); return { action: 'deny' }; });
   const guardNavigation = (e, url) => {
     if (isLocalOrigin(url)) return;
@@ -222,13 +227,15 @@ function createWindow() {
 let menuProfiles = [];
 let menuSelection = null;
 let refreshingMenu = false;
+let menuRefreshPending = false;
 function sendMenuCommand(command) {
   if (mainWindow && !mainWindow.isDestroyed() && isLocalOrigin(mainWindow.webContents.getURL())) {
     mainWindow.webContents.send('menu:command', command);
   }
 }
 async function refreshLearnerMenu() {
-  if (refreshingMenu || !mainWindow || mainWindow.isDestroyed() || !isLocalOrigin(mainWindow.webContents.getURL())) return;
+  if (refreshingMenu) { menuRefreshPending = true; return; }
+  if (!mainWindow || mainWindow.isDestroyed() || !isLocalOrigin(mainWindow.webContents.getURL())) return;
   refreshingMenu = true;
   try {
     const response = await fetch(`${origin}/api/learners`, { signal: AbortSignal.timeout(1500), redirect: 'error' });
@@ -239,16 +246,23 @@ async function refreshLearnerMenu() {
     const selection = await mainWindow.webContents.executeJavaScript("localStorage.getItem('eduagent.currentLearnerId')");
     const current = profiles.length === 1 ? profiles[0].id : selection;
     if (JSON.stringify(profiles.map(({ id, name }) => ({ id, name }))) !== JSON.stringify(menuProfiles) || current !== menuSelection) {
+      const profilesChanged = JSON.stringify(profiles.map(({ id, name }) => ({ id, name }))) !== JSON.stringify(menuProfiles);
       menuProfiles = profiles.map(({ id, name }) => ({ id, name }));
       menuSelection = current;
-      buildMenu();
+      if (profilesChanged) buildMenu();
+      else for (const item of Menu.getApplicationMenu()?.getMenuItemById('learners')?.submenu?.items ?? []) {
+        if (item.type === 'checkbox') item.checked = item.id === `learner:${current}`;
+      }
     }
   } catch { /* Startup/restart may temporarily make the endpoint unavailable. */ }
-  finally { refreshingMenu = false; }
+  finally {
+    refreshingMenu = false;
+    if (menuRefreshPending) { menuRefreshPending = false; void refreshLearnerMenu(); }
+  }
 }
 function buildMenu() {
   const navigate = (label, accelerator, command) => ({ label, accelerator, click: () => sendMenuCommand(command) });
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
+  const menu = Menu.buildFromTemplate([
     { label: 'EduAgent', submenu: [
       { label: '关于 EduAgent', role: 'about' },
       navigate('设置…', 'CommandOrControl+,', 'nav:settings'),
@@ -258,14 +272,18 @@ function buildMenu() {
     ] },
     { label: '编辑', role: 'editMenu' },
     { label: '显示', submenu: [navigate('课程', 'CommandOrControl+1', 'nav:courses'), navigate('学习记录', 'CommandOrControl+2', 'nav:records'), navigate('设置', 'CommandOrControl+3', 'nav:settings'), { type: 'separator' }, { label: '进入全屏', role: 'togglefullscreen' }] },
-    { label: '孩子', submenu: [
-      ...menuProfiles.map((profile) => ({ label: profile.name.replace(/&/g, '&&'), type: 'checkbox', checked: profile.id === menuSelection, click: () => { menuSelection = profile.id; sendMenuCommand(`learner:${profile.id}`); buildMenu(); } })),
+    { id: 'learners', label: '孩子', submenu: [
+      ...menuProfiles.map((profile) => ({ id: `learner:${profile.id}`, label: profile.name.replace(/&/g, '&&'), type: 'checkbox', checked: profile.id === menuSelection, click: () => { menuSelection = profile.id; sendMenuCommand(`learner:${profile.id}`); buildMenu(); } })),
       ...(menuProfiles.length ? [{ type: 'separator' }] : []),
       { label: '新建孩子档案…', click: () => sendMenuCommand('learner:new') },
     ] },
     { label: '窗口', submenu: [{ label: '最小化', role: 'minimize' }, { label: '缩放', role: 'zoom' }, { label: '关闭', role: 'close' }] },
     { label: '帮助', submenu: [{ label: '怎样获取 Key', click: () => sendMenuCommand('nav:settings') }] },
-  ]));
+  ]);
+  // Electron 45's Cocoa controller emits this on the root application Menu
+  // when a top-level submenu opens (not on the child Menu instance).
+  menu.on('menu-will-show', () => { void refreshLearnerMenu(); });
+  Menu.setApplicationMenu(menu);
 }
 function restoreWindowState() {
   const fallback = { width: 1280, height: 800 };

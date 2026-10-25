@@ -3,9 +3,9 @@ import { MIC_SETUP_COMPLETE } from '../microphone/MicOnboarding';
 import { getMicStatus } from '@/lib/audio/microphone';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { HomeStudy, type CourseCardStatus } from '@/components/home/HomeStudy';
-import { Course } from '@/types/course';
-import { PaperBg, PaperButton } from '@/components/magic';
+import { CourseHome, HomeSkeleton } from '@/components/home/CourseHome';
+import { LearnerPicker } from '@/components/home/LearnerPicker';
+import type { Course } from '@/types/course';
 import { loadLearners, selectedLearner, saveCurrentLearnerId, type LearnerProfile } from '@/lib/current-learner';
 import type { ProgressSnapshot } from '@/types/progress';
 
@@ -16,102 +16,72 @@ export default function HomePage() {
   const [profileError, setProfileError] = useState(false);
   const [needsMic, setNeedsMic] = useState<boolean | null>(null);
   const [courses, setCourses] = useState<Course[] | null>(null);
-  const [progress, setProgress] = useState<Record<string, CourseCardStatus>>({});
-  const [error, setError] = useState(false);
+  const [snapshot, setSnapshot] = useState<{ learnerId: string; data: ProgressSnapshot } | null>(null);
+  const [courseError, setCourseError] = useState(false);
+  const [progressError, setProgressError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
 
-  const load = () => {
-    setError(false);
-    fetch('/api/courses')
-      .then((r) => {
-        if (!r.ok) throw new Error('fetch failed');
-        return r.json();
-      })
-      .then(setCourses)
-      .catch(() => setError(true));
-
-  };
-  useEffect(load, []);
-  const loadProfiles = () => {
-    setProfileError(false);
-    loadLearners().then((items) => {
-      setLearners(items);
-      const current = selectedLearner(items) ?? null;
-      setLearner(current);
-      saveCurrentLearnerId(current?.id ?? null);
-    }).catch(() => setProfileError(true));
-  };
   useEffect(() => {
-    loadProfiles();
-    window.addEventListener('eduagent:learner-change', loadProfiles);
-    return () => window.removeEventListener('eduagent:learner-change', loadProfiles);
-  }, []);
-  useEffect(() => {
-    setProgress({});
-    if (!learner) return;
     let active = true;
-    fetch(`/api/progress?learnerId=${encodeURIComponent(learner.id)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((snap: ProgressSnapshot) => {
-        const map: Record<string, CourseCardStatus> = {};
-        for (const c of snap.courses) {
-          map[c.courseId] = {
-            timesStarted: c.timesStarted,
-            progressPercent: c.progressPercent,
-            hasResume: c.hasResume,
-            completed: c.completed,
-          };
-        }
-        if (active) setProgress(map);
-      })
-      .catch(() => { if (active) setProgress({}); });
+    setCourses(null); setCourseError(false);
+    fetch('/api/courses').then(r => { if (!r.ok) throw new Error('courses unavailable'); return r.json(); })
+      .then(data => { if (active) setCourses(data); }).catch(() => { if (active) setCourseError(true); });
     return () => { active = false; };
-  }, [learner]);
-
-  // 未配置(桌面版首次打开)时直接进入设置页;读取失败则不拦截,照常显示首页。
+  }, [retry]);
   useEffect(() => {
-    fetch('/api/settings')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((s) => {
-        if (s && s.configured === false) router.replace('/settings');
-        else if (s?.configured) {
-          void getMicStatus().then((status) => {
-            let completed = false;
-            try { completed = Boolean(localStorage.getItem(MIC_SETUP_COMPLETE)); } catch {}
-            setNeedsMic(status === 'not-determined' && !completed);
-          }).catch(() => setNeedsMic(false));
-        } else setNeedsMic(false);
-      })
-      .catch(() => setNeedsMic(false));
-  }, [router]);
+    let active = true;
+    let request = 0;
+    const load = () => {
+      const own = ++request;
+      setProfileError(false);
+      void loadLearners().then(items => {
+        if (!active || own !== request) return;
+        setLearners(items);
+        const current = selectedLearner(items) ?? null;
+        setLearner(current);
+        saveCurrentLearnerId(current?.id ?? null);
+      }).catch(() => { if (active && own === request) setProfileError(true); });
+    };
+    load();
+    window.addEventListener('eduagent:learner-change', load);
+    window.addEventListener('eduagent:profiles-change', load);
+    return () => { active = false; window.removeEventListener('eduagent:learner-change', load); window.removeEventListener('eduagent:profiles-change', load); };
+  }, [retry]);
+  const learnerId = learner?.id;
+  useEffect(() => {
+    setSnapshot(null); setProgressError(null);
+    if (!learnerId) return;
+    let active = true;
+    fetch(`/api/progress?learnerId=${encodeURIComponent(learnerId)}`)
+      .then(r => { if (!r.ok) throw new Error('progress unavailable'); return r.json(); })
+      .then((data: ProgressSnapshot) => { if (active) setSnapshot({ learnerId, data }); })
+      .catch(() => { if (active) setProgressError(learnerId); });
+    return () => { active = false; };
+  }, [learnerId, retry]);
 
+  useEffect(() => {
+    let active = true;
+    fetch('/api/settings').then(r => r.ok ? r.json() : null).then(async settings => {
+      if (!active) return;
+      if (settings?.configured === false) { router.replace('/settings'); return; }
+      let needs = false;
+      if (settings?.configured) {
+        const status = await getMicStatus();
+        let completed = false;
+        try { completed = Boolean(localStorage.getItem(MIC_SETUP_COMPLETE)); } catch {}
+        needs = status === 'not-determined' && !completed;
+      }
+      if (active) setNeedsMic(needs);
+    }).catch(() => { if (active) setNeedsMic(false); });
+    return () => { active = false; };
+  }, [router]);
   useEffect(() => { if (needsMic) router.replace('/microphone'); }, [needsMic, router]);
 
-  if (needsMic !== false) return (
-    <PaperBg tone="paper" className="h-screen w-screen"><main role="status" className="grid h-full place-items-center font-zh text-ink">正在准备…</main></PaperBg>
-  );
-
-  if (!learner) return (
-    <PaperBg tone="paper" className="h-screen w-screen">
-      <main className="mx-auto flex h-full max-w-xl flex-col gap-5 overflow-y-auto px-8 py-16 text-ink">
-        <h1 className="font-display text-3xl">{learners?.length ? '今天谁来学英语？' : '建第一个孩子档案'}</h1>
-        {profileError ? <><p role="alert">暂时读不到孩子档案</p><PaperButton onClick={loadProfiles}>重试</PaperButton></> : !learners ? <p>正在读取档案…</p> : learners.length === 0 ? <PaperButton onClick={() => router.push('/settings')}>建第一个孩子档案</PaperButton> : learners.map((item) => <PaperButton key={item.id} onClick={() => { saveCurrentLearnerId(item.id); setLearner(item); }}>{item.name}</PaperButton>)}
-        <PaperButton color="paper" onClick={() => router.push('/settings')}>设置</PaperButton>
-      </main>
-    </PaperBg>
-  );
-
-
-  return (
-    <>
-    <HomeStudy
-      courses={courses}
-      progress={progress}
-      error={error}
-      onRetry={load}
-      onCourseStart={(courseId) => router.push(`/lesson/${courseId}?learnerId=${encodeURIComponent(learner.id)}`)}
-      onJournal={() => router.push('/journal')}
-      onParents={() => router.push('/parents')}
-    />
-    </>
-  );
+  const reload = () => setRetry(value => value + 1);
+  if (needsMic !== false) return <HomeSkeleton />;
+  if (profileError || !learner) {
+    if (!learners && !profileError) return <HomeSkeleton />;
+    return <LearnerPicker learners={learners ?? []} error={profileError} onRetry={reload} onSettings={() => router.push('/settings')} onSelect={item => { saveCurrentLearnerId(item.id); setLearner(item); }} />;
+  }
+  return <CourseHome key={learner.id} learnerId={learner.id} courses={courses} progress={snapshot?.learnerId === learner.id ? snapshot.data.courses : null} error={courseError || progressError === learner.id} onRetry={reload} onCourseStart={id => router.push(`/lesson/${id}?learnerId=${encodeURIComponent(learner.id)}`)} />;
 }

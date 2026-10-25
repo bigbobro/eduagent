@@ -37,7 +37,7 @@ async function createFirstLearner(page, name) {
   await page.getByRole('button', { name: '新建孩子档案', exact: true }).click();
   await page.locator('section[aria-label="孩子档案"]').getByText(name, { exact: true }).waitFor();
   await page.getByRole('button', { name: '回首页', exact: true }).click();
-  await page.getByText('动物 Animals').first().waitFor({ timeout: 30000 });
+  await page.getByRole('button', { name: '动物 Animals', exact: true }).waitFor({ timeout: 30000 });
 }
 
 let app;
@@ -59,7 +59,8 @@ try {
   check('home page loads with course list', true, page.url());
 
   // 2. 进课
-  await page.getByText('动物 Animals').first().click();
+  await page.getByRole('button', { name: '动物 Animals', exact: true }).click();
+  await page.getByRole('button', { name: '开始上课', exact: true }).click();
   await page.waitForURL(/\/lesson\/animals/, { timeout: 10000 });
   const startRequest = page.waitForRequest((req) => req.url().endsWith('/api/chat') && req.postDataJSON()?.action === 'start');
   await page.getByRole('button', { name: /我们开始吧/ }).click();
@@ -371,7 +372,7 @@ try {
   await page.waitForURL(/restarting\.html$/, { timeout: 15000 });
   check('crash recovery shows a local restarting page', (await page.getByRole('status').innerText()).includes('正在重启'));
   await page.waitForURL(`${base}/`, { timeout: 60000 });
-  await page.getByText('动物 Animals').first().waitFor();
+  await page.getByRole('button', { name: '动物 Animals', exact: true }).waitFor();
   const secondPid = spawnedPids(collisionDir).at(-1);
   check('one server crash automatically recovers', firstPid !== secondPid && readFileSync(join(collisionDir, 'logs/server.log'), 'utf8').includes('automatic restart 1/1'));
   process.kill(secondPid, 'SIGKILL');

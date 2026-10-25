@@ -205,7 +205,7 @@ export function PhasedLessonView({ course, learnerId }: PhasedLessonViewProps) {
             onAllDone={() => phasedRef.current?.completeReinforcement()}
           />
         )}
-        {started && phase !== 'intro' && phase !== 'done' && v2 && <SubtitleLog controller={v2} />}
+        {started && phase !== 'intro' && phase !== 'done' && v2 && <SubtitleLog controller={v2} learnerId={learnerId} />}
         {started && !transitionRetry && phase === 'done' && (
           <DoneCelebrateFrame
             starsEarned={Math.min(5, clearedWordCount)}

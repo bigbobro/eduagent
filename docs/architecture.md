@@ -73,7 +73,7 @@
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
 | `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
 | `src/components/magic/*` | CC 绘本风原子组件:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
-| `src/components/home/HomeStudy.tsx` | 首页魔法书房,课程书本入口 + journal/parents CTA |
+| `src/components/home/{CourseHome,LearnerPicker}.tsx` | 课程列表/详情图片墙与孩子选择 |
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
 | `src/components/lesson/IntroFrame.tsx` | 主题导入:麻吉 + 锁定 chip 网格,不再依赖 scene.svg |
 | `src/components/lesson/LessonMandalaV2.tsx` | 跟读练习法阵,保留 `LessonController` ASR/TTS 管线 |
@@ -574,7 +574,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 课程、学习记录与设置页面沿用麻吉小猫组件:
 
 ```
-/                          魔法书房  · HomeStudy
+/                          课程列表与详情 · CourseHome
 /lesson/[id]               魔法课堂  · IntroFrame / LessonMandalaV2 / ReinforcementFlow
 /lesson/[id]/done          下课庆祝  · DoneCelebrateFrame
 /journal                   魔法书    · JournalPage
@@ -590,7 +590,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
 | `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
 | `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
-| `src/components/home/HomeStudy.tsx` | 魔法书房首页,课程以书本卡呈现 |
+| `src/components/home/{CourseHome,LearnerPicker}.tsx` | 分组课程列表与详情图片墙、孩子选择和读取状态 |
 | `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | G 课堂四段与暂留的下课 view 层，保留控制器与 phase 状态机 |
 | `src/components/lesson/{LessonToolbar,LessonCard,SubtitleLog}.tsx` | 独立课堂工具栏、共用大卡片、视图层累积字幕 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
@@ -624,8 +624,8 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 ### 数据流
 
 ```
-fetch /api/courses    → 首页 HomeStudy 书本列表(返回 registry `allCourses` 全部课程,数量见 index.ts)
-fetch /api/progress?learnerId   → JournalPage / 总结页(WordMastery + 3 星掌握筛选)
+fetch /api/courses    → 首页 CourseHome 分组列表与 6×2 单词图片墙(返回 registry `allCourses` 全部课程,数量见 index.ts)
+fetch /api/progress?learnerId   → CourseHome / JournalPage / 总结页(首页已会按 masteryStars ≥ 2 计算，列表进度保持断点比例)
 fetch /api/sessions?learnerId   → ParentsPage 最近课堂列表(默认 limit=10)
 fetch /api/stats?learnerId      → ParentsPage 数据卡(总分钟 + 掌握词数;streak/accuracy 暂显示占位)
 voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonController)
@@ -697,7 +697,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 **进程与端口**:Electron main(`desktop/main.js`)持有窗口和唯一 `utilityProcess` server。打包版优先监听 `127.0.0.1:38417`(`EDUAGENT_PORT` 可覆盖),启动前探测端口,被占用则向系统申请空闲端口并写日志。实际端口通过 `PORT` 注入 server;HTTP Settings CSRF 和语音 WS Origin 白名单均按该值校验,窗口导航、权限和 IPC 校验也只接受实际本地 origin。端口变化会改变 localStorage 的 origin,但 SQLite 和系统麦克风授权不受影响。
 
-**preload 暴露面**:`desktop/preload.js` 在 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` 下暴露 `window.eduagentDesktop` 的五个无参数原生方法及下述只读菜单订阅:`getMicStatus()`、`requestMic()`、`openMicSettings()`、`getAppInfo()`、`openLogsFolder()`。main 验证调用来自当前窗口的主 frame 和本地 origin。版本由 `app.getVersion()` 提供,设置路径、任意 URL、文件系统和原始 IPC 均不传给 renderer。新增只读 `onMenuCommand(callback)` 订阅，返回取消订阅函数，仅允许 `nav:courses / nav:records / nav:settings / learner:new / learner:<id>`；preload 校验枚举与 ID，回调不暴露 IPC event。main 从实际 loopback server 读取孩子档案，以固定代码读取本地选中 ID，加载/导航/聚焦与 2 秒轮询同步孩子菜单，列表或选中项变化才重建，关闭窗口取消轮询。
+**preload 暴露面**:`desktop/preload.js` 在 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` 下暴露 `window.eduagentDesktop` 的五个无参数原生方法及下述只读菜单订阅:`getMicStatus()`、`requestMic()`、`openMicSettings()`、`getAppInfo()`、`openLogsFolder()`。main 验证调用来自当前窗口的主 frame 和本地 origin。版本由 `app.getVersion()` 提供,设置路径、任意 URL、文件系统和原始 IPC 均不传给 renderer。新增只读 `onMenuCommand(callback)` 订阅，返回取消订阅函数，仅允许 `nav:courses / nav:records / nav:settings / learner:new / learner:<id>`；preload 校验枚举与 ID，回调不暴露 IPC event。main 从实际 loopback server 读取孩子档案，以固定代码读取本地选中 ID，加载/导航/聚焦、renderer 档案请求完成与应用菜单打开事件同步孩子菜单，无定时轮询；列表变化重建菜单，只有选择变化时就地更新勾选。
 
 **麦克风授权**:启动仅调用 `getMediaAccessStatus`,不申请授权。首页在 Key 已配置、权限为 `not-determined` 且尚未完成或跳过引导时,先显示 `MicOnboarding`;首页在配置与麦克风检查完成前保持准备状态,完成或跳过后再进入 Phase 2 的孩子档案选择/新建流程。跳过标记只存在当前 origin 的 localStorage。设置页的独立 `MicSection` 常驻显示「已允许 / 未询问 / 已拒绝」,只有明确点击「允许使用麦克风」才调用 `askForMediaAccess`。已拒绝时,「打开系统设置」经 `shell.openExternal` 打开固定 URL `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`;macOS 修改拒绝状态后可能需要退出重开 App。`restricted` / `unknown` 保守归为已拒绝。
 
@@ -720,7 +720,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 ### UI 重构 P1 基础层（2026-10-25）
 
-P0 临时 ShellSpike、shell-spike 路由与 native 材质开关已由正式 CSS 外壳替代。`src/app/(main)/layout.tsx` 常驻 Toolbar（52px，红绿灯 x16/y19）、SegmentedControl、LearnerSwitcher，路由包含首页、现有 `/journal`、设置以及暂留的 `/parents`。切 tab 只由组内 template 对内容做 150ms 淡入和 4px 位移，课堂及下课独立全窗口。旧页面内容保留，首页原右上浮层由工具栏替代；现有麦克风首次引导移至独立 `/microphone` 路由，不挂主工具栏；完整三步引导留 P5。
+P0 临时 ShellSpike、shell-spike 路由与 native 材质开关已由正式 CSS 外壳替代。`src/app/(main)/layout.tsx` 常驻 Toolbar（52px，红绿灯 x16/y19）、SegmentedControl、LearnerSwitcher，路由包含首页、现有 `/journal`、设置以及暂留的 `/parents`。切 tab 只由组内 template 对内容做 150ms 淡入和 4px 位移，课堂及下课独立全窗口。首页由 P3 替换为列表/详情，记录与设置暂留旧内容；首页原右上浮层由工具栏替代；现有麦克风首次引导移至独立 `/microphone` 路由，不挂主工具栏；完整三步引导留 P5。
 
 G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体，英文词汇使用已打包 Fredoka，旧字体文件留待 P6 清理。新组件使用 lucide-react 线性图标。UI primitives 包括 Button、GlassPanel、Tag、ProgressBar、Banner、Skeleton、EmptyState、六状态 PushToTalkPill。全局限制拖选、图片拖动、回弹、网页右键菜单，输入和说明可复制；输入右键保留原生编辑菜单，键盘焦点紫色环，降低透明度时工具栏和玻璃面板使用不透明浅色底。
 
@@ -737,8 +737,16 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 `IntroFrame` 为全宽麻吉水彩头像、当前老师字幕气泡和 6×2 图片墙；开始后的卡片点击沿用 `requestIntroCard` 和 introBusy 锁。逐词 `LessonMandalaV2` 与句子 `ReinforceFrame` 共用 `LessonCard`：左侧方图以容器高度和最小文字宽度计算尺寸，Fredoka 单词随容器缩放且长词降档（原型 6/8 字符档，另为现有长词组补 11/14 字符档），显示中文和多段 drillParts；逐词保留 awaiting 才能使用的老师重讲。选词用 2×2 图左字右卡，答对薄荷勾，答错轻微晃动。换卡旧图淡出、新图右侧滑入 250ms，reduced-motion 关闭位移。大卡保留 data-picture-card-size=hero 和 data-picture-card-state，供真实持按 smoke 定位。
 
-右栏 `SubtitleLog` 在逐词及巩固之间常驻，订阅现有 subtitle/subtitle-clear/asr-final，视图层最多累积 50 条。老师白底左对齐，孩子浅紫右对齐；partial 替换同轮识别文本，asr-final 或 clear 结束识别中样式，不把字幕写入控制器或持久数据。开场直接订阅老师当前字幕，不显示右栏。
+右栏 `SubtitleLog` 在逐词及巩固之间常驻，订阅现有 subtitle/subtitle-clear/asr-final，视图层最多累积 50 条。老师白底左对齐，孩子浅紫右对齐；孩子标签根据本课 learnerId 读取档案姓名，读取失败回退「你」；partial 替换同轮识别文本，asr-final 或 clear 结束识别中样式，不把字幕写入控制器或持久数据。开场直接订阅老师当前字幕，不显示右栏。
 
 `PushToTalkPill` 由 LessonStateName 映射六状态，idle/greeting 为 preparing、speaking/quiz-speaking 为 speaking，其余同名。只在 awaiting 开始，listening 保留释放语义；句子仍等待静态提示播完后启用，并沿用 routeToChat:false 与候选句。持按 Space 共用 useSpacebar，pointer capture 不因移出而结束，blur 清除按键锁并释放一次。可访问名称固定为「按住空格说话」，可见文案随状态变化。recorder 未暴露实时音量，声波采用固定动画，不改语音链路。
 
 课堂错误在工具栏下显示 Banner，配置类保留去设置，其他沿用 4 秒消失；transitionRetry 在舞台中显示 EmptyState 和用户触发的再试一次，字幕栏保留。断点 initialCardId/initialClearedCardIds/passedQuizIds、show_card 对已通过词及其句子卡的过滤、controller 推进与保存行为均保持。phase=done 暂用原 DoneCelebrateFrame。
+
+### P3 首页（2026-10-25）
+
+`CourseHome` 使用 232px 可滚动纯文字课程侧栏，按 completed / hasResume / timesStarted 分为接着学、学完了、新课；全部注册课程可选。右侧显示课程事实、单词掌握比例、最近练习时间和 6×2 图片墙。已会按当前词卡 masteryStars ≥ 2 计算，不使用 API 的 3 星 masteredWords 或会话 clearedCardIds；上次取 lastPracticed 最大有效值，按本地日历显示今天/昨天/日期与时间，未上过不显示。单词图片随格子高度 cover，英文单行省略，卡片不响应点击。
+
+显式选课保存为 `eduagent.selectedCourse.<learnerId>`，无有效记忆时优先接着学首课；切换孩子重新挂载并读取该孩子的进度，取消旧请求结果。多档案未选时显示具名选择面板，无档案保持设置建档入口。课程/进度未完成读取显示骨架，任一读取失败显示可重试错误，空目录单独显示空状态。新课按钮为开始上课，上过为继续上课，均复用既有 learnerId 路由和续课能力。没有跳过有效断点的现有入口，因此不提供从头复习按钮，也不改 controller；已完成课程原有 start 自动开启复习的行为保持。
+
+原生菜单监听根 Menu 的 menu-will-show：Electron 45 的 Cocoa controller 在应用子菜单打开时向根 model 发事件。与加载/导航/聚焦刷新共用固定本地读取，无新增 IPC。macOS tracking 期间结构重建会延迟到菜单关闭，所以额外观察当前 renderer 的固定 /api/learners 请求完成事件，提前同步同页档案和选择变化；只读 Node fetch 不经过该 session，不产生循环。异步读取失败保留旧菜单供下次恢复。

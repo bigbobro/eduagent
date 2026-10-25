@@ -1,5 +1,5 @@
 import { act, render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { LessonController } from '@/lib/voice/lesson-controller';
 import { SubtitleLog } from './SubtitleLog';
 
@@ -13,6 +13,17 @@ function controller() {
 }
 
 describe('SubtitleLog', () => {
+  it('uses the lesson child name while recognizing and after finalizing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: 'b', name: '安安' }]))));
+    const source = controller();
+    render(<SubtitleLog controller={source as unknown as LessonController} learnerId="b" />);
+    await act(async () => {});
+    act(() => source.emit('subtitle', { text: 'cat', source: 'user' }));
+    expect(await screen.findByText('安安 · 识别中')).toBeTruthy();
+    act(() => source.emit('asr-final'));
+    expect(screen.getByText('安安')).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
   it('keeps teacher sentences, replaces partial recognition, and finalizes a child turn', () => {
     const source = controller();
     render(<SubtitleLog controller={source as unknown as LessonController} />);
