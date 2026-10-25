@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { WebSocket as WsClient } from 'ws';
+import { doubaoAuthHeaders } from '../src/lib/voice/doubao-auth';
 import {
   decodeServerFrame,
   decodeTtsFrame,
@@ -85,8 +86,7 @@ function synthesizePcm(text: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
   return new Promise((resolve, reject) => {
     const ws = new WsClient(DOUBAO_TTS_URL, { headers: {
-      'X-Api-App-Id': process.env.DOUBAO_APP_ID || '',
-      'X-Api-Access-Key': process.env.DOUBAO_ACCESS_KEY || '',
+      ...doubaoAuthHeaders('tts'),
       'X-Api-Resource-Id': process.env.DOUBAO_TTS_RESOURCE_ID || 'seed-tts-2.0',
       'X-Api-Connect-Id': randomUUID(),
     } });
@@ -126,8 +126,7 @@ function runAsr(pcm: Buffer, session: AsrSessionInfo): Promise<string> {
   const requestId = randomUUID();
   return new Promise((resolve, reject) => {
     const ws = new WsClient(DOUBAO_ASR_URL, { headers: {
-      'X-Api-App-Key': process.env.DOUBAO_APP_ID || '',
-      'X-Api-Access-Key': process.env.DOUBAO_ACCESS_KEY || '',
+      ...doubaoAuthHeaders('asr'),
       'X-Api-Resource-Id': process.env.DOUBAO_ASR_RESOURCE_ID || 'volc.seedasr.sauc.duration',
       'X-Api-Request-Id': requestId,
       'X-Api-Sequence': '-1',

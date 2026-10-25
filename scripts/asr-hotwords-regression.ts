@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { WebSocket as WsClient } from 'ws';
+import { doubaoAuthHeaders, resolveDoubaoAuthMode } from '../src/lib/voice/doubao-auth';
 import {
   decodeServerFrame,
   decodeTtsFrame,
@@ -66,8 +67,7 @@ const cases: RegressionCase[] = CASE_SPECS.flatMap(({ courseId, cardIds }) => (
 
 async function main(): Promise<void> {
   requireEnv([
-    'DOUBAO_APP_ID',
-    'DOUBAO_ACCESS_KEY',
+    ...(resolveDoubaoAuthMode() === 'apikey' ? ['DOUBAO_API_KEY'] : ['DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY']),
     'DOUBAO_ASR_RESOURCE_ID',
     'DOUBAO_TTS_RESOURCE_ID',
     'DOUBAO_TTS_DEFAULT_SPEAKER',
@@ -228,8 +228,7 @@ async function synthesizePcm(text: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const ws = new WsClient(DOUBAO_TTS_URL, {
       headers: {
-        'X-Api-App-Id': process.env.DOUBAO_APP_ID || '',
-        'X-Api-Access-Key': process.env.DOUBAO_ACCESS_KEY || '',
+        ...doubaoAuthHeaders('tts'),
         'X-Api-Resource-Id': process.env.DOUBAO_TTS_RESOURCE_ID || 'seed-tts-2.0',
         'X-Api-Connect-Id': connectId,
       },
@@ -314,8 +313,7 @@ async function runAsr(pcm: Buffer, session: AsrSessionInfo, caseId: string, vari
   return new Promise((resolve, reject) => {
     const ws = new WsClient(DOUBAO_ASR_URL, {
       headers: {
-        'X-Api-App-Key': process.env.DOUBAO_APP_ID || '',
-        'X-Api-Access-Key': process.env.DOUBAO_ACCESS_KEY || '',
+        ...doubaoAuthHeaders('asr'),
         'X-Api-Resource-Id': process.env.DOUBAO_ASR_RESOURCE_ID || 'volc.seedasr.sauc.duration',
         'X-Api-Request-Id': requestId,
         'X-Api-Sequence': '-1',
