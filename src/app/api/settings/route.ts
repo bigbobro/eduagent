@@ -42,7 +42,10 @@ export async function POST(req: Request) {
   try {
     const saved = mergeSubmitted(readSettingsFile(path), parsed.data);
     writeSettingsFile(path, saved);
-    console.log('[settings] saved', { provider: saved.llmChannels.find((channel) => channel.id === saved.activeLlmChannelId)?.provider ?? 'custom' });
+    console.log('[settings] saved', {
+      provider: saved.llmChannels.find((channel) => channel.id === saved.activeLlmChannelId)?.provider ?? 'custom',
+      doubaoAuth: saved.doubaoAuthMode,
+    });
   } catch (err) {
     console.error('[settings] write failed', { message: (err as Error).message });
     return NextResponse.json({ error: '保存失败,请重试' }, { status: 500 });

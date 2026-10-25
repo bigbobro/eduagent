@@ -47,6 +47,11 @@ describe('SettingsClient', () => {
     expect(await screen.findByRole('heading', { name: 'AI 老师' })).toBeTruthy();
     expect(screen.queryByLabelText(/TTS Resource ID/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '语音' }));
+    expect(screen.getByLabelText('豆包 API Key')).toBeTruthy();
+    expect(screen.queryByLabelText('App ID')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /旧版控制台/ }));
+    expect(screen.getByLabelText('App ID')).toBeTruthy();
+    expect(screen.queryByLabelText('豆包 API Key')).toBeNull();
     expect(screen.queryByLabelText(/TTS Resource ID/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /高级/ }));
     expect((screen.getByLabelText(/TTS Resource ID/) as HTMLInputElement).value).toBe('seed-tts-2.0');

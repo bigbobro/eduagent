@@ -9,6 +9,7 @@ import { SETTINGS_DEFAULTS } from '@/lib/settings/store';
 // 全部走本地 fake server,不请求任何真实厂商端点。
 const GOOD_LLM_KEY = 'fake-llm-good-key-1111';
 const GOOD_ACCESS = 'fake-access-good-2222';
+const GOOD_API_KEY = 'fake-doubao-api-key-3333';
 const ORIGIN = 'http://127.0.0.1:3000';
 
 function ttsFrame(event: number, payload = '{}'): Buffer {
@@ -44,6 +45,7 @@ describe('POST /api/settings/test against local fake servers', () => {
   let llmUrl: string;
   const seenAuth: string[] = [];
   const seenBodies: string[] = [];
+  const seenVoice: Array<Record<string, string>> = [];
   const envKeys = ['PORT', 'DOUBAO_TTS_WS_URL', 'DOUBAO_ASR_WS_URL', 'EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'VOICE_MOCK'];
   const saved: Record<string, string | undefined> = {};
 
@@ -52,6 +54,7 @@ describe('POST /api/settings/test against local fake servers', () => {
     process.env.PORT = '3000';
     seenAuth.length = 0;
     seenBodies.length = 0;
+    seenVoice.length = 0;
 
     llm = createServer((req, res) => {
       seenAuth.push(req.headers.authorization ?? '');
@@ -72,7 +75,15 @@ describe('POST /api/settings/test against local fake servers', () => {
     llmUrl = `http://127.0.0.1:${(llm.address() as AddressInfo).port}/v1`;
 
     const verifyClient = (info: { req: { headers: Record<string, string | string[] | undefined> } }, cb: (ok: boolean, code?: number, msg?: string) => void) => {
-      if (info.req.headers['x-api-access-key'] === GOOD_ACCESS) cb(true);
+      const header = (name: string) => String(info.req.headers[name] ?? '');
+      seenVoice.push({
+        key: header('x-api-key'),
+        appKey: header('x-api-app-key'),
+        appId: header('x-api-app-id'),
+        access: header('x-api-access-key'),
+        resource: header('x-api-resource-id'),
+      });
+      if (header('x-api-access-key') === GOOD_ACCESS || header('x-api-key') === GOOD_API_KEY) cb(true);
       else cb(false, 401, 'Unauthorized');
     };
     tts = new WebSocketServer({ port: 0, host: '127.0.0.1', verifyClient });
@@ -99,6 +110,8 @@ describe('POST /api/settings/test against local fake servers', () => {
     model?: string;
     provider?: 'siliconflow' | 'volc-ark' | 'deepseek' | 'custom';
     channelId?: string;
+    doubaoAuthMode?: 'apikey' | 'legacy';
+    doubaoApiKey?: string;
     doubaoAppId?: string;
     doubaoAccessKey?: string;
     channels?: Array<Record<string, string>>;
@@ -121,6 +134,8 @@ describe('POST /api/settings/test against local fake servers', () => {
         ...SETTINGS_DEFAULTS,
         llmChannels: over.channels ?? [one],
         activeLlmChannelId: over.activeLlmChannelId ?? id,
+        doubaoAuthMode: over.doubaoAuthMode ?? 'legacy',
+        doubaoApiKey: over.doubaoApiKey ?? '',
         doubaoAppId: over.doubaoAppId ?? 'fake-app',
         doubaoAccessKey: over.doubaoAccessKey ?? '',
         scope: over.scope,
@@ -139,6 +154,31 @@ describe('POST /api/settings/test against local fake servers', () => {
     expect(report.asr.ok).toBe(true);
     expect(seenAuth).toEqual([`Bearer ${GOOD_LLM_KEY}`]);
     expect(JSON.parse(seenBodies[0]).thinking).toBeUndefined();
+    const asr = seenVoice.find((headers) => headers.resource === 'volc.seedasr.sauc.duration');
+    const tts = seenVoice.find((headers) => headers.resource === 'seed-tts-2.0');
+    expect(asr).toMatchObject({ appKey: 'fake-app', access: GOOD_ACCESS, key: '' });
+    expect(tts).toMatchObject({ appId: 'fake-app', access: GOOD_ACCESS, key: '' });
+  });
+
+  it('voice scope uses the new API key header and ignores a saved legacy key', async () => {
+    const report = await run({
+      scope: 'voice',
+      doubaoAuthMode: 'apikey',
+      doubaoApiKey: GOOD_API_KEY,
+      doubaoAppId: '',
+      doubaoAccessKey: GOOD_ACCESS,
+    });
+    expect(report.tts.ok).toBe(true);
+    expect(report.asr.ok).toBe(true);
+    expect(report.llm).toBeUndefined();
+    expect(seenVoice).toHaveLength(2);
+    for (const headers of seenVoice) {
+      expect(headers.key).toBe(GOOD_API_KEY);
+      expect(headers.appKey).toBe('');
+      expect(headers.appId).toBe('');
+      expect(headers.access).toBe('');
+      expect(headers.resource).not.toBe('');
+    }
   });
 
   it('probes the requested channel even when it is not active, and disables volc-ark thinking', async () => {

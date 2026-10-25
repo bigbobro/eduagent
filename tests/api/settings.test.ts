@@ -28,6 +28,8 @@ const channel = (over: Record<string, string> = {}) => ({
 const form = (over: Record<string, unknown> = {}) => ({
   llmChannels: [channel()],
   activeLlmChannelId: 'default-llm',
+  doubaoAuthMode: 'legacy' as const,
+  doubaoApiKey: '',
   doubaoAppId: 'fake-app-id-12345678',
   doubaoAccessKey: FAKE_ACCESS,
   doubaoAsrResourceId: 'asr-res',
@@ -49,7 +51,7 @@ function post(handler: typeof POST, body: unknown, origin: string | null = ORIGI
 describe('/api/settings', () => {
   let dir: string;
   let settingsPath: string;
-  const envKeys = ['EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'PORT', 'VOICE_MOCK', 'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY', 'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID'];
+  const envKeys = ['EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'PORT', 'VOICE_MOCK', 'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY', 'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID'];
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {
@@ -81,6 +83,8 @@ describe('/api/settings', () => {
     expect(body.values.llmChannels[0].provider).toBe('siliconflow');
     expect(body.values.activeLlmChannelId).toBe('default-llm');
     expect(body.values.doubaoAsrResourceId).toBe('volc.seedasr.sauc.duration');
+    expect(body.values.doubaoAuthMode).toBe('apikey');
+    expect(body.values.doubaoApiKey).toBe('');
   });
 
   it('GET masks every credential field (last 4 only) and returns non-secrets as is', async () => {

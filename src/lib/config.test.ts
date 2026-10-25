@@ -15,6 +15,8 @@ describe('config: LLM credential group resolution', () => {
     ...Object.keys(REQUIRED),
     'LLM_API_KEY',
     'LLM_BASE_URL',
+    'DOUBAO_AUTH_MODE',
+    'DOUBAO_API_KEY',
     'LLM_MODEL',
     'LLM_PROVIDER',
     'MIMO_BASE_URL',
@@ -103,7 +105,7 @@ describe('config: LLM credential group resolution', () => {
 
 describe('config: 未配置 / 已配置 / mock 三种状态', () => {
   const KEYS = [
-    'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
+    'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
     'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'VOICE_MOCK',
   ];
   const saved: Record<string, string | undefined> = {};
@@ -138,5 +140,24 @@ describe('config: 未配置 / 已配置 / mock 三种状态', () => {
   it('mock: VOICE_MOCK=true counts as configured without any key', () => {
     process.env.VOICE_MOCK = 'true';
     expect(isConfigured()).toBe(true);
+  });
+
+  it('new console API key is enough, and the mode selects which credentials count', () => {
+    process.env.LLM_API_KEY = 'llm';
+    process.env.DOUBAO_API_KEY = 'voice';
+    process.env.DOUBAO_ASR_RESOURCE_ID = 'asr';
+    process.env.DOUBAO_TTS_RESOURCE_ID = 'tts';
+    expect(isConfigured()).toBe(true);
+    expect(getConfig().doubaoAuthMode).toBe('apikey');
+
+    process.env.DOUBAO_AUTH_MODE = 'legacy';
+    resetConfig();
+    expect(isConfigured()).toBe(false);
+
+    process.env.DOUBAO_APP_ID = 'app';
+    process.env.DOUBAO_ACCESS_KEY = 'access';
+    resetConfig();
+    expect(isConfigured()).toBe(true);
+    expect(getConfig().doubaoAuthMode).toBe('legacy');
   });
 });

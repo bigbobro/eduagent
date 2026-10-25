@@ -4,12 +4,8 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { SettingsField, SettingsNotice } from './SettingsField';
+import { DoubaoConsoleLink, VoiceAuthFields } from './VoiceAuthFields';
 import type { CheckResult, SettingsDraft, TestReport, VoiceField } from './useSettingsDraft';
-
-const VOICE: { key: VoiceField; label: string; secret: boolean }[] = [
-  { key: 'doubaoAppId', label: 'App ID', secret: true },
-  { key: 'doubaoAccessKey', label: 'Access Key', secret: true },
-];
 
 const ADVANCED: { key: VoiceField; label: string; hint?: string; secret: boolean }[] = [
   { key: 'doubaoAsrResourceId', label: 'ASR Resource ID', hint: '语音识别资源', secret: false },
@@ -44,17 +40,10 @@ export function VoiceSettingsPanel({ draft }: { draft: SettingsDraft }) {
           className="settings-card"
           aria-label="豆包语音"
         >
-          {VOICE.map((field) => (
-            <SettingsField
-              key={field.key}
-              label={field.label}
-              secret={field.secret}
-              value={draft.voice[field.key]}
-              masked={field.secret ? draft.maskedVoice[field.key as 'doubaoAppId'] : undefined}
-              disabled={disabled}
-              onChange={(value) => draft.setVoice(field.key, value)}
-            />
-          ))}
+          <VoiceAuthFields
+            draft={draft}
+            disabled={disabled}
+          />
           <button
             type="button"
             className="settings-advanced"
@@ -97,15 +86,7 @@ export function VoiceSettingsPanel({ draft }: { draft: SettingsDraft }) {
         <p role="status">正在重启…保存成功,窗口马上刷新。</p>
       )}
       <div className="settings-actions">
-        <a
-          className="ui-button ui-button-glass"
-          href="https://console.volcengine.com/speech/app"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="打开火山引擎豆包语音控制台"
-        >
-          打开豆包语音控制台
-        </a>
+        <DoubaoConsoleLink />
         <span className="settings-spacer" />
         {!draft.readOnly && draft.info && !draft.info.mock && (
           <>

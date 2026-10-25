@@ -12,6 +12,7 @@ import {
   Serialization,
 } from './doubao-codec';
 import { createWsTeardown } from './ws-teardown';
+import { doubaoAuthHeaders, resolveDoubaoAuthMode } from './doubao-auth';
 import { doubaoAsrWsUrl } from './doubao-endpoints';
 
 
@@ -219,10 +220,9 @@ interface AsrBridgeOptions {
 export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: AsrBridgeOptions = {}): void {
   const requestId = randomUUID();
   const tag = `[asr ${requestId.slice(0, 8)}]`;
-  console.log(`${tag} bridge open`);
+  console.log(`${tag} bridge open auth=${resolveDoubaoAuthMode()}`);
   const headers: Record<string, string> = {
-    'X-Api-App-Key': process.env.DOUBAO_APP_ID || '',
-    'X-Api-Access-Key': process.env.DOUBAO_ACCESS_KEY || '',
+    ...doubaoAuthHeaders('asr'),
     'X-Api-Resource-Id': process.env.DOUBAO_ASR_RESOURCE_ID || 'volc.seedasr.sauc.duration',
     'X-Api-Request-Id': requestId,
     'X-Api-Sequence': '-1',

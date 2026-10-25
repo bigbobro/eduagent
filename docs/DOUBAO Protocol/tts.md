@@ -24,17 +24,27 @@ The implementation lives in:
 
 ## Headers
 
-The current implementation uses the older console-style headers:
+`src/lib/voice/doubao-auth.ts` builds one auth row. The resource and
+connection headers stay either way.
+
+New console (`DOUBAO_AUTH_MODE=apikey`, the default for a new install):
+
+- `X-Api-Key` from `DOUBAO_API_KEY`
+
+Older console (`legacy`):
 
 - `X-Api-App-Id` from `DOUBAO_APP_ID`
 - `X-Api-Access-Key` from `DOUBAO_ACCESS_KEY`
+
+Always:
+
 - `X-Api-Resource-Id` from `DOUBAO_TTS_RESOURCE_ID`
 - `X-Api-Connect-Id`
 
-Note the ASR/TTS naming difference: ASR uses `X-Api-App-Key`; TTS uses
-`X-Api-App-Id`.
-
-Do not expose these values to browser code.
+Note the ASR/TTS naming difference on the old console: ASR uses
+`X-Api-App-Key`; TTS uses `X-Api-App-Id`. The new console uses `X-Api-Key`
+for both. Do not expose these values to browser code. A live new-console
+key has not been exercised here.
 
 ## Local Integration Contracts
 

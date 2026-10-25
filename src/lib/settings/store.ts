@@ -4,6 +4,7 @@ import { chmodSync, closeSync, existsSync, openSync, readFileSync, renameSync, u
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { DEFAULT_TTS_SPEAKER, getConfig } from '../config';
+import type { DoubaoAuthMode } from '../voice/doubao-auth';
 import {
   inferLlmProvider,
   isLlmProviderId,
@@ -52,6 +53,8 @@ export function defaultSettings(): SettingsValues {
   return {
     llmChannels: [channel],
     activeLlmChannelId: channel.id,
+    doubaoAuthMode: 'apikey',
+    doubaoApiKey: '',
     doubaoAppId: '',
     doubaoAccessKey: '',
     doubaoAsrResourceId: 'volc.seedasr.sauc.duration',
@@ -88,6 +91,8 @@ const channelSchema = z.object({
 export const settingsInputSchema = z.object({
   llmChannels: z.array(channelSchema).min(1).max(20),
   activeLlmChannelId: field.min(1).max(80),
+  doubaoAuthMode: z.enum(['apikey', 'legacy']),
+  doubaoApiKey: field,
   doubaoAppId: field,
   doubaoAccessKey: field,
   doubaoAsrResourceId: field,
@@ -126,6 +131,7 @@ export function maskValues(values: SettingsValues): SettingsValues {
   return {
     ...values,
     llmChannels: values.llmChannels.map((channel) => ({ ...channel, apiKey: maskSecret(channel.apiKey) })),
+    doubaoApiKey: maskSecret(values.doubaoApiKey),
     doubaoAppId: maskSecret(values.doubaoAppId),
     doubaoAccessKey: maskSecret(values.doubaoAccessKey),
   };
@@ -146,6 +152,7 @@ export function mergeSubmitted(saved: SettingsValues, submitted: SettingsValues)
       if (!previous) return channel;
       return { ...channel, apiKey: keepSecret(channel.apiKey, previous.apiKey) };
     }),
+    doubaoApiKey: keepSecret(submitted.doubaoApiKey, saved.doubaoApiKey),
     doubaoAppId: keepSecret(submitted.doubaoAppId, saved.doubaoAppId),
     doubaoAccessKey: keepSecret(submitted.doubaoAccessKey, saved.doubaoAccessKey),
   };
@@ -171,7 +178,7 @@ export function normalizeSettings(raw: unknown): SettingsValues {
   const defaults = defaultSettings();
   if (!raw || typeof raw !== 'object') return defaults;
   const record = raw as Record<string, unknown>;
-  const voice = voiceFrom(record, defaults);
+  const voice = { ...voiceFrom(record, defaults), ...authFrom(record) };
   if (Array.isArray(record.llmChannels)) {
     const channels = record.llmChannels.map(parseChannel).filter((channel): channel is LlmChannel => channel !== null);
     const llmChannels = channels.length > 0 ? channels : defaults.llmChannels;
@@ -181,6 +188,14 @@ export function normalizeSettings(raw: unknown): SettingsValues {
   }
   if (isLegacyLlm(record)) return { ...migrateLegacyLlm(record), ...voice };
   return { ...defaults, ...voice };
+}
+
+function authFrom(raw: Record<string, unknown>): Pick<SettingsValues, 'doubaoAuthMode' | 'doubaoApiKey'> {
+  const explicit = raw.doubaoAuthMode;
+  const mode: DoubaoAuthMode = explicit === 'apikey' || explicit === 'legacy'
+    ? explicit
+    : (text(raw.doubaoAppId) || text(raw.doubaoAccessKey) ? 'legacy' : 'apikey');
+  return { doubaoAuthMode: mode, doubaoApiKey: text(raw.doubaoApiKey) };
 }
 
 function isLegacyLlm(raw: Record<string, unknown>): boolean {
@@ -260,6 +275,8 @@ export function applySettingsToEnv(): void {
   if (getSettingsMode() !== 'app' || !path) return;
   for (const name of LLM_ENV_NAMES) delete process.env[name];
   for (const name of Object.values(VOICE_ENV)) delete process.env[name];
+  delete process.env.DOUBAO_API_KEY;
+  delete process.env.DOUBAO_AUTH_MODE;
   if (!existsSync(path)) {
     applyValues(defaultSettings());
     return;
@@ -273,15 +290,22 @@ export function applySettingsToEnv(): void {
     return;
   }
   const values = normalizeSettings(raw);
-  if (isLegacyDocument(raw)) {
+  if (isLegacyDocument(raw) || needsAuthMigration(raw)) {
     try {
       writeSettingsFile(path, values);
-      console.log('[settings] migrated legacy llm settings');
+      console.log('[settings] migrated legacy settings');
     } catch (err) {
       console.error('[settings] legacy migration write failed', { message: (err as Error).message });
     }
   }
   applyValues(values);
+}
+
+function needsAuthMigration(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const record = raw as Record<string, unknown>;
+  if (record.doubaoAuthMode === 'apikey' || record.doubaoAuthMode === 'legacy') return false;
+  return text(record.doubaoAppId) !== '' || text(record.doubaoAccessKey) !== '';
 }
 
 function isLegacyDocument(raw: unknown): boolean {
@@ -297,10 +321,12 @@ function applyValues(values: SettingsValues): void {
   if (channel.baseUrl) process.env.LLM_BASE_URL = channel.baseUrl;
   if (channel.model) process.env.LLM_MODEL = channel.model;
   process.env.LLM_PROVIDER = channel.provider;
+  process.env.DOUBAO_AUTH_MODE = values.doubaoAuthMode;
+  if (values.doubaoApiKey) process.env.DOUBAO_API_KEY = values.doubaoApiKey;
   for (const key of VOICE_FIELDS) {
     if (values[key]) process.env[VOICE_ENV[key]] = values[key];
   }
-  console.log('[settings] applied active channel', { provider: channel.provider });
+  console.log('[settings] applied active channel', { provider: channel.provider, doubaoAuth: values.doubaoAuthMode });
 }
 
 // ─── 当前生效值(给 GET 与测试连接用)───────────────────────────────────
@@ -328,6 +354,8 @@ function settingsFromEnv(): SettingsValues {
     ...defaults,
     llmChannels: [channel],
     activeLlmChannelId: channel.id,
+    doubaoAuthMode: config.doubaoAuthMode,
+    doubaoApiKey: config.doubaoApiKey,
     doubaoAppId: config.doubaoAppId,
     doubaoAccessKey: config.doubaoAccessKey,
     doubaoAsrResourceId: config.doubaoAsrResourceId || defaults.doubaoAsrResourceId,

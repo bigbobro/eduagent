@@ -36,7 +36,8 @@ describe('settings store', () => {
   let path: string;
   const envKeys = [
     'EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER',
-    'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY', 'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'DOUBAO_TTS_DEFAULT_SPEAKER',
+    'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
+    'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'DOUBAO_TTS_DEFAULT_SPEAKER',
     'MIMO_API_KEY',
   ];
   const saved: Record<string, string | undefined> = {};
@@ -62,6 +63,7 @@ describe('settings store', () => {
     expect(masked.llmChannels[0].apiKey).toBe('••••1234');
     expect(masked.llmChannels[1].apiKey).toBe('••••9999');
     expect(masked.doubaoAccessKey).toBe('••••5678');
+    expect(maskValues({ ...FAKE, doubaoApiKey: 'fake-doubao-api-key-7788' }).doubaoApiKey).toBe('••••7788');
     expect(masked.llmChannels[0].baseUrl).toBe(FAKE.llmChannels[0].baseUrl);
     expect(JSON.stringify(masked)).not.toContain('aaaaaaaaaaaa');
     expect(JSON.stringify(masked)).not.toContain('bbbbbbbbbbbb');
@@ -69,7 +71,7 @@ describe('settings store', () => {
 
   it('keeps each channel key by id when the submission is masked or empty', () => {
     const second = { ...FAKE.llmChannels[0], id: 'other', name: '自定义', provider: 'custom' as const, apiKey: 'sk-other-bbbbbbbbbbbb9999', baseUrl: 'https://llm.example.test/v1' };
-    const saved = { ...FAKE, llmChannels: [...FAKE.llmChannels, second] };
+    const saved = { ...FAKE, llmChannels: [...FAKE.llmChannels, second], doubaoApiKey: 'fake-doubao-api-key-7788' };
     const merged = mergeSubmitted(saved, {
       ...saved,
       llmChannels: [
@@ -79,6 +81,7 @@ describe('settings store', () => {
       ],
       doubaoAccessKey: '',
       doubaoAppId: 'new-app-id',
+      doubaoApiKey: '••••7788',
     });
     expect(merged.llmChannels[0].apiKey).toBe(FAKE.llmChannels[0].apiKey);
     expect(merged.llmChannels[0].model).toBe('m2');
@@ -86,6 +89,7 @@ describe('settings store', () => {
     expect(merged.llmChannels[2].apiKey).toBe('');
     expect(merged.doubaoAccessKey).toBe(FAKE.doubaoAccessKey);
     expect(merged.doubaoAppId).toBe('new-app-id');
+    expect(merged.doubaoApiKey).toBe('fake-doubao-api-key-7788');
     expect(isMaskedValue('••••1234')).toBe(true);
   });
 
@@ -129,6 +133,17 @@ describe('settings store', () => {
     }]);
     expect(values.activeLlmChannelId).toBe(LEGACY_CHANNEL_ID);
     expect(values.doubaoAppId).toBe('app-12345678');
+    expect(values.doubaoAuthMode).toBe('legacy');
+    expect(values.doubaoApiKey).toBe('');
+  });
+
+  it('keeps a new install on the API key mode, and an explicit mode wins over a leftover App ID', () => {
+    expect(normalizeSettings({ llmChannels: SETTINGS_DEFAULTS.llmChannels }).doubaoAuthMode).toBe('apikey');
+    expect(normalizeSettings({
+      doubaoAuthMode: 'apikey',
+      doubaoApiKey: 'fake-doubao-api-key-7788',
+      doubaoAppId: 'app-12345678',
+    }).doubaoAuthMode).toBe('apikey');
   });
 
   it('applySettingsToEnv maps the active channel onto LLM_* plus LLM_PROVIDER and rewrites a legacy file', () => {
@@ -151,6 +166,9 @@ describe('settings store', () => {
     expect(process.env.LLM_BASE_URL).toBe('https://ark.cn-beijing.volces.com/api/v3');
     expect(process.env.LLM_MODEL).toBe('deepseek-v4-1-flash-economy');
     expect(process.env.LLM_PROVIDER).toBe('volc-ark');
+    expect(saved.doubaoAuthMode).toBe('legacy');
+    expect(process.env.DOUBAO_AUTH_MODE).toBe('legacy');
+    expect(process.env.DOUBAO_API_KEY).toBeUndefined();
     expect(process.env.DOUBAO_APP_ID).toBe(FAKE.doubaoAppId);
     expect(process.env.DOUBAO_ASR_RESOURCE_ID).toBe('volc.seedasr.sauc.duration');
     expect(process.env.MIMO_API_KEY).toBeUndefined();

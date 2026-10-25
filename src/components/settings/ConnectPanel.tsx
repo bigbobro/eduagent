@@ -5,12 +5,8 @@ import { LLM_PROVIDERS, withProvider } from '@/lib/llm-providers';
 import { Button } from '@/components/ui/Button';
 import { SettingsField, SettingsNotice } from './SettingsField';
 import { ProviderCards } from './TeacherSection';
-import type { CheckResult, SettingsDraft, TestReport, VoiceField } from './useSettingsDraft';
-
-const VOICE: { key: VoiceField; label: string; secret: boolean }[] = [
-  { key: 'doubaoAppId', label: 'App ID', secret: true },
-  { key: 'doubaoAccessKey', label: 'Access Key', secret: true },
-];
+import { DoubaoConsoleLink, VoiceAuthFields } from './VoiceAuthFields';
+import type { CheckResult, SettingsDraft, TestReport } from './useSettingsDraft';
 
 const STATUS: { key: keyof TestReport; label: string }[] = [
   { key: 'llm', label: 'AI 老师' },
@@ -109,17 +105,10 @@ export function ConnectPanel({
             aria-label="豆包语音"
           >
             <legend>豆包语音</legend>
-            {VOICE.map((field) => (
-              <SettingsField
-                key={field.key}
-                label={field.label}
-                secret={field.secret}
-                value={draft.voice[field.key]}
-                masked={draft.maskedVoice[field.key as 'doubaoAppId']}
-                disabled={disabled}
-                onChange={(value) => draft.setVoice(field.key, value)}
-              />
-            ))}
+            <VoiceAuthFields
+              draft={draft}
+              disabled={disabled}
+            />
             <div className="settings-status">
               <span>连接状态</span>
               <div className="settings-chips">
@@ -149,15 +138,7 @@ export function ConnectPanel({
             以后再说
           </Button>
         )}
-        <a
-          className="ui-button ui-button-glass ui-button-lg"
-          href="https://console.volcengine.com/speech/app"
-          target="_blank"
-          rel="noreferrer"
-          aria-label="打开火山引擎豆包语音控制台"
-        >
-          打开豆包语音控制台
-        </a>
+        <DoubaoConsoleLink large />
         <span className="settings-spacer" />
         {!draft.readOnly && draft.info && !draft.info.mock && (
           <>

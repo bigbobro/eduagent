@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { clearResumeMicrophone, markResumeMicrophone } from '@/lib/onboarding-entry';
 import { LLM_PROVIDERS, type LlmChannel, type LlmProviderId } from '@/lib/llm-providers';
-import type { SettingsValues, VoiceField } from '@/lib/settings/types';
+import type { DoubaoAuthMode, SettingsValues, VoiceField } from '@/lib/settings/types';
 
 export type { LlmChannel, LlmProviderId, VoiceField };
 export interface CheckResult { ok: boolean; reason: string }
@@ -20,7 +20,13 @@ const VOICE_DEFAULTS: Pick<SettingsValues, 'doubaoAsrResourceId' | 'doubaoTtsRes
   doubaoTtsResourceId: 'seed-tts-2.0',
 };
 
-const EMPTY_VOICE: Pick<SettingsValues, VoiceField> = {
+export type VoiceDraft = Pick<SettingsValues, VoiceField | 'doubaoApiKey'> & {
+  doubaoAuthMode: DoubaoAuthMode;
+};
+
+const EMPTY_VOICE: VoiceDraft = {
+  doubaoAuthMode: 'apikey',
+  doubaoApiKey: '',
   doubaoAppId: '',
   doubaoAccessKey: '',
   doubaoAsrResourceId: '',
@@ -34,8 +40,8 @@ export interface SettingsDraft {
   channels: LlmChannel[];
   maskedKeys: Record<string, string>;
   activeLlmChannelId: string;
-  voice: Pick<SettingsValues, VoiceField>;
-  maskedVoice: Partial<Pick<SettingsValues, 'doubaoAppId' | 'doubaoAccessKey'>>;
+  voice: VoiceDraft;
+  maskedVoice: Partial<Pick<SettingsValues, 'doubaoApiKey' | 'doubaoAppId' | 'doubaoAccessKey'>>;
   report: TestReport | null;
   channelReports: Record<string, CheckResult>;
   testing: null | 'all' | 'voice' | string;
@@ -43,7 +49,7 @@ export interface SettingsDraft {
   error: string | null;
   readOnly: boolean;
   setChannel: (id: string, patch: Partial<LlmChannel>) => void;
-  setVoice: (key: VoiceField, value: string) => void;
+  setVoice: (key: keyof VoiceDraft, value: string) => void;
   runTest: (options?: TestOptions) => Promise<void>;
   save: (options?: SaveOptions) => Promise<void>;
 }
@@ -89,17 +95,20 @@ export function useSettingsDraft(): SettingsDraft {
           hidden[channel.id] = channel.apiKey ?? '';
           return { ...channel, apiKey: '' };
         });
-        const nextVoice = { ...EMPTY_VOICE };
-        (Object.keys(EMPTY_VOICE) as VoiceField[]).forEach((key) => {
-          if (key === 'doubaoAppId' || key === 'doubaoAccessKey') return;
-          nextVoice[key] = data.values[key] || VOICE_DEFAULTS[key as 'doubaoAsrResourceId'] || '';
-        });
+        const nextVoice: VoiceDraft = {
+          ...EMPTY_VOICE,
+          doubaoAuthMode: data.values.doubaoAuthMode === 'legacy' ? 'legacy' : 'apikey',
+          doubaoAsrResourceId: data.values.doubaoAsrResourceId || VOICE_DEFAULTS.doubaoAsrResourceId,
+          doubaoTtsResourceId: data.values.doubaoTtsResourceId || VOICE_DEFAULTS.doubaoTtsResourceId,
+          doubaoTtsSpeaker: data.values.doubaoTtsSpeaker || '',
+        };
         setInfo(data);
         setChannels(nextChannels);
         setMaskedKeys(hidden);
         setActiveLlmChannelId(data.values.activeLlmChannelId || nextChannels[0]?.id || '');
         setVoiceState(nextVoice);
         setMaskedVoice({
+          doubaoApiKey: data.values.doubaoApiKey ?? '',
           doubaoAppId: data.values.doubaoAppId ?? '',
           doubaoAccessKey: data.values.doubaoAccessKey ?? '',
         });
@@ -115,7 +124,12 @@ export function useSettingsDraft(): SettingsDraft {
     setChannels((current) => current.map((channel) => (channel.id === id ? { ...channel, ...patch, id } : channel)));
   };
 
-  const setVoice = (key: VoiceField, value: string) => {
+  const setVoice = (key: keyof VoiceDraft, value: string) => {
+    if (key === 'doubaoAuthMode') {
+      if (value !== 'apikey' && value !== 'legacy') return;
+      setVoiceState((current) => ({ ...current, doubaoAuthMode: value }));
+      return;
+    }
     setVoiceState((current) => ({ ...current, [key]: value }));
   };
 

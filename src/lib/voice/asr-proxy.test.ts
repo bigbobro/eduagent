@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { bridge, buildAsrRequestPayload, parseAsrSessionInfoFromUrl } from './asr-proxy';
 import { decodeServerFrame, MessageType, Flags } from './doubao-codec';
 
@@ -129,5 +129,37 @@ describe('asr-proxy bridge', () => {
 
     expect(client.readyState).toBe(client.CLOSED);
     expect(upstream.readyState).toBe(upstream.CLOSED);
+  });
+
+  describe('auth headers', () => {
+    const keys = ['DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY'];
+    const saved: Record<string, string | undefined> = {};
+    afterEach(() => {
+      for (const key of keys) {
+        if (saved[key] === undefined) delete process.env[key];
+        else process.env[key] = saved[key];
+      }
+    });
+
+    it('sends the legacy ASR names and still sends the resource and sequence headers', () => {
+      for (const key of keys) saved[key] = process.env[key];
+      process.env.DOUBAO_AUTH_MODE = 'legacy';
+      process.env.DOUBAO_APP_ID = 'fake-app';
+      process.env.DOUBAO_ACCESS_KEY = 'fake-access';
+      delete process.env.DOUBAO_API_KEY;
+      const headers: Record<string, string>[] = [];
+      bridge(new FakeWs() as any, {}, {
+        createUpstream: (_url, options) => {
+          headers.push(options.headers);
+          return new FakeWs() as any;
+        },
+      });
+      expect(headers[0]['X-Api-App-Key']).toBe('fake-app');
+      expect(headers[0]['X-Api-Access-Key']).toBe('fake-access');
+      expect(headers[0]['X-Api-Key']).toBeUndefined();
+      expect(headers[0]['X-Api-Resource-Id']).toBe('volc.seedasr.sauc.duration');
+      expect(headers[0]['X-Api-Sequence']).toBe('-1');
+      expect(headers[0]['X-Api-Request-Id']).toBeTruthy();
+    });
   });
 });

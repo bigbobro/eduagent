@@ -126,9 +126,8 @@ try {
 const B_PORT = 38427;
 const B_ORIGIN = `http://127.0.0.1:${B_PORT}`;
 const GOOD_LLM = 'fake-llm-key-e2e-ABCD1111';
-const GOOD_ACCESS = 'fake-access-key-e2e-EFGH2222';
-const FAKE_APP_ID = 'fake-app-id-e2e-3333';
-const ALL_KEYS = [GOOD_LLM, GOOD_ACCESS, FAKE_APP_ID];
+const GOOD_DOUBAO = 'fake-doubao-key-e2e-WXYZ2222';
+const ALL_KEYS = [GOOD_LLM, GOOD_DOUBAO];
 
 function ttsConnectionStarted() {
   const body = Buffer.from('{}');
@@ -144,7 +143,12 @@ function asrFrame() {
   const bl = Buffer.alloc(4); bl.writeUInt32BE(body.length);
   return Buffer.concat([Buffer.from([0x11, 0x91, 0x10, 0x00]), seq, bl, body]);
 }
-const verifyClient = (info, cb) => (info.req.headers['x-api-access-key'] === GOOD_ACCESS ? cb(true) : cb(false, 401, 'Unauthorized'));
+const verifyClient = (info, cb) => {
+  const key = info.req.headers['x-api-key'];
+  const access = info.req.headers['x-api-access-key'];
+  if (key === GOOD_DOUBAO || access === 'fake-access-key-e2e-EFGH2222') cb(true);
+  else cb(false, 401, 'Unauthorized');
+};
 const llmServer = http.createServer((req, res) => {
   req.resume();
   req.on('end', () => {
@@ -192,16 +196,16 @@ try {
   await page.getByRole('button', { name: '修改服务地址' }).click();
   await page.getByLabel('服务地址').fill(llmUrl);
   await page.getByRole('group', { name: 'AI 老师' }).getByLabel(/^API Key/).fill(GOOD_LLM);
-  await page.getByLabel('App ID').fill(FAKE_APP_ID);
-  await page.getByLabel('Access Key').fill('wrong-access-key-0000');
+  const voice = page.getByRole('group', { name: '豆包语音' });
+  await voice.getByLabel('豆包 API Key').fill('wrong-doubao-key-0000');
   await page.getByRole('button', { name: '测试连接' }).click();
   await page.waitForFunction(() => {
     const text = document.querySelector('main')?.innerText ?? '';
     return text.includes('鉴权失败') && text.includes('401');
   }, undefined, { timeout: 20000 });
   const failText = await page.locator('main').innerText();
-  check('test connection: wrong key shows readable auth failure (fake server)', /鉴权失败/.test(failText) && failText.includes('401') && !failText.includes('wrong-access-key-0000'));
-  await page.getByLabel('Access Key').fill(GOOD_ACCESS);
+  check('test connection: wrong key shows readable auth failure (fake server)', /鉴权失败/.test(failText) && failText.includes('401') && !failText.includes('wrong-doubao-key-0000'));
+  await voice.getByLabel('豆包 API Key').fill(GOOD_DOUBAO);
   await page.getByRole('button', { name: '测试连接' }).click();
   await page.waitForFunction(() => ['AI 老师 正常', '听写 正常', '发音 正常'].every((name) => document.body.innerText.includes(name)), undefined, { timeout: 20000 });
   const okText = await page.locator('main').innerText();
@@ -212,7 +216,7 @@ try {
   await page.getByRole('link', { name: /火山引擎豆包语音控制台/ }).click();
   await page.waitForTimeout(500);
   const opened = await appB.evaluate(() => globalThis.__opened);
-  check('external guide link opens in system browser, window stays on onboarding', opened.length === 1 && opened[0].startsWith('https://console.volcengine.com/') && /\/onboarding/.test(page.url()), JSON.stringify(opened));
+  check('external guide link opens in system browser, window stays on onboarding', opened.length === 1 && opened[0] === 'https://console.volcengine.com/speech/new/setting/apikeys?projectName=default' && /\/onboarding/.test(page.url()), JSON.stringify(opened));
 
   // B4. 保存 -> server 重启 -> 窗口 reload -> 回到引导第 2 步
   const restartNavigations = [];
@@ -233,7 +237,7 @@ try {
   check('settings.json mode is 0600', (statSync(settingsPath).mode & 0o777) === 0o600, (statSync(settingsPath).mode & 0o777).toString(8));
   const infoText = (await nodeRequest('/api/settings')).text;
   const logAll = readFileSync(logPath2, 'utf8');
-  check('no full key in server.log or HTTP responses', ALL_KEYS.every((k) => !logAll.includes(k) && !infoText.includes(k)) && info.values.llmChannels[0].apiKey === '••••1111');
+  check('no full key in server.log or HTTP responses', ALL_KEYS.every((k) => !logAll.includes(k) && !infoText.includes(k)) && info.values.llmChannels[0].apiKey === '••••1111' && info.values.doubaoApiKey === '••••2222' && info.values.doubaoAuthMode === 'apikey');
 
   // B6. CSRF:无 Origin / 外站 Origin 的 POST 被拒
   const noOrigin = await nodeRequest('/api/settings', { method: 'POST', body: '{}' });

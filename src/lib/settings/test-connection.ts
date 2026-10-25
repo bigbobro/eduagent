@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket as WsClient } from 'ws';
 import { decodeTtsFrame, encodeFullClientRequest, encodeTtsEvent, MessageType } from '../voice/doubao-codec';
+import { doubaoAuthHeadersFor, type DoubaoAuthInput, type DoubaoAuthService } from '../voice/doubao-auth';
 import { doubaoAsrWsUrl, doubaoTtsWsUrl } from '../voice/doubao-endpoints';
 import type { LlmChannel } from '../llm-providers';
 import { LLM_PROVIDERS, llmRequestExtras } from '../llm-providers';
@@ -226,17 +227,34 @@ function parseErrorFrame(buf: Buffer): string | null {
   return `${code} ${msg}`.trim() || 'error';
 }
 
-export function testDoubaoTts(v: Pick<SettingsValues, 'doubaoAppId' | 'doubaoAccessKey' | 'doubaoTtsResourceId'>): Promise<CheckResult> {
-  if (!v.doubaoAppId || !v.doubaoAccessKey) return Promise.resolve({ ok: false, reason: '还没有填写豆包 App ID / Access Key' });
+type VoiceProbe = Pick<SettingsValues, 'doubaoAuthMode' | 'doubaoApiKey' | 'doubaoAppId' | 'doubaoAccessKey'>;
+
+function missingVoiceReason(v: VoiceProbe): string | null {
+  if (v.doubaoAuthMode === 'apikey') return v.doubaoApiKey ? null : '还没有填写豆包 API Key';
+  if (!v.doubaoAppId || !v.doubaoAccessKey) return '还没有填写豆包 App ID / Access Key';
+  return null;
+}
+
+function voiceAuth(v: VoiceProbe): DoubaoAuthInput {
+  return { mode: v.doubaoAuthMode, apiKey: v.doubaoApiKey, appId: v.doubaoAppId, accessKey: v.doubaoAccessKey };
+}
+
+function voiceHeaders(service: DoubaoAuthService, v: VoiceProbe, resourceId: string): Record<string, string> {
+  return {
+    ...doubaoAuthHeadersFor(service, voiceAuth(v)),
+    'X-Api-Resource-Id': resourceId,
+    ...(service === 'asr'
+      ? { 'X-Api-Request-Id': randomUUID(), 'X-Api-Sequence': '-1' }
+      : { 'X-Api-Connect-Id': randomUUID() }),
+  };
+}
+
+export function testDoubaoTts(v: VoiceProbe & Pick<SettingsValues, 'doubaoTtsResourceId'>): Promise<CheckResult> {
+  const missing = missingVoiceReason(v);
+  if (missing) return Promise.resolve({ ok: false, reason: missing });
   return probeWs({
     url: doubaoTtsWsUrl(),
-    // 与 tts-proxy.ts 同样的头
-    headers: {
-      'X-Api-App-Id': v.doubaoAppId,
-      'X-Api-Access-Key': v.doubaoAccessKey,
-      'X-Api-Resource-Id': v.doubaoTtsResourceId,
-      'X-Api-Connect-Id': randomUUID(),
-    },
+    headers: voiceHeaders('tts', v, v.doubaoTtsResourceId),
     onOpen: () => encodeTtsEvent({ event: 1, payload: Buffer.from('{}', 'utf8') }), // StartConnection
     judge: (buf) => {
       const err = parseErrorFrame(buf);
@@ -251,18 +269,12 @@ export function testDoubaoTts(v: Pick<SettingsValues, 'doubaoAppId' | 'doubaoAcc
   });
 }
 
-export function testDoubaoAsr(v: Pick<SettingsValues, 'doubaoAppId' | 'doubaoAccessKey' | 'doubaoAsrResourceId'>): Promise<CheckResult> {
-  if (!v.doubaoAppId || !v.doubaoAccessKey) return Promise.resolve({ ok: false, reason: '还没有填写豆包 App ID / Access Key' });
+export function testDoubaoAsr(v: VoiceProbe & Pick<SettingsValues, 'doubaoAsrResourceId'>): Promise<CheckResult> {
+  const missing = missingVoiceReason(v);
+  if (missing) return Promise.resolve({ ok: false, reason: missing });
   return probeWs({
     url: doubaoAsrWsUrl(),
-    // 与 asr-proxy.ts 同样的头
-    headers: {
-      'X-Api-App-Key': v.doubaoAppId,
-      'X-Api-Access-Key': v.doubaoAccessKey,
-      'X-Api-Resource-Id': v.doubaoAsrResourceId,
-      'X-Api-Request-Id': randomUUID(),
-      'X-Api-Sequence': '-1',
-    },
+    headers: voiceHeaders('asr', v, v.doubaoAsrResourceId),
     // 与 asr-proxy 相同的 full client request,不带热词
     onOpen: () =>
       encodeFullClientRequest(

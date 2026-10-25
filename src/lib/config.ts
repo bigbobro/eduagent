@@ -7,6 +7,7 @@
 
 import { z } from 'zod'
 import { isLlmProviderId, type LlmProviderId } from './llm-providers'
+import { resolveDoubaoAuthMode } from './voice/doubao-auth'
 import { DEFAULT_DOUBAO_ASR_WS_URL, DEFAULT_DOUBAO_TTS_WS_URL } from './voice/doubao-endpoints'
 
 export const DEFAULT_TTS_SPEAKER = 'BV001_streaming'
@@ -20,6 +21,8 @@ const configSchema = z.object({
   llmProvider: z.enum(['siliconflow', 'volc-ark', 'deepseek', 'custom']).default('custom'),
 
   // Doubao Voice (ASR + TTS)
+  doubaoAuthMode: z.enum(['apikey', 'legacy']).default('apikey'),
+  doubaoApiKey: z.string().default(''),
   doubaoAppId: z.string().default(''),
   doubaoAccessKey: z.string().default(''),
   doubaoAsrResourceId: z.string().default(''),
@@ -64,6 +67,8 @@ export function getConfig(): AppConfig {
       : (process.env.LLM_MODEL ?? 'deepseek-ai/DeepSeek-V3.2'),
     llmProvider: readLlmProvider(process.env.LLM_PROVIDER),
 
+    doubaoAuthMode: resolveDoubaoAuthMode(),
+    doubaoApiKey: process.env.DOUBAO_API_KEY,
     doubaoAppId: process.env.DOUBAO_APP_ID,
     doubaoAccessKey: process.env.DOUBAO_ACCESS_KEY,
     doubaoAsrResourceId: process.env.DOUBAO_ASR_RESOURCE_ID,
@@ -98,13 +103,11 @@ export function getConfig(): AppConfig {
 export function isConfigured(): boolean {
   if (process.env.VOICE_MOCK === 'true') return true
   const llmKey = process.env.LLM_API_KEY || process.env.MIMO_API_KEY
-  return Boolean(
-    llmKey &&
-      process.env.DOUBAO_APP_ID &&
-      process.env.DOUBAO_ACCESS_KEY &&
-      process.env.DOUBAO_ASR_RESOURCE_ID &&
-      process.env.DOUBAO_TTS_RESOURCE_ID,
-  )
+  const resources = process.env.DOUBAO_ASR_RESOURCE_ID && process.env.DOUBAO_TTS_RESOURCE_ID
+  const voice = resolveDoubaoAuthMode() === 'apikey'
+    ? process.env.DOUBAO_API_KEY
+    : process.env.DOUBAO_APP_ID && process.env.DOUBAO_ACCESS_KEY
+  return Boolean(llmKey && resources && voice)
 }
 
 /**

@@ -72,4 +72,41 @@ describe('tts-proxy bridge', () => {
 
     expect(upstreamEvents(upstream)).toEqual([1, 100, 200, 101]);
   });
+
+  it('sends one X-Api-Key row for the new console and keeps the connect id', () => {
+    const previous = {
+      mode: process.env.DOUBAO_AUTH_MODE,
+      key: process.env.DOUBAO_API_KEY,
+      app: process.env.DOUBAO_APP_ID,
+      access: process.env.DOUBAO_ACCESS_KEY,
+    };
+    process.env.DOUBAO_AUTH_MODE = 'apikey';
+    process.env.DOUBAO_API_KEY = 'fake-api-key';
+    delete process.env.DOUBAO_APP_ID;
+    delete process.env.DOUBAO_ACCESS_KEY;
+    const headers: Record<string, string>[] = [];
+    try {
+      bridge(new FakeWs() as any, {
+        createUpstream: (_url, options) => {
+          headers.push(options.headers);
+          return new FakeWs() as any;
+        },
+      });
+    } finally {
+      for (const [name, value] of Object.entries({
+        DOUBAO_AUTH_MODE: previous.mode,
+        DOUBAO_API_KEY: previous.key,
+        DOUBAO_APP_ID: previous.app,
+        DOUBAO_ACCESS_KEY: previous.access,
+      })) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    expect(headers[0]['X-Api-Key']).toBe('fake-api-key');
+    expect(headers[0]['X-Api-App-Id']).toBeUndefined();
+    expect(headers[0]['X-Api-Access-Key']).toBeUndefined();
+    expect(headers[0]['X-Api-Resource-Id']).toBe('seed-tts-2.0');
+    expect(headers[0]['X-Api-Connect-Id']).toBeTruthy();
+  });
 });

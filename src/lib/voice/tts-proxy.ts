@@ -9,6 +9,7 @@ import {
 } from './doubao-codec';
 import { createWsTeardown } from './ws-teardown';
 import { DEFAULT_TTS_SPEAKER } from '../config';
+import { doubaoAuthHeaders, resolveDoubaoAuthMode } from './doubao-auth';
 import { doubaoTtsWsUrl } from './doubao-endpoints';
 
 
@@ -33,9 +34,9 @@ interface TtsBridgeOptions {
 
 export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void {
   const connectId = randomUUID();
+  console.log(`[tts ${connectId.slice(0, 8)}] bridge open auth=${resolveDoubaoAuthMode()}`);
   const headers: Record<string, string> = {
-    'X-Api-App-Id': process.env.DOUBAO_APP_ID || '',
-    'X-Api-Access-Key': process.env.DOUBAO_ACCESS_KEY || '',
+    ...doubaoAuthHeaders('tts'),
     'X-Api-Resource-Id': process.env.DOUBAO_TTS_RESOURCE_ID || 'seed-tts-2.0',
     'X-Api-Connect-Id': connectId,
   };
