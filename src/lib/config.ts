@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod'
+import { isLlmProviderId, type LlmProviderId } from './llm-providers'
 import { DEFAULT_DOUBAO_ASR_WS_URL, DEFAULT_DOUBAO_TTS_WS_URL } from './voice/doubao-endpoints'
 
 export const DEFAULT_TTS_SPEAKER = 'BV001_streaming'
@@ -15,6 +16,8 @@ const configSchema = z.object({
   llmApiKey: z.string().default(''),
   llmBaseUrl: z.string().url(),
   llmModel: z.string().min(1),
+  // 缺省 custom。.env.local 不写 LLM_PROVIDER 时 server 仍能启动。
+  llmProvider: z.enum(['siliconflow', 'volc-ark', 'deepseek', 'custom']).default('custom'),
 
   // Doubao Voice (ASR + TTS)
   doubaoAppId: z.string().default(''),
@@ -59,6 +62,7 @@ export function getConfig(): AppConfig {
     llmModel: useLegacyLlm
       ? (process.env.MIMO_MODEL ?? 'mimo-v2.5-pro')
       : (process.env.LLM_MODEL ?? 'deepseek-ai/DeepSeek-V3.2'),
+    llmProvider: readLlmProvider(process.env.LLM_PROVIDER),
 
     doubaoAppId: process.env.DOUBAO_APP_ID,
     doubaoAccessKey: process.env.DOUBAO_ACCESS_KEY,
@@ -108,4 +112,9 @@ export function isConfigured(): boolean {
  */
 export function resetConfig(): void {
   cachedConfig = null
+}
+
+function readLlmProvider(value: string | undefined): LlmProviderId {
+  if (value && isLlmProviderId(value)) return value
+  return 'custom'
 }

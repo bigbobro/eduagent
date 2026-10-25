@@ -1,6 +1,7 @@
 import { getConfig } from './config';
 import { createLogger } from './logger';
 import { classifyLlmFailure, LlmServiceError } from './llm-errors';
+import { llmRequestExtras } from './llm-providers';
 
 const log = createLogger('llm');
 
@@ -83,9 +84,10 @@ export async function* streamLLM(
     temperature: 0.7,
     stream: true,
     stream_options: { include_usage: true },
+    ...llmRequestExtras(config.llmProvider),
   });
 
-  log.debug('Calling LLM', { model: config.llmModel, messageCount: apiMessages.length });
+  log.debug('Calling LLM', { model: config.llmModel, provider: config.llmProvider, messageCount: apiMessages.length });
 
   // One overall deadline, combined with the caller's cancel signal so a client disconnect still
   // aborts immediately. Each attempt also gets its own controller so the losing one can be dropped.

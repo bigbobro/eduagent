@@ -11,8 +11,20 @@ vi.mock('@/lib/audio/microphone', () => ({ getMicStatus: permission.status, requ
 vi.mock('@/lib/audio/recorder', () => ({ LessonRecorder: class { start = vi.fn(); dispose = vi.fn(); } }));
 
 const values = {
-  llmApiKey: '', llmBaseUrl: '', llmModel: '',
-  doubaoAppId: '', doubaoAccessKey: '', doubaoAsrResourceId: '', doubaoTtsResourceId: '', doubaoTtsSpeaker: '',
+  llmChannels: [{
+    id: 'default-llm',
+    name: 'SiliconFlow',
+    provider: 'siliconflow',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    apiKey: '',
+    model: 'deepseek-ai/DeepSeek-V3.2',
+  }],
+  activeLlmChannelId: 'default-llm',
+  doubaoAppId: '',
+  doubaoAccessKey: '',
+  doubaoAsrResourceId: '',
+  doubaoTtsResourceId: '',
+  doubaoTtsSpeaker: '',
 };
 const storage = new Map<string, string>();
 const json = (body: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(body), { status }));

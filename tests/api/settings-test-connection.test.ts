@@ -43,6 +43,7 @@ describe('POST /api/settings/test against local fake servers', () => {
   let asr: WebSocketServer;
   let llmUrl: string;
   const seenAuth: string[] = [];
+  const seenBodies: string[] = [];
   const envKeys = ['PORT', 'DOUBAO_TTS_WS_URL', 'DOUBAO_ASR_WS_URL', 'EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'VOICE_MOCK'];
   const saved: Record<string, string | undefined> = {};
 
@@ -50,11 +51,14 @@ describe('POST /api/settings/test against local fake servers', () => {
     for (const k of envKeys) { saved[k] = process.env[k]; delete process.env[k]; }
     process.env.PORT = '3000';
     seenAuth.length = 0;
+    seenBodies.length = 0;
 
     llm = createServer((req, res) => {
       seenAuth.push(req.headers.authorization ?? '');
-      req.resume();
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk) => chunks.push(chunk));
       req.on('end', () => {
+        seenBodies.push(Buffer.concat(chunks).toString('utf8'));
         if (req.headers.authorization === 'Bearer fake-balance-key') {
           res.writeHead(402, { 'Content-Type': 'application/json' }).end('{"code":30001,"message":"Sorry, your account balance is insufficient"}');
         } else if (req.headers.authorization === `Bearer ${GOOD_LLM_KEY}`) {
@@ -89,32 +93,86 @@ describe('POST /api/settings/test against local fake servers', () => {
     ]);
   });
 
-  const run = async (over: Record<string, string>) => {
+  const run = async (over: {
+    apiKey?: string;
+    baseUrl?: string;
+    model?: string;
+    provider?: 'siliconflow' | 'volc-ark' | 'deepseek' | 'custom';
+    channelId?: string;
+    doubaoAppId?: string;
+    doubaoAccessKey?: string;
+    channels?: Array<Record<string, string>>;
+    scope?: 'all' | 'channel' | 'voice';
+    activeLlmChannelId?: string;
+  } = {}) => {
+    const id = over.channelId ?? SETTINGS_DEFAULTS.llmChannels[0].id;
+    const one = {
+      ...SETTINGS_DEFAULTS.llmChannels[0],
+      id,
+      provider: over.provider ?? SETTINGS_DEFAULTS.llmChannels[0].provider,
+      baseUrl: over.baseUrl ?? llmUrl,
+      apiKey: over.apiKey ?? '',
+      model: over.model ?? SETTINGS_DEFAULTS.llmChannels[0].model,
+    };
     const res = await TEST_POST(new Request('http://127.0.0.1:3000/api/settings/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Origin: ORIGIN },
-      body: JSON.stringify({ ...SETTINGS_DEFAULTS, llmBaseUrl: llmUrl, doubaoAppId: 'fake-app', ...over }),
+      body: JSON.stringify({
+        ...SETTINGS_DEFAULTS,
+        llmChannels: over.channels ?? [one],
+        activeLlmChannelId: over.activeLlmChannelId ?? id,
+        doubaoAppId: over.doubaoAppId ?? 'fake-app',
+        doubaoAccessKey: over.doubaoAccessKey ?? '',
+        scope: over.scope,
+        channelId: over.scope === 'channel' ? id : undefined,
+      }),
     }));
     expect(res.status).toBe(200);
     return res.json();
   };
 
   it('success path: LLM, TTS and ASR all report ok', async () => {
-    const report = await run({ llmApiKey: GOOD_LLM_KEY, doubaoAccessKey: GOOD_ACCESS });
+    const report = await run({ apiKey: GOOD_LLM_KEY, doubaoAccessKey: GOOD_ACCESS });
     expect(report.llm.ok).toBe(true);
+    expect(report.llm.reason).toMatch(/^正常 · 首字 \d+\.\ds · 整轮 \d+\.\ds$/);
     expect(report.tts.ok).toBe(true);
     expect(report.asr.ok).toBe(true);
     expect(seenAuth).toEqual([`Bearer ${GOOD_LLM_KEY}`]);
+    expect(JSON.parse(seenBodies[0]).thinking).toBeUndefined();
+  });
+
+  it('probes the requested channel even when it is not active, and disables volc-ark thinking', async () => {
+    const active = { ...SETTINGS_DEFAULTS.llmChannels[0], apiKey: 'wrong-llm-key-9999', baseUrl: llmUrl };
+    const volc = {
+      ...SETTINGS_DEFAULTS.llmChannels[0],
+      id: 'volc-1',
+      name: '火山方舟',
+      provider: 'volc-ark',
+      apiKey: GOOD_LLM_KEY,
+      baseUrl: llmUrl,
+      model: 'ep-demo',
+    };
+    const report = await run({
+      channels: [active, volc],
+      activeLlmChannelId: active.id,
+      scope: 'channel',
+      channelId: 'volc-1',
+      doubaoAccessKey: GOOD_ACCESS,
+    });
+    expect(report.llm.ok).toBe(true);
+    expect(report.tts).toBeUndefined();
+    expect(seenAuth.at(-1)).toBe(`Bearer ${GOOD_LLM_KEY}`);
+    expect(JSON.parse(seenBodies.at(-1) ?? '{}').thinking).toEqual({ type: 'disabled' });
   });
 
   it('insufficient balance is explicit in the settings API response', async () => {
-    const report = await run({ llmApiKey: 'fake-balance-key', doubaoAccessKey: GOOD_ACCESS });
+    const report = await run({ apiKey: 'fake-balance-key', doubaoAccessKey: GOOD_ACCESS });
     expect(report.llm).toEqual({ ok: false, code: 'LLM_INSUFFICIENT_BALANCE', reason: '余额不足:请到模型服务商控制台充值后再试(HTTP 402)' });
     expect(JSON.stringify(report)).not.toContain('fake-balance-key');
   });
 
   it('auth failure path: readable Chinese reason with the raw HTTP code, and no key in the response', async () => {
-    const report = await run({ llmApiKey: 'wrong-llm-key-9999', doubaoAccessKey: 'wrong-access-8888' });
+    const report = await run({ apiKey: 'wrong-llm-key-9999', doubaoAccessKey: 'wrong-access-8888' });
     for (const item of [report.llm, report.tts, report.asr]) {
       expect(item.ok).toBe(false);
       expect(item.reason).toContain('鉴权失败');
@@ -128,14 +186,14 @@ describe('POST /api/settings/test against local fake servers', () => {
   it('Doubao error frame (resource not granted) is classified as 资源未开通 with the error code', async () => {
     tts.removeAllListeners('connection');
     tts.on('connection', (ws) => ws.on('message', () => ws.send(errorFrame(45000000, 'requested resource not granted'))));
-    const report = await run({ llmApiKey: GOOD_LLM_KEY, doubaoAccessKey: GOOD_ACCESS });
+    const report = await run({ apiKey: GOOD_LLM_KEY, doubaoAccessKey: GOOD_ACCESS });
     expect(report.tts.ok).toBe(false);
     expect(report.tts.reason).toContain('资源未开通');
     expect(report.tts.reason).toContain('45000000');
   });
 
   it('unreachable server is reported as 网络不通', async () => {
-    const report = await run({ llmApiKey: GOOD_LLM_KEY, llmBaseUrl: 'http://127.0.0.1:1/v1' });
+    const report = await run({ apiKey: GOOD_LLM_KEY, baseUrl: 'http://127.0.0.1:1/v1' });
     expect(report.llm.ok).toBe(false);
     expect(report.llm.reason).toContain('网络不通');
   });
@@ -150,7 +208,7 @@ describe('POST /api/settings/test against local fake servers', () => {
     const { resetConfig } = await import('@/lib/config');
     resetConfig();
     try {
-      const report = await run({ llmApiKey: '••••1111', doubaoAppId: '', doubaoAccessKey: '' });
+      const report = await run({ apiKey: '••••1111', channelId: 'env-llm', doubaoAppId: '', doubaoAccessKey: '' });
       expect(report.llm.ok).toBe(true);
       expect(report.tts.ok).toBe(true);
     } finally {

@@ -63,7 +63,7 @@ describe('lesson LLM errors against a local fake provider', () => {
         expect(text).not.toContain('event: done');
         expect(text).not.toContain(key);
       }
-      const probe = await testLlm({ llmBaseUrl: baseUrl, llmApiKey: key, llmModel: 'fake-model' });
+      const probe = await testLlm({ baseUrl, apiKey: key, model: 'fake-model', provider: 'custom' });
       expect(probe).toMatchObject({ ok: false, code, reason: expect.stringContaining(message) });
       expect(probe.reason).toContain(`HTTP ${status}`);
       const logText = logs.mock.calls.flat().join('\n');

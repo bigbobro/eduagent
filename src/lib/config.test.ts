@@ -16,6 +16,7 @@ describe('config: LLM credential group resolution', () => {
     'LLM_API_KEY',
     'LLM_BASE_URL',
     'LLM_MODEL',
+    'LLM_PROVIDER',
     'MIMO_BASE_URL',
     'MIMO_API_BASE',
     'MIMO_MODEL',
@@ -48,6 +49,17 @@ describe('config: LLM credential group resolution', () => {
     expect(c.llmApiKey).toBe('new-key');
     expect(c.llmBaseUrl).toBe('https://provider.test/v1');
     expect(c.llmModel).toBe('test/model');
+    expect(c.llmProvider).toBe('custom');
+  });
+
+  it('reads LLM_PROVIDER and treats an unknown value as custom', () => {
+    process.env.LLM_API_KEY = 'new-key';
+    process.env.LLM_PROVIDER = 'volc-ark';
+    resetConfig();
+    expect(getConfig().llmProvider).toBe('volc-ark');
+    process.env.LLM_PROVIDER = 'not-a-provider';
+    resetConfig();
+    expect(getConfig().llmProvider).toBe('custom');
   });
 
   it('defaults base URL / model to SiliconFlow DeepSeek when only LLM_API_KEY is set', () => {

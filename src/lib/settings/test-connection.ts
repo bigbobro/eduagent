@@ -4,7 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { WebSocket as WsClient } from 'ws';
 import { decodeTtsFrame, encodeFullClientRequest, encodeTtsEvent, MessageType } from '../voice/doubao-codec';
 import { doubaoAsrWsUrl, doubaoTtsWsUrl } from '../voice/doubao-endpoints';
-import type { SettingsValues } from './store';
+import type { LlmChannel } from '../llm-providers';
+import { LLM_PROVIDERS, llmRequestExtras } from '../llm-providers';
+import type { SettingsValues } from './types';
+import { activeChannel } from './store';
 import { classifyLlmFailure, type LlmErrorCode, type LlmFailure } from '../llm-errors';
 import { createLogger } from '../logger';
 
@@ -46,29 +49,113 @@ function networkReason(err: unknown): string {
 
 // ─── LLM ────────────────────────────────────────────────────────────────
 
-export async function testLlm(v: Pick<SettingsValues, 'llmApiKey' | 'llmBaseUrl' | 'llmModel'>): Promise<CheckResult> {
-  if (!v.llmApiKey) return { ok: false, reason: '还没有填写 LLM API Key' };
-  const url = `${v.llmBaseUrl.replace(/\/+$/, '')}/chat/completions`;
+export async function testLlm(channel: Pick<LlmChannel, 'apiKey' | 'baseUrl' | 'model' | 'provider'>): Promise<CheckResult> {
+  const preset = LLM_PROVIDERS[channel.provider];
+  const baseUrl = channel.baseUrl || preset.defaultBaseUrl;
+  const model = channel.model || preset.defaultModel;
+  if (!channel.apiKey) return { ok: false, reason: '还没有填写 LLM API Key' };
+  if (!baseUrl) return { ok: false, reason: '还没有填写服务地址' };
+  if (!model) return { ok: false, reason: '还没有填写模型' };
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const started = Date.now();
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${v.llmApiKey}` },
-      body: JSON.stringify({ model: v.llmModel, messages: [{ role: 'user', content: 'hi' }], max_tokens: 5 }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${channel.apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 16,
+        stream: true,
+        ...llmRequestExtras(channel.provider),
+      }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     if (res.ok) {
-      await res.body?.cancel().catch(() => {});
-      return { ok: true, reason: '连接正常' };
+      const timing = await measureLlmBody(res, started);
+      return { ok: true, reason: formatTiming(timing.firstMs, timing.totalMs) };
     }
     const text = await res.text().catch(() => '');
-    return llmCheckFailure(classifyLlmFailure({ status: res.status, body: text }));
+    return llmCheckFailure(classifyLlmFailure({ status: res.status, body: text }), channel.provider);
   } catch (error) {
-    return llmCheckFailure(classifyLlmFailure({ error }));
+    return llmCheckFailure(classifyLlmFailure({ error }), channel.provider);
   }
 }
 
-function llmCheckFailure(failure: LlmFailure): CheckResult {
-  log.error('LLM probe failed', { code: failure.code, status: failure.status ?? null, providerCode: failure.providerCode ?? null });
+function formatTiming(firstMs: number, totalMs: number): string {
+  return `正常 · 首字 ${seconds(firstMs)} · 整轮 ${seconds(totalMs)}`;
+}
+
+function seconds(ms: number): string {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+}
+
+/** 首字只认正文 content,不把思考字段算进去。非流式 JSON 和 SSE 都认。 */
+async function measureLlmBody(res: Response, started: number): Promise<{ firstMs: number; totalMs: number }> {
+  const reader = res.body?.getReader();
+  if (!reader) {
+    const totalMs = Date.now() - started;
+    return { firstMs: totalMs, totalMs };
+  }
+  const decoder = new TextDecoder();
+  let pending = '';
+  let firstMs: number | null = null;
+  const note = (text: string) => {
+    if (firstMs === null && hasVisibleContent(text)) firstMs = Date.now() - started;
+  };
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, { stream: true });
+      let splitAt = pending.indexOf('\n\n');
+      while (splitAt >= 0) {
+        note(pending.slice(0, splitAt));
+        pending = pending.slice(splitAt + 2);
+        splitAt = pending.indexOf('\n\n');
+      }
+      note(pending);
+    }
+    note(pending + decoder.decode());
+  } finally {
+    reader.releaseLock();
+  }
+  const totalMs = Date.now() - started;
+  return { firstMs: firstMs ?? totalMs, totalMs };
+}
+
+function hasVisibleContent(text: string): boolean {
+  const candidates = [text.trim()];
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('data:')) candidates.push(trimmed.slice(5).trim());
+  }
+  for (const candidate of candidates) {
+    if (!candidate || candidate === '[DONE]') continue;
+    try {
+      const json = JSON.parse(candidate) as {
+        choices?: Array<{ delta?: { content?: unknown }; message?: { content?: unknown } }>;
+      };
+      const choice = json.choices?.[0];
+      if (nonEmpty(choice?.delta?.content) || nonEmpty(choice?.message?.content)) return true;
+    } catch {
+      // 半截 JSON 等到下一帧再认
+    }
+  }
+  return false;
+}
+
+function nonEmpty(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function llmCheckFailure(failure: LlmFailure, provider: string): CheckResult {
+  log.error('LLM probe failed', {
+    code: failure.code,
+    status: failure.status ?? null,
+    providerCode: failure.providerCode ?? null,
+    provider,
+  });
   return { ok: false, code: failure.code, reason: `${failure.message}${failure.status ? `(HTTP ${failure.status})` : ''}` };
 }
 
@@ -202,6 +289,16 @@ export interface TestReport {
 }
 
 export async function runAllTests(v: SettingsValues): Promise<TestReport> {
-  const [llm, tts, asr] = await Promise.all([testLlm(v), testDoubaoTts(v), testDoubaoAsr(v)]);
+  const [llm, tts, asr] = await Promise.all([testLlm(activeChannel(v)), testDoubaoTts(v), testDoubaoAsr(v)]);
   return { llm, tts, asr };
+}
+
+export function runChannelTest(v: SettingsValues, channelId: string): Promise<CheckResult> {
+  const channel = v.llmChannels.find((item) => item.id === channelId);
+  if (!channel) return Promise.resolve({ ok: false, reason: '找不到这个渠道' });
+  return testLlm(channel);
+}
+
+export function runVoiceTests(v: SettingsValues): Promise<Pick<TestReport, 'tts' | 'asr'>> {
+  return Promise.all([testDoubaoTts(v), testDoubaoAsr(v)]).then(([tts, asr]) => ({ tts, asr }));
 }

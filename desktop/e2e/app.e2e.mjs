@@ -188,9 +188,10 @@ try {
   await page.getByTestId('config-status').waitFor({ timeout: 30000 });
   check('empty userData, non-mock: opens onboarding', (await page.getByTestId('config-status').innerText()).includes('还没有配置'), page.url());
 
-  // B2. 填假 key,测试连接成功
+  // B2. 选默认渠道,展开地址,填假 key,测试连接成功
+  await page.getByRole('button', { name: '修改服务地址' }).click();
   await page.getByLabel('服务地址').fill(llmUrl);
-  await page.getByLabel(/^API Key/).fill(GOOD_LLM);
+  await page.getByRole('group', { name: 'AI 老师' }).getByLabel(/^API Key/).fill(GOOD_LLM);
   await page.getByLabel('App ID').fill(FAKE_APP_ID);
   await page.getByLabel('Access Key').fill('wrong-access-key-0000');
   await page.getByRole('button', { name: '测试连接' }).click();
@@ -232,7 +233,7 @@ try {
   check('settings.json mode is 0600', (statSync(settingsPath).mode & 0o777) === 0o600, (statSync(settingsPath).mode & 0o777).toString(8));
   const infoText = (await nodeRequest('/api/settings')).text;
   const logAll = readFileSync(logPath2, 'utf8');
-  check('no full key in server.log or HTTP responses', ALL_KEYS.every((k) => !logAll.includes(k) && !infoText.includes(k)) && info.values.llmApiKey === '••••1111');
+  check('no full key in server.log or HTTP responses', ALL_KEYS.every((k) => !logAll.includes(k) && !infoText.includes(k)) && info.values.llmChannels[0].apiKey === '••••1111');
 
   // B6. CSRF:无 Origin / 外站 Origin 的 POST 被拒
   const noOrigin = await nodeRequest('/api/settings', { method: 'POST', body: '{}' });

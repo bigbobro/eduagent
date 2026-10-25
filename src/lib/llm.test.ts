@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Avoid real env / .env.local: streamLLM only needs base + key + model from config.
-vi.mock('./config', () => ({
-  getConfig: () => ({
+// Avoid real env / .env.local: streamLLM only needs base + key + model + provider from config.
+const { configState } = vi.hoisted(() => ({
+  configState: {
     llmBaseUrl: 'http://test.local/v1',
     llmApiKey: 'test-key',
     llmModel: 'test-model',
-  }),
+    llmProvider: 'custom',
+  },
+}));
+vi.mock('./config', () => ({
+  getConfig: () => configState,
 }));
 
 import { streamLLM } from './llm';
@@ -33,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  configState.llmProvider = 'custom';
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
@@ -115,6 +120,31 @@ async function drain(gen: AsyncGenerator<any>) {
 
 const fastTimings = { hedgeAfterMs: 30, stallTimeoutMs: 80, totalTimeoutMs: 1000 };
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe('streamLLM provider request body', () => {
+  it.each(['custom', 'siliconflow', 'deepseek'] as const)('does not add thinking for %s', async (provider) => {
+    configState.llmProvider = provider;
+    const fetchMock = abortAwareFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const ac = new AbortController();
+    ac.abort();
+    await expect(streamLLM('sys', [{ role: 'user', content: 'hi' }], ac.signal).next()).rejects.toThrow();
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.thinking).toBeUndefined();
+    expect(body.model).toBe('test-model');
+  });
+
+  it('disables volc-ark thinking so the first content token is not delayed', async () => {
+    configState.llmProvider = 'volc-ark';
+    const fetchMock = abortAwareFetch();
+    vi.stubGlobal('fetch', fetchMock);
+    const ac = new AbortController();
+    ac.abort();
+    await expect(streamLLM('sys', [{ role: 'user', content: 'hi' }], ac.signal).next()).rejects.toThrow();
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.thinking).toEqual({ type: 'disabled' });
+  });
+});
 
 describe('streamLLM hedge + stall deadlines', () => {
   it('does not hedge when the first token arrives in time', async () => {

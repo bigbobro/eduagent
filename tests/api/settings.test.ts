@@ -15,10 +15,19 @@ const ORIGIN = 'http://127.0.0.1:3000';
 const FAKE_KEY = 'sk-fake-0123456789abcdefWXYZ';
 const FAKE_ACCESS = 'fake-access-token-QRST';
 
-const form = (over: Record<string, string> = {}) => ({
-  llmApiKey: FAKE_KEY,
-  llmBaseUrl: 'https://llm.example.test/v1',
-  llmModel: 'fake-model',
+const channel = (over: Record<string, string> = {}) => ({
+  id: 'default-llm',
+  name: 'SiliconFlow',
+  provider: 'siliconflow' as const,
+  baseUrl: 'https://llm.example.test/v1',
+  apiKey: FAKE_KEY,
+  model: 'fake-model',
+  ...over,
+});
+
+const form = (over: Record<string, unknown> = {}) => ({
+  llmChannels: [channel()],
+  activeLlmChannelId: 'default-llm',
   doubaoAppId: 'fake-app-id-12345678',
   doubaoAccessKey: FAKE_ACCESS,
   doubaoAsrResourceId: 'asr-res',
@@ -67,8 +76,10 @@ describe('/api/settings', () => {
     const body = await (await GET()).json();
     expect(body.mode).toBe('app');
     expect(body.configured).toBe(false);
-    expect(body.values.llmApiKey).toBe('');
-    expect(body.values.llmBaseUrl).toBe('https://api.siliconflow.cn/v1');
+    expect(body.values.llmChannels[0].apiKey).toBe('');
+    expect(body.values.llmChannels[0].baseUrl).toBe('https://api.siliconflow.cn/v1');
+    expect(body.values.llmChannels[0].provider).toBe('siliconflow');
+    expect(body.values.activeLlmChannelId).toBe('default-llm');
     expect(body.values.doubaoAsrResourceId).toBe('volc.seedasr.sauc.duration');
   });
 
@@ -82,10 +93,10 @@ describe('/api/settings', () => {
     const text = await res.text();
     const body = JSON.parse(text);
     expect(body.configured).toBe(true);
-    expect(body.values.llmApiKey).toBe('••••WXYZ');
+    expect(body.values.llmChannels[0].apiKey).toBe('••••WXYZ');
     expect(body.values.doubaoAccessKey).toBe('••••QRST');
     expect(body.values.doubaoAppId).toBe('••••5678');
-    expect(body.values.llmBaseUrl).toBe('https://llm.example.test/v1');
+    expect(body.values.llmChannels[0].baseUrl).toBe('https://llm.example.test/v1');
     expect(body.values.doubaoTtsResourceId).toBe('tts-res');
     expect(text).not.toContain(FAKE_KEY);
     expect(text).not.toContain(FAKE_ACCESS);
@@ -104,20 +115,24 @@ describe('/api/settings', () => {
     expect(res.status).toBe(200);
     expect(text).not.toContain(FAKE_KEY);
     expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(settingsPath, 'utf8')).llmApiKey).toBe(FAKE_KEY);
+    expect(JSON.parse(readFileSync(settingsPath, 'utf8')).llmChannels[0].apiKey).toBe(FAKE_KEY);
     expect(restart).toHaveBeenCalledTimes(1);
   });
 
   it('POST with masked or empty secrets keeps the saved values, while other fields update', async () => {
     appMode();
     await post(POST, form());
-    const res = await post(POST, form({ llmApiKey: '••••WXYZ', doubaoAccessKey: '', doubaoAppId: '••••5678', llmModel: 'changed-model' }));
+    const res = await post(POST, form({
+      llmChannels: [channel({ apiKey: '••••WXYZ', model: 'changed-model' })],
+      doubaoAccessKey: '',
+      doubaoAppId: '••••5678',
+    }));
     expect(res.status).toBe(200);
     const saved = JSON.parse(readFileSync(settingsPath, 'utf8'));
-    expect(saved.llmApiKey).toBe(FAKE_KEY);
+    expect(saved.llmChannels[0].apiKey).toBe(FAKE_KEY);
     expect(saved.doubaoAccessKey).toBe(FAKE_ACCESS);
     expect(saved.doubaoAppId).toBe('fake-app-id-12345678');
-    expect(saved.llmModel).toBe('changed-model');
+    expect(saved.llmChannels[0].model).toBe('changed-model');
     expect(statSync(settingsPath).mode & 0o777).toBe(0o600);
   });
 
@@ -131,8 +146,9 @@ describe('/api/settings', () => {
 
   it('POST rejects invalid payloads with 400', async () => {
     appMode();
-    expect((await post(POST, form({ llmBaseUrl: 'javascript:alert(1)' }))).status).toBe(400);
+    expect((await post(POST, form({ llmChannels: [channel({ baseUrl: 'javascript:alert(1)' })] }))).status).toBe(400);
     expect((await post(POST, { llmApiKey: 'x' })).status).toBe(400);
+    expect((await post(POST, form({ llmChannels: [], activeLlmChannelId: 'missing' }))).status).toBe(400);
     expect(restart).not.toHaveBeenCalled();
   });
 

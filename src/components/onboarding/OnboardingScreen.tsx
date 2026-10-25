@@ -7,7 +7,7 @@ import { Check } from 'lucide-react';
 import maji from '../../../desktop/build-resources/icon-source.png';
 import { Button } from '@/components/ui/Button';
 import { MicSection } from '@/components/settings/MicSection';
-import { VoiceSettingsPanel } from '@/components/settings/VoiceSettingsPanel';
+import { ConnectPanel } from '@/components/settings/ConnectPanel';
 import { useSettingsDraft } from '@/components/settings/useSettingsDraft';
 import { loadLearners, saveCurrentLearnerId } from '@/lib/current-learner';
 import { getMicStatus } from '@/lib/audio/microphone';
@@ -146,9 +146,8 @@ function ConnectStep({ onSkip }: { onSkip: () => void }) {
     <>
       <span className="ui-tag">第 1 步 · 共 3 步</span>
       <h2>连上 AI 老师和语音服务</h2>
-      <VoiceSettingsPanel
+      <ConnectPanel
         draft={draft}
-        variant="onboarding"
         onSkip={onSkip}
       />
     </>

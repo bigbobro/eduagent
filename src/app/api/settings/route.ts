@@ -40,12 +40,13 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ code: 'INVALID_SETTINGS', error: '设置内容格式不正确' }, { status: 400 });
 
   try {
-    writeSettingsFile(path, mergeSubmitted(readSettingsFile(path), parsed.data));
+    const saved = mergeSubmitted(readSettingsFile(path), parsed.data);
+    writeSettingsFile(path, saved);
+    console.log('[settings] saved', { provider: saved.llmChannels.find((channel) => channel.id === saved.activeLlmChannelId)?.provider ?? 'custom' });
   } catch (err) {
     console.error('[settings] write failed', { message: (err as Error).message });
     return NextResponse.json({ error: '保存失败,请重试' }, { status: 500 });
   }
-  console.log('[settings] saved');
   scheduleRestart();
   return NextResponse.json({ ok: true, restarting: true });
 }
