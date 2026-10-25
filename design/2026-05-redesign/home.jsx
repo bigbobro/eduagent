@@ -1,5 +1,5 @@
 // Home — 3 variants of 魔法学院 entry
-// All variants share: 4 course "books", entry to 魔法书 (journal) + 家长阁楼 (parents),
+// All variants share: 4 course "books", entry to 旧单词本 (journal) + 旧家长页 (parents),
 // progress (stars), cat mascot.
 
 const COURSES = [
@@ -46,7 +46,7 @@ function HeaderStrip({ stars = 23, streak = 4, title, density }) {
 }
 
 // =========================================================
-// Variant A: 魔法书房 (Study Room) — interior view with shelf
+// Variant A: 旧选课页 (Study Room) — interior view with shelf
 // Each course = a magical book on the shelf. Cat sits at desk.
 // =========================================================
 function HomeStudy({ variant: catVariant = 'storybook', density = 'normal' }) {
@@ -54,14 +54,14 @@ function HomeStudy({ variant: catVariant = 'storybook', density = 'normal' }) {
   const gap = density === 'tight' ? 18 : 28;
   return (
     <PaperBg tone="paper" style={{ width: W, height: H }}>
-      <HeaderStrip stars={23} streak={4} title="魔法书房" density={density} />
+      <HeaderStrip stars={23} streak={4} title="旧选课页" density={density} />
 
       <div style={{ display: 'flex', height: H - 80 }}>
         {/* Left: bookshelf with 4 course books */}
         <div style={{ flex: 1.4, padding: density === 'tight' ? '24px 32px' : '40px 48px' }}>
           <div style={{ fontFamily: 'var(--font-zh)', fontSize: 22, color: PALETTE.inkSoft, marginBottom: 18 }}>
             <Sparkle size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            今天想读哪一本咒语书?
+            今天想读哪一本旧课程卡?
           </div>
           {/* Shelf */}
           <div style={{ position: 'relative' }}>
@@ -121,8 +121,8 @@ function HomeStudy({ variant: catVariant = 'storybook', density = 'normal' }) {
 
           {/* Two portal doors */}
           <div style={{ position: 'absolute', bottom: 14, left: 24, display: 'flex', gap: 14 }}>
-            <PortalDoor label="魔法书" sub="Journal" color="lilac" />
-            <PortalDoor label="家长阁楼" sub="Parents" color="mint" small />
+            <PortalDoor label="旧单词本" sub="Journal" color="lilac" />
+            <PortalDoor label="旧家长页" sub="Parents" color="mint" small />
           </div>
         </div>
       </div>
@@ -254,7 +254,7 @@ function HomeMap({ variant: catVariant = 'storybook', density = 'normal' }) {
 
         {/* Entries — bottom right corner */}
         <div style={{ position: 'absolute', bottom: 30, right: 30, display: 'flex', gap: 14 }}>
-          <PortalDoor label="魔法书" sub="Journal" color="lilac" small />
+          <PortalDoor label="旧单词本" sub="Journal" color="lilac" small />
           <PortalDoor label="阁楼" sub="Parents" color="rose" small />
         </div>
       </div>
@@ -331,7 +331,7 @@ function HomeWall({ variant: catVariant = 'storybook', density = 'normal' }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 18 }}>
-            <SideShelf title="魔法书" sub="my words" tone="lilac" />
+            <SideShelf title="旧单词本" sub="my words" tone="lilac" />
             <SideShelf title="阁楼" sub="parents" tone="rose" />
           </div>
         </div>

@@ -1,16 +1,31 @@
-import { Cat, PaperBg, PaperButton } from '@/components/magic';
+import Image from 'next/image';
+import maji from '../../desktop/build-resources/icon-source.png';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 export default function NotFound() {
   return (
-    <PaperBg tone="paperDeep" className="h-screen w-screen">
-      <div className="flex h-full flex-col items-center justify-center gap-6">
-        <Cat size={160} mood="happy" />
-        <h1 className="font-display text-4xl text-ink">迷路啦</h1>
-        <p className="font-zh text-lg text-inkSoft">这个页面不存在哦</p>
-        <PaperButton color="butter">
-          <a href="/">回魔法书房</a>
-        </PaperButton>
-      </div>
-    </PaperBg>
+    <main className="grid h-screen place-items-center">
+      <EmptyState
+        title="找不到这个页面"
+        illustration={(
+          <Image
+            src={maji}
+            alt=""
+            width={104}
+            height={104}
+          />
+        )}
+        action={(
+          <a
+            className="ui-button ui-button-primary"
+            href="/"
+          >
+            回到课程
+          </a>
+        )}
+      >
+        这个地址没有对应的页面。
+      </EmptyState>
+    </main>
   );
 }

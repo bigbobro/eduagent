@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { Cat, PaperButton } from '@/components/magic';
 import { CourseHome } from '@/components/home/CourseHome';
 import { allCourses } from '@/data/courses';
 import type { Course } from '@/types/course';
@@ -22,11 +21,6 @@ const course: Course = {
 };
 
 describe('a11y basics', () => {
-  it('Cat exposes role=img + aria-label', () => {
-    render(<Cat />);
-    expect(screen.getByRole('img', { name: /Mochi/i })).toBeTruthy();
-  });
-
   it('CourseHome course button aria-label contains course title', () => {
     render(
       <CourseHome
@@ -56,11 +50,5 @@ describe('a11y basics', () => {
     for (const registeredCourse of allCourses) {
       expect(screen.getByRole('button', { name: registeredCourse.title })).toBeTruthy();
     }
-  });
-
-  it('PaperButton keeps focus ring class', () => {
-    render(<PaperButton>按住 Space</PaperButton>);
-    const btn = screen.getByRole('button', { name: '按住 Space' });
-    expect(btn.className).toMatch(/focus-visible:ring/);
   });
 });

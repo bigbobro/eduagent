@@ -28,7 +28,7 @@ export const shapesCourse: Course = {
     sentences: ['It is a circle.', 'I see a star.', 'This is a square.', 'I like the heart.'],
   },
   teachingHints: {
-    opening: '今天我们打开形状魔法书,认识几种形状!',
+    opening: '今天我们认识几种形状!',
     reviewCardIds: [],
     newCardIds: ['circle', 'square', 'triangle', 'star', 'heart', 'rectangle', 'oval', 'diamond', 'line', 'arrow', 'cube', 'cone'],
     quizQuestions: ['Where is circle?', 'Find star.', 'Which one is triangle?', 'Find square.'],
@@ -36,7 +36,7 @@ export const shapesCourse: Course = {
   },
   phases: {
     introduction: {
-      sceneCaption: '形状魔法书里浮出不同形状',
+      sceneCaption: '这一课出现不同的形状',
       narrationHint: '逐个指认形状,用 It is a ... 和 I see a ... 做短句示范。不要要求孩子一次记住全部。',
     },
     interactive: {},

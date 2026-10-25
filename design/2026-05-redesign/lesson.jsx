@@ -57,7 +57,7 @@ function LessonScroll({ variant: catVariant = 'storybook', density = 'normal' })
   );
 }
 
-function TopBar({ courseTitle = '美食魔药', courseEn = 'Food', exitLabel = '回大厅' }) {
+function TopBar({ courseTitle = '美食魔药', courseEn = 'Food', exitLabel = '回课程' }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -554,7 +554,7 @@ function LessonMandalaV2({ variant: catVariant = 'storybook', density = 'normal'
           <button style={{
             background: 'transparent', border: `2px solid ${PALETTE.ink}`, borderRadius: 18,
             padding: '5px 13px', fontFamily: 'var(--font-zh)', fontSize: 14, cursor: 'pointer', color: PALETTE.ink,
-          }}>← 回大厅</button>
+          }}>← 回课程</button>
           <span style={{ fontFamily: 'var(--font-display)', fontSize: 24, color: PALETTE.ink, whiteSpace: 'nowrap' }}>美食魔药</span>
           <span style={{ fontFamily: 'var(--font-en-script)', fontSize: 15, color: PALETTE.inkSoft, whiteSpace: 'nowrap' }}>Food · Lesson 1</span>
         </div>

@@ -22,7 +22,7 @@ python3 -m http.server 8000
 | `EduAGENT.html` | 设计画布入口 |
 | `shared.jsx` | Design tokens · 调色板 · SVG defs · PaperBg / Star / Sparkle / PaperButton / IllustrationSlot |
 | `mascot.jsx` | 麻吉小猫 (4 风格,只上线 storybook) |
-| `home.jsx` | HomeStudy (魔法书房) + 备选 HomeMap / HomeWall |
+| `home.jsx` | HomeStudy (旧选课页) + 备选 HomeMap / HomeWall |
 | `lesson.jsx` | PictureCard 三种 size + LessonMandalaV2 + 备选 LessonScroll / LessonTower |
 | `lesson-flow.jsx` | IntroFrame / QuizPickWordFrame / ReinforceFrame / DoneCelebrateFrame / PINGateFrame |
 | `journal-parents.jsx` | JournalPage / ParentsPage |
@@ -46,7 +46,7 @@ python3 -m http.server 8000
 ## 业务流程
 
 ```
-[首页 · 魔法书房]
+[首页 · 旧选课页]
   → [② 招呼 + 今日 12 词预告]
   → 对每个单词 (× N):
       [③ 跟读练习] (listening / recording / correct / tryAgain)
@@ -54,5 +54,5 @@ python3 -m http.server 8000
   → [⑤ 复习 · 句型空填]
   → [⑥ 下课庆祝]
 
-独立: [魔法书 /journal] · [家长阁楼 PIN + 数据 /parents]
+独立: [旧单词本 /journal] · [旧家长页 PIN + 数据 /parents]
 ```

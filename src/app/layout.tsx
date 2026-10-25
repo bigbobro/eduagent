@@ -1,7 +1,6 @@
 import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
-import { SVGDefs } from '@/components/ui/SVGDefs';
 import { DesktopEvents } from '@/components/shell/DesktopEvents';
 import './globals.css';
 
@@ -20,7 +19,6 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className={fredoka.variable}>
       <body className="font-zh antialiased">
-        <SVGDefs />
         <ErrorBoundary><DesktopEvents />{children}</ErrorBoundary>
       </body>
     </html>

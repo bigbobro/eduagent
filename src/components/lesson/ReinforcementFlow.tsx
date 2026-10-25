@@ -73,8 +73,8 @@ export function ReinforcementFlow({ course, controller, passedQuizIds = [], onAl
 
   if (!current) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-paperDeep">
-        <p className="font-zh text-xl text-ink">今天的练习完成啦</p>
+      <div className="flex h-full w-full items-center justify-center">
+        <p className="text-xl">今天的练习完成啦</p>
       </div>
     );
   }

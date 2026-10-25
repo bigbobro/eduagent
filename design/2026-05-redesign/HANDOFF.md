@@ -10,7 +10,7 @@
 
 ## 0. TL;DR
 
-把 `claude-design-frontend` 的整套 UI 替换成**手绘绘本风 · 魔法学院**主题。视觉锚点是**白底灰斑小猫 (麻吉 / Mochi)** 替代原"小兔子",场景隐喻从"院子+阁楼+储物间"换成"**魔法书房 + 魔法书 + 家长阁楼**"。
+把 `claude-design-frontend` 的整套 UI 替换成**手绘绘本风 · 魔法学院**主题。视觉锚点是**白底灰斑小猫 (麻吉 / Mochi)** 替代原"小兔子",场景隐喻从"院子+阁楼+储物间"换成"**旧选课页 + 旧单词本 + 旧家长页**"。
 
 技术上没有架构动作:不改路由、不改语音/ASR/TTS 协议、不改课程数据格式、不改 `LessonController` 状态机。**纯前端组件 / 样式重写**。
 
@@ -33,8 +33,8 @@
 ## 2. 业务流程 (User Flow)
 
 ```
-[首页 · 魔法书房]
-       │ 点击一本咒语书 (course)
+[首页 · 旧选课页]
+       │ 点击一本旧课程卡 (course)
        ▼
 [② 招呼 + 今日 N 词预告]
        │ 点击 "我们开始吧"
@@ -57,8 +57,8 @@
 ```
 
 **独立功能** (与主流程平行,不在课中触达):
-- **魔法书** (`/journal`): 已收集的单词翻阅,按章节 (= 课程) 分页
-- **家长阁楼** (`/parents`): PIN 解锁 → 数据面板
+- **旧单词本** (`/journal`): 已收集的单词翻阅,按章节 (= 课程) 分页
+- **旧家长页** (`/parents`): PIN 解锁 → 数据面板
 
 ---
 
@@ -272,8 +272,8 @@ interface HomeProps {
 
 **布局**:
 - 顶部 strip: 课程标题 + 星星总数 + 连续天数
-- 左 1.4: 2×2 课程"咒语书"(spine + cover,每本随机微旋 ±1°)
-- 右 1: 窗子 + 桌面 + 麻吉坐桌上 + 对话框 + 两个传送门 (魔法书 / 家长阁楼)
+- 左 1.4: 2×2 课程"旧课程卡"(spine + cover,每本随机微旋 ±1°)
+- 右 1: 窗子 + 桌面 + 麻吉坐桌上 + 对话框 + 两个传送门 (旧单词本 / 旧家长页)
 
 ### 6.2 招呼 · Lesson Intro
 
@@ -387,10 +387,10 @@ interface DoneProps {
 - 中央大麻吉 (340px) 头戴小纸帽 (3 颗宝石装饰)
 - 5 颗大星横排,每颗微旋
 - 数据一行 (词数 · 用时 · 准确率)
-- 底部双 CTA:回大厅 / 再来一节
+- 底部双 CTA:回课程 / 再来一节
 - 角落 10 颗小纸屑装饰
 
-### 6.7 魔法书 (Journal) · `/journal`
+### 6.7 旧单词本 (Journal) · `/journal`
 
 **组件**: `<JournalPage chapters={...} activeChapter={...} />`
 
@@ -411,7 +411,7 @@ interface JournalProps {
 - 左页: 目录 (4 章对应 4 课程,active 高亮) + 星星统计卡
 - 右页: 当前章的词卡网格 (3 列 chip,但 size 略放大,带 tape 装饰),未解锁位用虚线 `?` 占位
 
-### 6.8 家长阁楼 · `/parents`
+### 6.8 旧家长页 · `/parents`
 
 #### 6.8.1 PIN 解锁页
 
@@ -419,7 +419,7 @@ interface JournalProps {
 
 - 半透明纸纹蒙层 + dimmed 背景 (blur 2px)
 - 居中 480w 弹窗 (-1° 微旋)
-- 麻吉头 110px + 标题"家长阁楼" + 4 圆点 + 3×4 键盘 (✓ mint, ← peach)
+- 麻吉头 110px + 标题"旧家长页" + 4 圆点 + 3×4 键盘 (✓ mint, ← peach)
 - 错 3 次进入 30 秒冷却
 
 #### 6.8.2 数据面板
@@ -548,7 +548,7 @@ function toPictureCardData(c: WordCard, tone?: PaletteKey): PictureCardData {
 2. **复刻 `<Cat>` + `<PaperBg>` + `<Star>` + `<Sparkle>` + `<PaperButton>` + `<IllustrationSlot>` 6 个原子**。从 `mascot.jsx` + `shared.jsx` 直接抄,转成 TS + Tailwind。
 3. **实现 `<PictureCard>`** 三种 size。这是大头。用 §5 的 props 表 + §5.3 状态表。
 4. **逐屏拼装**:首页 → 招呼 → 跟读 → quiz → 复习 → 庆祝。**每屏接现有 controller 的事件**,view-only 替换。
-5. **独立屏**: 魔法书 / PIN / 家长面板。
+5. **独立屏**: 旧单词本 / PIN / 家长面板。
 6. **删除旧组件** (见 §8 表)。Run `pnpm test` + `pnpm exec tsc --noEmit` 必须通过。
 7. **跑一节真实课程**,听 / 录 / 对 / 错 / 完整流程都走一遍。
 

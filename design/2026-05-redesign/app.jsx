@@ -18,7 +18,7 @@ function App() {
       <DesignCanvas>
         {/* ===== MAIN FLOW (in lesson order) ===== */}
         <DCSection id="flow-1-pick" title="① 主流程 · 选课 (首页)">
-          <DCArtboard id="flow-1-home" label="魔法书房 · 选一本咒语书" width={1280} height={800}>
+          <DCArtboard id="flow-1-home" label="旧选课页 · 选一本旧课程卡" width={1280} height={800}>
             <HomeStudy variant="storybook" density="normal" />
           </DCArtboard>
         </DCSection>
@@ -72,13 +72,13 @@ function App() {
         </DCSection>
 
         {/* ===== STANDALONE FEATURES ===== */}
-        <DCSection id="stand-journal" title="独立 · 单词收藏 (魔法书)">
-          <DCArtboard id="journal" label="翻开的魔法书" width={1280} height={800}>
+        <DCSection id="stand-journal" title="独立 · 单词收藏 (旧单词本)">
+          <DCArtboard id="journal" label="翻开的旧单词本" width={1280} height={800}>
             <JournalPage variant="storybook" density="normal" />
           </DCArtboard>
         </DCSection>
 
-        <DCSection id="stand-parents" title="独立 · 家长阁楼 (先 PIN · 再数据)">
+        <DCSection id="stand-parents" title="独立 · 旧家长页 (先 PIN · 再数据)">
           <DCArtboard id="pin" label="PIN 解锁" width={1280} height={800}>
             <PINGateFrame variant="storybook" entered={2} />
           </DCArtboard>

@@ -1,5 +1,5 @@
-// Journal (魔法书) — collected words shelf in open book layout
-// Parents (家长阁楼) — restrained dashboard with paper feel
+// Journal (旧单词本) — collected words shelf in open book layout
+// Parents (旧家长页) — restrained dashboard with paper feel
 
 const ALL_WORDS = [
   { en: 'apple',   zh: '苹果',   ipa: '/ˈæp.əl/',  emoji: '🍎', stars: 3, course: 'Food' },
@@ -20,8 +20,8 @@ function JournalPage({ variant: catVariant = 'storybook', density = 'normal' }) 
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 60px', borderBottom: `1.5px dashed ${PALETTE.inkPale}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <button style={{ background: 'transparent', border: `2px solid ${PALETTE.ink}`, borderRadius: 18, padding: '6px 14px', fontFamily: 'var(--font-zh)', fontSize: 15, cursor: 'pointer', color: PALETTE.ink }}>← 回大厅</button>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: 26, color: PALETTE.ink }}>我的魔法书</span>
+          <button style={{ background: 'transparent', border: `2px solid ${PALETTE.ink}`, borderRadius: 18, padding: '6px 14px', fontFamily: 'var(--font-zh)', fontSize: 15, cursor: 'pointer', color: PALETTE.ink }}>← 回课程</button>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: 26, color: PALETTE.ink }}>我的旧单词本</span>
           <span style={{ fontFamily: 'var(--font-en-script)', fontSize: 16, color: PALETTE.inkSoft }}>My Spellbook</span>
         </div>
         <div style={{ fontFamily: 'var(--font-zh)', fontSize: 16, color: PALETTE.inkSoft }}>已收集 <b style={{ color: PALETTE.ink, fontSize: 22 }}>9</b> / 44 个词</div>
@@ -150,7 +150,7 @@ function ParentsPage({ variant: catVariant = 'storybook', density = 'normal' }) 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 60px', borderBottom: `1.5px dashed ${PALETTE.inkPale}` }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <button style={{ background: 'transparent', border: `2px solid ${PALETTE.ink}`, borderRadius: 18, padding: '6px 14px', fontFamily: 'var(--font-zh)', fontSize: 15, cursor: 'pointer', color: PALETTE.ink }}>← 离开阁楼</button>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: 26, color: PALETTE.ink }}>家长阁楼</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: 26, color: PALETTE.ink }}>旧家长页</span>
           <span style={{ fontFamily: 'var(--font-en-script)', fontSize: 16, color: PALETTE.inkSoft }}>Parents · staff room</span>
         </div>
         <span style={{ fontFamily: 'var(--font-zh)', fontSize: 14, color: PALETTE.inkSoft }}>已用 PIN 解锁 · 自动 5 分钟后退出</span>

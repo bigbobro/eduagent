@@ -39,10 +39,23 @@ export function LessonClient({ course, requestedLearnerId: requested }: LessonCl
   }, [requested, router, status]);
   // Do not mount the controller (or prewarm the recorder) until access is allowed.
   if (status !== 'granted') return (
-    <main className="grid h-screen place-items-center bg-paper p-8 text-ink">
-      <div role={status ? 'alert' : 'status'} className="text-center font-zh">
+    <main className="grid h-screen place-items-center p-8">
+      <div
+        role={status ? 'alert' : 'status'}
+        className="text-center"
+      >
         <h1 className="mb-4 text-2xl">{status ? '上课前需要允许使用麦克风' : '正在检查麦克风…'}</h1>
-        {status && <><p className="mb-6">请到设置页允许麦克风,再回来上课。</p><Link href="/settings" className="rounded-paper-md border-2 border-ink bg-butter px-5 py-3 focus-visible:outline">去设置</Link></>}
+        {status && (
+          <>
+            <p className="mb-6">请到设置页允许麦克风,再回来上课。</p>
+            <Link
+              href="/settings"
+              className="ui-button ui-button-primary"
+            >
+              去设置
+            </Link>
+          </>
+        )}
       </div>
     </main>
   );

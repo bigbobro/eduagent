@@ -67,16 +67,15 @@
 | `src/lib/audio/recorder.ts` | **课堂实例拥有 mic + AudioContext + worklet**，`LessonRecorder.prewarm()` 提前就绪，同课多轮复用，旧课清理不触碰新课资源 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
-| `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,使用 `tone` 驱动 CC 调色 |
+| `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,`tone` 是课程色板键,不对应 Tailwind 颜色类 |
 | `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
-| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
-| `src/components/magic/*` | CC 绘本风原子组件:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
+| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill,ErrorBoundary}.tsx` | G 基础组件、六状态按住说话条和根错误页 |
 | `src/components/home/{CourseHome,LearnerPicker}.tsx` | 课程列表/详情图片墙与孩子选择 |
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
 | `src/components/lesson/IntroFrame.tsx` | 主题导入:麻吉 + 锁定 chip 网格,不再依赖 scene.svg |
-| `src/components/lesson/LessonMandalaV2.tsx` | 跟读练习法阵,保留 `LessonController` ASR/TTS 管线 |
+| `src/components/lesson/LessonMandalaV2.tsx` | 逐词跟读,保留 `LessonController` ASR/TTS 管线 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS gate:等待 `awaiting`,调用 `speakStatic`,短暂失败重试,播完后解锁 UI |
 | `src/components/lesson/QuizPickWordFrame.tsx` | quiz:静态 TTS 播 prompt + 正确英文词,播完前锁选词卡选择 |
 | `src/components/lesson/ReinforceFrame.tsx` | quiz:静态 TTS 播 targetText,播完前锁 repeat-after-me 录音 |
@@ -574,7 +573,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ```
 /                          课程列表与详情 · CourseHome
-/lesson/[id]               魔法课堂  · IntroFrame / LessonMandalaV2 / ReinforcementFlow
+/lesson/[id]               课堂  · IntroFrame / LessonMandalaV2 / ReinforcementFlow
 /lesson/[id]/done          下课庆祝  · DoneCelebrateFrame
 /records                   学习记录  · RecordsPage(当前孩子)
 /settings                  设置      · AI 老师与语音 / 麦克风 / 孩子 / 关于
@@ -586,8 +585,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | 文件 | 职责 |
 |------|------|
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
-| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill}.tsx` | G 基础组件与六状态按住说话条 |
-| `src/components/magic/*` | 绘本风 UI 原子:Cat / PaperBg / Star / Sparkle / PaperButton / IllustrationSlot / PictureCard |
+| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill,ErrorBoundary}.tsx` | G 基础组件、六状态按住说话条和根错误页 |
 | `src/components/home/{CourseHome,LearnerPicker,HomeWordCard}.tsx` | 分组课程列表、详情图片墙、可复用单词卡、孩子选择和读取状态 |
 | `src/components/settings/{VoiceSettingsPanel,useSettingsDraft,MicSection,LearnersSection,AboutSection}` | 设置四分区、凭据草稿、连接测试和保存后的退出码 75 |
 | `src/components/onboarding/OnboardingScreen.tsx` / `src/lib/onboarding-entry.ts` | 三步首次引导和首页进入条件 |
@@ -596,7 +594,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
 | `src/components/records/{RecordsPage,CourseWordsSheet,Heatmap,useLearningRecords,WordMastery}.tsx` | 当前孩子学习记录、居中课程单词墙浮层、正方形热力图、并行读取与请求隔离；下课页逐词表仍用 WordMastery |
 | `src/components/lesson/DoneLesson.tsx` | 课堂内和独立下课路由共用的数据加载与导航 |
-| `src/components/ui/{ErrorBoundary,SVGDefs}.tsx` | root 兜底与全局 SVG defs |
+| `src/app/not-found.tsx` | 未知地址:麻吉、`EmptyState`、「找不到这个页面」、「回到课程」 |
 | `src/lib/progress.ts` / `stats.ts` | 纯聚合(SQL 全部下沉到 `db/queries.ts`,这里只对返回行做 JS 整形) |
 | `src/app/api/{progress,sessions,stats}/route.ts` | 三个只读聚合 API;请求开始先 `ensureDatabaseInitialized()` 支持 fresh DB |
 | `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 4 页面 + 4 API |
@@ -604,12 +602,9 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ### Design tokens
 
-- 新外壳使用 G 的 primary/success/accent/text、glass/surface、4/8/12/16/24/32/48 间距、control/panel/card（10/16/24px）圆角与 rim/lift 阴影；具体值在 `tailwind.config.ts` 与 `globals.css`。
-
-- 旧页面调色（P6 清理前保留）:`tailwind.config.ts` 中 `paper / ink / rose / butter / mint / sky / lilac / peach / cat* / ember` 以及 Deep / Shadow 变体。
-- 字体:中文/界面标题使用系统字体，英文词汇由 `next/font/local` 加载 Fredoka 并提供 `--font-en`，旧 `font-en-script` 暂时别名到它；等宽使用系统字体。旧字体文件留待 P6 清理。
-- 圆角阶:`rounded-paper-sm/md/lg/pill`。
-- 阴影:`shadow-paper` / `shadow-paper-hero`,均为绘本纸张的实心偏移阴影。
+- 界面使用 G 的 primary `#6842FF`、success `#2DD4BF`、accent `#FF9F2E`、text、glass/surface、4/8/12/16/24/32/48 间距、control/panel/card（10/16/24px）圆角与 rim/lift 阴影。具体值在 `tailwind.config.ts` 与 `globals.css`。
+- 字体:中文和界面标题使用系统字体（`--font-zh`），英文词使用 `next/font/local` 加载的 Fredoka（`--font-en`），Key 字段使用系统等宽（`--font-mono`）。源码里只保留 Fredoka 字体文件。
+- 课程数据里的 `tone`（peach / butter / mint / sky / lilac）只标记课程，不生成 Tailwind 颜色类。
 
 ### 本地孩子档案(2026-10-24)
 
@@ -754,7 +749,7 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 ## P4 下课与学习记录（2026-10-25）
 
-`/records` 合并旧魔法书与家长页，主工具栏及原生 nav:records / Cmd+2 指向它。`/journal`、`/parents` 路由和旧组件已移除。学习记录只列 timesStarted > 0 的课程，以最近课次和词级 lastPracticed 降序排列。点课程条打开居中玻璃浮层（Esc、遮罩、关闭按钮可关，焦点进入后回到该行，遮罩下 `.shell-content` 与课程列表不滚动），墙为 6 列，复用首页 `HomeWordCard`（图片、中英、三段掌握、≥2 星打勾、未练淡化）。热力图为包含今天的滚动 91 天（13 列、7 行），格子边长取可用宽高减去间距后的较小值并居中，不随窗口压成扁矩形；使用本地日期，按每日 0 / 1–9 / 10–19 / >=20 分钟四档紫色。只展示现有时长、课次、会说单词、最近课次与 attempts > 0 且 masteryStars <= 1 的待练词，不显示占位准确率、连续天数等指标。
+`/records` 合并原先的单词本和家长页，主工具栏及原生 nav:records / Cmd+2 指向它。`/journal`、`/parents` 路由和旧组件已移除。学习记录只列 timesStarted > 0 的课程，以最近课次和词级 lastPracticed 降序排列。点课程条打开居中玻璃浮层（Esc、遮罩、关闭按钮可关，焦点进入后回到该行，遮罩下 `.shell-content` 与课程列表不滚动），墙为 6 列，复用首页 `HomeWordCard`（图片、中英、三段掌握、≥2 星打勾、未练淡化）。热力图为包含今天的滚动 91 天（13 列、7 行），格子边长取可用宽高减去间距后的较小值并居中，不随窗口压成扁矩形；使用本地日期，按每日 0 / 1–9 / 10–19 / >=20 分钟四档紫色。只展示现有时长、课次、会说单词、最近课次与 attempts > 0 且 masteryStars <= 1 的待练词，不显示占位准确率、连续天数等指标。
 
 `buildStatsSnapshot` / `/api/stats` 向后兼容新增 `lastDays: { date, minutes }[]`，始终 91 条且按日期升序补零；`last7Days` 保留原有聚合语义，等于 lastDays 最后七条。累计总数包含窗口外课次，日期按 startTime 的本地日期归属、每课次分钟先四舍五入，维持旧行为，不改 schema。
 

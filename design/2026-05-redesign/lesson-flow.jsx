@@ -27,7 +27,7 @@ function LessonTopBar({ courseTitle = '美食魔药', courseSub = 'Food · Lesso
         <button style={{
           background: 'transparent', border: `2px solid ${PALETTE.ink}`, borderRadius: 18,
           padding: '5px 13px', fontFamily: 'var(--font-zh)', fontSize: 14, cursor: 'pointer', color: PALETTE.ink,
-        }}>← 回大厅</button>
+        }}>← 回课程</button>
         <span style={{ fontFamily: 'var(--font-display)', fontSize: 24, color: PALETTE.ink, whiteSpace: 'nowrap' }}>{courseTitle}</span>
         <span style={{ fontFamily: 'var(--font-en-script)', fontSize: 15, color: PALETTE.inkSoft, whiteSpace: 'nowrap' }}>{courseSub}</span>
       </div>
@@ -360,7 +360,7 @@ function DoneCelebrateFrame({ variant: catVariant = 'storybook', starsEarned = 5
           padding: '14px 30px', background: PALETTE.paper, border: `2.4px solid ${PALETTE.ink}`, borderRadius: 999,
           fontFamily: 'var(--font-display)', fontSize: 22, color: PALETTE.ink,
           cursor: 'pointer', boxShadow: `4px 5px 0 ${PALETTE.paperShadow}`,
-        }}>回大厅 ←</button>
+        }}>回课程 ←</button>
         <button style={{
           padding: '14px 36px', background: PALETTE.mint, border: `2.4px solid ${PALETTE.ink}`, borderRadius: 999,
           fontFamily: 'var(--font-display)', fontSize: 22, color: PALETTE.ink,
@@ -405,7 +405,7 @@ function PINGateFrame({ variant: catVariant = 'storybook', entered = 2, error = 
           <Cat variant={catVariant} size={110} mood="idle" />
         </div>
         <div style={{ textAlign: 'center', fontFamily: 'var(--font-display)', fontSize: 28, color: PALETTE.ink, lineHeight: 1.1 }}>
-          家长阁楼
+          旧家长页
         </div>
         <div style={{ textAlign: 'center', fontFamily: 'var(--font-zh)', fontSize: 14, color: PALETTE.inkSoft, marginTop: 4, marginBottom: 18 }}>
           悄悄输入 4 位数 · 只有大人能进去哟

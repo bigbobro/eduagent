@@ -3,11 +3,9 @@
 @tailwind utilities;
 
 :root {
-  --background: #FBF5E6;
-  --foreground: #3D3326;
+  --background: #F7F5FB;
+  --foreground: #1E293B;
   --font-zh: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
-  --font-display: var(--font-zh);
-  --font-en-script: var(--font-en);
   --font-mono: ui-monospace, "SF Mono", monospace;
 }
 
@@ -19,53 +17,15 @@ body {
   font-family: var(--font-zh);
 }
 
-.paper-bg {
-  position: relative;
-  isolation: isolate;
-}
-
-.paper-grain {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.34;
-  mix-blend-mode: multiply;
-  background-image:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' seed='4'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E");
-}
-
-.paper-vignette {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(circle at 50% 42%, rgba(251, 245, 230, 0) 45%, rgba(201, 182, 138, 0.22) 100%);
-}
-
-.magic-sparkle {
-  transform-origin: center;
-  animation: magic-sparkle-twinkle 1800ms ease-in-out infinite;
-}
-
-@keyframes magic-sparkle-twinkle {
-  0%, 100% { opacity: 0.62; transform: scale(0.94) rotate(-4deg); }
-  50% { opacity: 1; transform: scale(1.08) rotate(5deg); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   *::before, *::after, * {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-
-  .magic-sparkle {
-    animation: none !important;
-    transform: none !important;
-  }
 }
 
-
-/* G foundation. Legacy paper tokens remain until P6. */
+/* G foundation. */
 :root {
   --purple: #6842FF; --purple-press: #5A35F0; --purple-soft: rgba(104,66,255,.12);
   --ui-ink: #1E293B; --ui-secondary: #64748B; --ui-muted: #94A3B8;
