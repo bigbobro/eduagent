@@ -14,6 +14,7 @@ async function main() {
   const pcm = readFileSync(input);
   if (!pcm.length || pcm.length > 48000 * 30 || pcm.length % 2) throw new Error('Invalid PCM input');
   const token = randomUUID();
+  let callStarted = false;
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === `/${token}`) {
       res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>Realtime transport probe</title>'); return;
@@ -22,6 +23,9 @@ async function main() {
     if (req.method !== 'POST' || req.url !== `/${token}/call` || req.headers.origin !== expectedOrigin) {
       res.writeHead(403); res.end(); return;
     }
+    if (callStarted) { res.writeHead(409); res.end('Probe call already started'); return; }
+    callStarted = true;
+    console.log('[prototype] WebRTC signaling start');
     try {
       let sdp = '';
       for await (const chunk of req) {
@@ -36,9 +40,10 @@ async function main() {
       const upstream = await fetch('https://api.openai.com/v1/realtime/calls', {
         method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form, signal: AbortSignal.timeout(15000),
       });
+      console.log(`[prototype] WebRTC signaling upstream HTTP ${upstream.status}`);
       if (!upstream.ok) { await upstream.body?.cancel(); res.writeHead(upstream.status); res.end('Realtime call rejected'); return; }
       res.setHeader('Content-Type', 'application/sdp'); res.end(await upstream.text());
-    } catch { res.writeHead(502); res.end('Realtime signaling failed'); }
+    } catch { console.error('[prototype] WebRTC signaling error'); res.writeHead(502); res.end('Realtime signaling failed'); }
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   let browser;
@@ -74,7 +79,11 @@ async function main() {
         if (e.type === 'session.created') { hasSession = true; settle?.(); }
         if (e.type === 'error') { failure = new Error('Realtime WebRTC protocol error'); settle?.(); }
         if (e.type === 'response.output_audio_transcript.done') transcript = e.transcript;
-        if (e.type === 'response.done') { usage = e.response?.usage; settle?.(); }
+        if (e.type === 'response.done') {
+          usage = e.response?.usage;
+          if (e.response?.status !== 'completed') failure = new Error('Realtime WebRTC response did not complete');
+          settle?.();
+        }
       };
       try {
         await context.resume();
@@ -98,15 +107,21 @@ async function main() {
         stats.forEach((stat) => {
           if (stat.type === 'inbound-rtp' && stat.kind === 'audio') inbound.push({ bytesReceived: stat.bytesReceived, packetsReceived: stat.packetsReceived });
         });
-        return { events, transcript, usage, inbound, connectionState: pc.connectionState,
+        if (!inbound.some((stat) => stat.bytesReceived > 0)) throw new Error('WebRTC completed without received audio');
+        return { events, transcript, usage, usageIncomplete: !usage, inbound, connectionState: pc.connectionState,
           limitation: 'Synthetic MediaStream, headless audio sink; not physical speaker playback completion' };
       } finally {
-        clearTimeout(timeout); source.stop(); pc.close(); destination.stream.getTracks().forEach((track) => track.stop()); await context.close();
+        clearTimeout(timeout);
+        try { source.stop(); } catch { /* A failed handshake may precede source.start(). */ }
+        pc.close(); destination.stream.getTracks().forEach((track) => track.stop()); await context.close();
       }
     }, { samples, token });
     const reportPath = path.join(path.dirname(input), 'webrtc-result.json');
     writeFileSync(reportPath, JSON.stringify(result, null, 2));
     console.log(`[prototype] WebRTC ${result.connectionState}; report=${reportPath}`);
+  } catch (error) {
+    writeFileSync(path.join(path.dirname(input), 'webrtc-failure.json'), JSON.stringify({ error: (error as Error).message, usageIncomplete: true }, null, 2));
+    throw error;
   } finally {
     await browser?.close();
     server.closeAllConnections();

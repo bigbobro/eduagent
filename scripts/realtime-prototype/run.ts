@@ -16,12 +16,13 @@ const option = (name: string, fallback: string) => {
 };
 const cases = [
   { id: 'cat-correct', target: 'cat', source: 'tests/fixtures/audio/animals_cat.wav', text: 'cat', expected: ['correct'] },
-  { id: 'cat-wrong', target: 'cat', source: 'tests/fixtures/audio/animals_dog.wav', text: 'dog', expected: ['wrong', 'off_topic'] },
+  { id: 'cat-wrong', target: 'cat', source: 'tests/fixtures/audio/animals_dog.wav', text: 'dog', expected: ['wrong'] },
   { id: 'sentence', target: 'cat', text: 'I can see a cat.', expected: ['correct'] },
+  { id: 'sentence-target', target: 'sentence-cat', targetText: 'I can see a cat.', text: 'I can see a cat.', expected: ['correct'] },
   { id: 'off-topic', target: 'cat', text: 'I want to go home.', expected: ['off_topic'] },
   { id: 'silence', target: 'cat', text: '', expected: ['silence'] },
   { id: 'mixed', target: 'cat', text: '这是 cat。', voice: 'Tingting', expected: ['correct'] },
-  { id: 'chinese-only', target: 'cat', text: '这是猫。', voice: 'Tingting', expected: ['wrong', 'off_topic'] },
+  { id: 'chinese-only', target: 'cat', text: '这是猫。', voice: 'Tingting', expected: ['wrong'] },
   { id: 'early-end', target: 'cat', text: 'I am done. Let us finish the lesson.', expected: ['off_topic'] },
 ];
 const output = path.resolve(args.includes('--out') ? option('--out', '') : mkdtempSync(path.join(tmpdir(), 'eduagent-realtime-prototype-')));
@@ -35,6 +36,8 @@ if (!Number.isInteger(repeats) || repeats < 1 || repeats > 5) throw new Error('-
 const strategy = option('--strategy', 'tool-first');
 if (strategy !== 'single' && strategy !== 'tool-first') throw new Error('Unknown --strategy');
 const clarifyGoal = args.includes('--clarify-goal');
+const presentation = option('--present', '');
+if (presentation && !['word', 'sentence', 'segmented', 'choice'].includes(presentation)) throw new Error('Unknown --present');
 const model = option('--model', 'gpt-realtime-2.1');
 const manifest = cases.map((c) => {
   const pcmPath = path.join(output, `${c.id}.pcm`);
@@ -66,7 +69,7 @@ async function main() {
     throw new Error('Prototype requires the official OpenAI endpoint');
   }
   const results: object[] = [];
-  const report = { prototype: true, startedAt: new Date().toISOString(), model, strategy, clarifyGoal,
+  const report = { prototype: true, startedAt: new Date().toISOString(), model, strategy, clarifyGoal, presentation,
     scope: 'single audio turn with in-memory assessment receipt, no production DB or UI integration', results };
   const save = () => writeFileSync(path.join(output, 'results.json'), JSON.stringify(report, null, 2));
   save();
@@ -76,14 +79,18 @@ async function main() {
       console.log(`[prototype] live ${c.id} ${repeat + 1}/${repeats} strategy=${strategy} model=${model}`);
       try {
         const { audio, ...result } = await runAudioTurn({ apiKey: process.env.OPENAI_API_KEY, model,
-          pcm: readFileSync(fixture.pcmPath), cardId: c.target, strategy: strategy as 'single' | 'tool-first', clarifyGoal });
+          pcm: readFileSync(fixture.pcmPath), cardId: c.target, strategy: strategy as 'single' | 'tool-first', clarifyGoal,
+          targetText: 'targetText' in c ? c.targetText : undefined,
+          presentation: presentation ? presentation as 'word' | 'sentence' | 'segmented' | 'choice' : undefined });
         const audioFile = `${c.id}-${repeat + 1}-output.pcm`;
         writeFileSync(path.join(output, audioFile), audio);
         results.push({ caseId: c.id, repeat: repeat + 1, ...result, audioFile, audioBytes: audio.length,
-          expected: c.expected, classificationMatches: result.assessments.length === 1 && c.expected.includes(result.assessments[0].result),
+          expected: c.expected, usageIncomplete: !result.usageComplete,
+          targetPassMatches: result.kind === 'presentation' ? null : result.assessments.length === 1 && (c.expected.includes('correct') === (result.assessments[0].result === 'correct')),
+          classificationMatches: result.kind === 'presentation' ? null : result.assessments.length === 1 && c.expected.includes(result.assessments[0].result),
           note: 'firstAudioMs measures received bytes after commit acknowledgement, not speaker playback or end-to-end release latency' });
         save();
-        console.log(`[prototype] ${c.id} result=${result.assessments[0]?.result ?? 'MISSING'} audioBytes=${audio.length} firstAudioMs=${Math.round(result.firstAudioMs ?? -1)}`);
+        console.log(`[prototype] ${c.id} result=${result.kind === 'presentation' ? 'presentation-not-assessed' : result.assessments[0]?.result ?? 'MISSING'} audioBytes=${audio.length} firstAudioMs=${Math.round(result.firstAudioMs ?? -1)}`);
       } catch (error) {
         // runAudioTurn only emits sanitized errors; do not log raw provider bodies or credentials.
         results.push({ caseId: c.id, repeat: repeat + 1, error: (error as Error).message, usageIncomplete: true });

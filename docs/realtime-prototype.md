@@ -41,10 +41,9 @@ that the English target can occur within a sentence and that silence must not be
 invented speech; use it only as a separately labeled experiment arm.
 
 Supported cases: `cat-correct`, `cat-wrong`, `sentence`, `off-topic`, `silence`,
-`mixed`, `chinese-only`, `early-end`; comma-separated case IDs are allowed. `--repeat` accepts 1–5. Model defaults to
+`mixed`, `chinese-only`, `early-end`, `sentence-target`; comma-separated case IDs are allowed. `--repeat` accepts 1–5. Model defaults to
 `gpt-realtime-2.1`; `--model` is explicit and no fallback model is chosen silently.
-Each case/repetition opens its own session. This does **not** test multi-turn
-classroom progression, adaptive retries, completion or cross-mode resume.
+Each ordinary case/repetition opens its own session. The dedicated sequence probe below keeps one session and uses model decisions to drive a small two-word exercise. Neither is the production classroom.
 
 The runner saves the response instructions, tool result, model self-report,
 assistant audio transcript, output PCM, event types and raw provider usage.
@@ -88,3 +87,43 @@ Production playback unlock and the full teaching loop need separate validation.
 - [Realtime WebSockets](https://developers.openai.com/api/docs/guides/voice-websockets?voice-api=realtime)
 - [Realtime WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc?voice-api=realtime)
 - [GPT-Realtime-2.1 pricing](https://developers.openai.com/api/docs/models/gpt-realtime-2.1)
+
+## Multi-turn, demonstrations and checkpoint mapping
+
+```sh
+pnpm exec tsx scripts/realtime-prototype/sequence.ts /tmp/realtime-single/manifest.json --live
+pnpm exec tsx scripts/realtime-prototype/run.ts --live --case sentence-target --present segmented
+pnpm exec tsx scripts/realtime-prototype/run.ts --live --case cat-correct --present choice
+pnpm test scripts/realtime-prototype/checkpoint.test.ts
+```
+
+The sequence uses one remote session, begins with a wrong word, then selects
+correct input for the current screen target. The model returns mastery and a
+retry/review/advance/skip decision. The scratch application follows it and stops
+after at most five child turns, reporting unfinished goals rather than claiming
+completion. This is not a full course and uses no production database.
+
+Demonstrations request only audio with tools disabled. They do not append child
+audio or create assessment records. `sentence-target` assesses a whole sentence;
+`sentence` tests whether a target word inside a sentence is accepted. Their labels
+are distinct. Wrong versus off-topic matter for attempt accounting: the current
+runner reports exact category agreement and separately compares target pass/fail.
+Earlier evidence used broader accepted category sets and must not be relabeled as
+exact agreement after the fact.
+
+The scratch checkpoint mapper uses the real serializer, parser and resume lookup
+to test retaining old hit counts and passed quizzes while adding model assessments
+and explicit mastery. It does not implement production cross-mode start, session
+ownership, phase recovery, or the known reinforcement resume fix.
+
+## Browser playback drain (offline)
+
+```sh
+pnpm exec tsx scripts/realtime-prototype/playback.ts /tmp/realtime-single/cat-correct-1-output.pcm
+```
+
+This bundles the existing `PcmPlayer` without modifying it, queues real returned
+PCM in headless Chrome and asserts that generation completion does not unlock
+playback: the player must stay busy until the actual WebAudio queue drains. It
+reports scheduled duration and observed idle time. No API or microphone is used.
+Physical speaker sound and subjective voice quality still require user acceptance.

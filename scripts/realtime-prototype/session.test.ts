@@ -43,6 +43,7 @@ it('executes the assessment before continuing speech and returns audio and bille
   expect(result.audio.length).toBe(4);
   expect(result.usage).toEqual([{ input_tokens: 100, output_tokens: 10 }, { input_tokens: 120, output_tokens: 20 }]);
   expect(result.audioBeforeAssessment).toBe(false);
+  expect(result.usageComplete).toBe(true);
   expect(result.transcripts).toEqual(['Good job!']);
 });
 
@@ -76,6 +77,7 @@ it('does not count duplicate tool deliveries twice and returns rejected target r
   const result = await runAudioTurn({ url: `ws://127.0.0.1:${address.port}`, apiKey: 'fake', model: 'test',
     pcm: Buffer.alloc(48000), cardId: 'cat', strategy: 'single' });
   expect(result.assessments).toHaveLength(1);
+  expect(result.usageComplete).toBe(false);
   expect(receipts.map((r) => r.ok)).toEqual([false, true, true, true]);
   expect(receipts[3].duplicate).toBe(true);
 });
@@ -93,4 +95,74 @@ it('releases a stalled connection on cancellation without an assessment', async 
   await expect(runAudioTurn({ url: `ws://127.0.0.1:${address.port}`, apiKey: 'fake', model: 'test', pcm: Buffer.alloc(48000),
     cardId: 'cat', strategy: 'single', signal: abort.signal })).rejects.toThrow('cancelled');
   await closed;
+});
+
+it('keeps one session for a state-driven retry and never counts feedback as another child turn', async () => {
+  const server = new WebSocketServer({ port: 0 });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.on('listening', resolve));
+  let connections = 0;
+  server.on('connection', (socket) => {
+    connections++;
+    let childTurns = 0;
+    let feedback = false;
+    const send = (e: object) => socket.send(JSON.stringify(e));
+    send({ type: 'session.created' });
+    socket.on('message', (raw) => {
+      const e = JSON.parse(String(raw));
+      if (e.type === 'session.update') send({ type: 'session.updated' });
+      if (e.type === 'input_audio_buffer.commit') {
+        childTurns++; feedback = false;
+        send({ type: 'input_audio_buffer.committed', item_id: `input-${childTurns}` });
+      }
+      if (e.type === 'conversation.item.create') feedback = true;
+      if (e.type === 'response.create' && !feedback) send({ type: 'response.done', response: {
+        id: `r${childTurns}-assess`, status: 'completed', metadata: e.response.metadata,
+        output: [{ type: 'function_call', name: 'record_assessment', call_id: `call-${childTurns}`, arguments: JSON.stringify({
+          card_id: 'cat', result: childTurns === 1 ? 'wrong' : 'correct', heard: childTurns === 1 ? 'dog' : 'cat',
+          evidence: 'Synthetic example', mastered: childTurns === 2, next_action: childTurns === 1 ? 'retry' : 'advance',
+        }) }],
+      } });
+      else if (e.type === 'response.create') send({ type: 'response.done', response: {
+        id: `r${childTurns}-speech`, status: 'completed', metadata: e.response.metadata, output: [],
+      } });
+    });
+  });
+  const address = server.address() as { port: number };
+  const result = await runAudioTurn({ url: `ws://127.0.0.1:${address.port}`, apiKey: 'fake', model: 'test',
+    pcm: Buffer.alloc(48000), cardId: 'cat', strategy: 'tool-first',
+    nextInput: (previous) => previous.mastered ? undefined : { pcm: Buffer.alloc(48000), cardId: 'cat' },
+  });
+  expect(connections).toBe(1);
+  expect(result.assessments[0].result).toBe('wrong');
+  expect(result.followingTurns?.map((t) => t.assessments[0].result)).toEqual(['correct']);
+  expect(result.followingTurns?.[0].mastered).toBe(true);
+  expect(result.turnId).not.toBe(result.followingTurns?.[0].turnId);
+});
+
+it('presents a sentence without creating a child input or recording an assessment', async () => {
+  const server = new WebSocketServer({ port: 0 });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.on('listening', resolve));
+  const received: string[] = [];
+  server.on('connection', (socket) => {
+    const send = (e: object) => socket.send(JSON.stringify(e));
+    send({ type: 'session.created' });
+    socket.on('message', (raw) => {
+      const e = JSON.parse(String(raw)); received.push(e.type);
+      if (e.type === 'session.update') send({ type: 'session.updated' });
+      if (e.type === 'input_audio_buffer.commit') send({ type: 'input_audio_buffer.committed' });
+      if (e.type === 'response.create') {
+        send({ type: 'response.output_audio.delta', delta: 'AQACAA==' });
+        send({ type: 'response.done', response: { id: 'demo', status: 'completed', metadata: e.response.metadata, output: [] } });
+      }
+    });
+  });
+  const address = server.address() as { port: number };
+  const result = await runAudioTurn({ url: `ws://127.0.0.1:${address.port}`, apiKey: 'fake', model: 'test',
+    cardId: 'sentence-cat', targetText: 'I can see a cat.', pcm: Buffer.alloc(4800), strategy: 'tool-first', presentation: 'segmented' });
+  expect(received).not.toContain('input_audio_buffer.commit');
+  expect(result.assessments).toEqual([]);
+  expect(result.audio.length).toBe(4);
+  expect(result.kind).toBe('presentation');
 });
