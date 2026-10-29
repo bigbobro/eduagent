@@ -12,7 +12,7 @@ function mockController(initialState: LessonStateName): any {
     off: vi.fn((event: string) => handlers.delete(event)),
     startListening: vi.fn(),
     stopListening: vi.fn(),
-    sendCustomAction: vi.fn(async () => {}),
+    repeatCard: vi.fn(async () => {}),
     getState: () => initialState,
   };
 }
@@ -24,7 +24,7 @@ describe('LessonMandalaV2', () => {
     const repeat = screen.getByRole('button', { name: '老师再讲一遍' }) as HTMLButtonElement;
     expect(repeat.disabled).toBe(state !== 'awaiting');
     fireEvent.click(repeat);
-    expect(controller.sendCustomAction).toHaveBeenCalledTimes(state === 'awaiting' ? 1 : 0);
+    expect(controller.repeatCard).toHaveBeenCalledTimes(state === 'awaiting' ? 1 : 0);
     const pill = screen.getByRole('button', { name: '按住空格说话' }) as HTMLButtonElement;
     expect(pill.disabled).toBe(state !== 'awaiting' && state !== 'listening');
   });
@@ -81,7 +81,7 @@ describe('LessonMandalaV2', () => {
     expect(screen.getByText('This is an apple.')).toBeTruthy();
   });
 
-  it('ignores show_card actions for already cleared word cards', async () => {
+  it('allows the classroom to revisit a mastered word', async () => {
     const controller = mockController('awaiting');
     const { container } = render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
 
@@ -93,7 +93,7 @@ describe('LessonMandalaV2', () => {
 
     const hero = container.querySelector('[data-picture-card-size="hero"]');
     expect(hero).toBeTruthy();
-    await waitFor(() => expect(within(container.querySelector('[data-picture-card-size="hero"]:last-child') as HTMLElement).getByText('banana')).toBeTruthy());
+    await waitFor(() => expect(within(container.querySelector('[data-picture-card-size="hero"]:last-child') as HTMLElement).getByText('apple')).toBeTruthy());
   });
 
   it('R1 (2026-07-20): positions on initialCardId instead of the first word card', () => {
@@ -121,10 +121,7 @@ describe('LessonMandalaV2', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '老师再讲一遍' }));
 
-    expect(controller.sendCustomAction).toHaveBeenCalledWith(expect.objectContaining({
-      action: 'message',
-      text: expect.stringContaining('当前卡片 apple'),
-    }));
+    expect(controller.repeatCard).toHaveBeenCalledWith('apple');
   });
 
   it('keeps pointer recording active while the captured pointer leaves the button', () => {

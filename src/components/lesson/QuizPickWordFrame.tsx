@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Course, Quiz, WordCard } from '@/types/course';
-import type { LessonController } from '@/lib/voice/lesson-controller';
+import type { Classroom } from '@/lib/voice/classroom';
 import Image from 'next/image';
 import { Check } from 'lucide-react';
 import { useStaticPromptSpeech } from './useStaticPromptSpeech';
@@ -12,7 +12,7 @@ interface QuizPickWordFrameProps {
   attempt?: number;
   quiz: Extract<Quiz, { type: 'pick-word' }>;
   course: Course;
-  controller: LessonController;
+  controller: Classroom;
   onAnswer: (result: { correct: boolean; picked: string }) => void;
 }
 
@@ -23,8 +23,7 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer, disabled
   const answeredRef = useRef(false);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const options = useMemo(() => buildOptions(wordCards, quiz), [wordCards, quiz]);
-  const promptText = useMemo(() => buildPickWordPromptText(quiz, course), [course, quiz]);
-  const { state, promptPlaying } = useStaticPromptSpeech(controller, promptText, quiz.id);
+  const { state, promptPlaying } = useStaticPromptSpeech(controller, quiz.id);
   const locked = disabled || promptPlaying || state === 'quiz-speaking';
 
   useEffect(() => {
@@ -46,12 +45,6 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer, disabled
       }}><div className="p2-option-pic"><Image src={card.imageUrl} alt="" fill sizes="280px" unoptimized /></div><div><b>{card.english}</b><small>{card.chinese}</small>{correct && <span className="p2-check" aria-label="答对了"><Check size={16} strokeWidth={3} /></span>}</div></button>;
     })}</div>
   </section>;
-}
-
-export function buildPickWordPromptText(quiz: Extract<Quiz, { type: 'pick-word' }>, course: Course): string {
-  const correct = course.cards.find((card) => card.id === quiz.correctCardId);
-  const english = correct?.english ?? quiz.correctCardId;
-  return `${quiz.prompt} ${english}.`;
 }
 
 function buildOptions(cards: WordCard[], quiz: Extract<Quiz, { type: 'pick-word' }>): WordCard[] {

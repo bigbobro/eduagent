@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Course, PhaseName } from '@/types/course';
 import { llmFailureNeedsSettings } from '@/lib/llm-errors';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
-import { LessonController } from '@/lib/voice/lesson-controller';
-import { PhasedLessonController } from '@/lib/voice/phased-lesson-controller';
+import type { Classroom } from '@/lib/voice/classroom';
+import { LegacyClassroom } from '@/lib/voice/legacy-classroom';
 import { DoneLesson } from './DoneLesson';
 import { IntroFrame } from './IntroFrame';
 import { LessonMandalaV2 } from './LessonMandalaV2';
@@ -29,8 +29,7 @@ interface PhasedLessonViewProps {
 
 export function PhasedLessonView({ course, learnerId, fresh, onStarted }: PhasedLessonViewProps) {
   const router = useRouter();
-  const v2Ref = useRef<LessonController | null>(null);
-  const phasedRef = useRef<PhasedLessonController | null>(null);
+  const v2Ref = useRef<Classroom | null>(null);
   const [introSubtitle, setIntroSubtitle] = useState('');
   const [quizIndex, setQuizIndex] = useState(0);
   const [phase, setPhase] = useState<PhaseName>('intro');
@@ -57,8 +56,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
 
   useEffect(() => {
-    const v2 = new LessonController();
-    const phased = new PhasedLessonController(v2, course);
+    const v2 = new LegacyClassroom(course);
+    const phased = v2;
     // R1 (2026-07-20 session persistence): a resumed session's very first 'phase-change' event
     // IS the resume application itself (PhasedLessonController.applyResumeInfo emits it
     // synchronously before startLesson() resolves — see phased-lesson-controller.ts). Reading
@@ -94,7 +93,6 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       if (!llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
     };
     v2Ref.current = v2;
-    phasedRef.current = phased;
     const onSubtitle = (next: { text: string; source: string }) => { if (next.source === 'ai') setIntroSubtitle(next.text); };
     v2.on('subtitle', onSubtitle);
     v2.on('progress', onProgress);
@@ -104,7 +102,6 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     phased.on('intro-busy-change', onIntroBusyChange);
     phased.on('intro-active-card-change', onIntroActiveCardChange);
     return () => {
-      if (phasedRef.current === phased) phasedRef.current = null;
       if (v2Ref.current === v2) v2Ref.current = null;
       v2.off('subtitle', onSubtitle);
       v2.off('progress', onProgress);
@@ -122,9 +119,9 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     setLessonError(null);
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     setStarted(true);
-    const phased = phasedRef.current;
+    const phased = v2Ref.current;
     const startedOk = await phased?.startLesson(learnerId, fresh ? { fresh: true } : undefined);
-    if (phasedRef.current !== phased) return;
+    if (v2Ref.current !== phased) return;
     if (startedOk === false) {
       setStarted(false);
       setPhase('intro');
@@ -139,7 +136,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
 
   const handleHotspotClick = (cardId: string) => {
     if (!started) return;
-    void phasedRef.current?.requestIntroCard(cardId);
+    void v2Ref.current?.requestIntroCard(cardId);
   };
 
   const handleLeave = () => router.push('/');
@@ -169,10 +166,10 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       <div className={`p2-content ${started && phase !== 'intro' && phase !== 'done' ? 'p2-lesson' : ''}`}>
         {transitionRetry && (
           <div role="alert" className="p2-retry"><EmptyState title="老师还没准备好下一步,再试一次吧" action={<Button disabled={retrying} onClick={async () => {
-              const phased = phasedRef.current;
+              const phased = v2Ref.current;
               setLessonError(null);
               setRetrying(true);
-              try { await phased?.retryTransition(); } finally { if (phasedRef.current === phased) setRetrying(false); }
+              try { await phased?.retryTransition(); } finally { if (v2Ref.current === phased) setRetrying(false); }
             }}>{retrying ? '准备中…' : '再试一次'}</Button>} /></div>
         )}
         {!started && (
@@ -208,7 +205,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             controller={v2}
             passedQuizIds={resumePassedQuizIds}
             onQuizChange={setQuizIndex}
-            onAllDone={() => phasedRef.current?.completeReinforcement()}
+            onAllDone={() => v2Ref.current?.completeReinforcement()}
           />
         )}
         {started && phase !== 'intro' && phase !== 'done' && v2 && <SubtitleLog controller={v2} learnerId={learnerId} />}

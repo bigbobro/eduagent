@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import maji from '../../../desktop/build-resources/icon-source.png';
 import { loadLearners } from '@/lib/current-learner';
-import type { LessonController } from '@/lib/voice/lesson-controller';
+import type { Classroom } from '@/lib/voice/classroom';
 
 interface Message { text: string; source: 'user' | 'ai'; live: boolean }
 
-export function SubtitleLog({ controller, learnerId }: { controller: LessonController; learnerId?: string }) {
+export function SubtitleLog({ controller, learnerId }: { controller: Classroom; learnerId?: string }) {
   const [name, setName] = useState('你');
   useEffect(() => {
     let active = true;

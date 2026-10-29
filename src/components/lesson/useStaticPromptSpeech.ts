@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import type { LessonController, LessonStateName } from '@/lib/voice/lesson-controller';
+import type { Classroom, LessonStateName } from '@/lib/voice/classroom';
 
 const STATIC_PROMPT_RETRY_MS = 250;
 
@@ -12,9 +12,8 @@ interface StaticPromptSpeechState {
 }
 
 export function useStaticPromptSpeech(
-  controller: LessonController,
-  promptText: string,
-  resetKey: string,
+  controller: Classroom,
+  quizId: string,
 ): StaticPromptSpeechState {
   const [state, setState] = useState<LessonStateName>(controller.getState());
   const [promptPlaying, setPromptPlaying] = useState(true);
@@ -25,9 +24,8 @@ export function useStaticPromptSpeech(
   const speakingPromptRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const lastResetRef = useRef<{
-    controller: LessonController;
-    promptText: string;
-    resetKey: string;
+    controller: Classroom;
+    quizId: string;
   } | null>(null);
 
   useEffect(() => {
@@ -48,40 +46,39 @@ export function useStaticPromptSpeech(
     const lastReset = lastResetRef.current;
     if (
       lastReset?.controller === controller
-      && lastReset.promptText === promptText
-      && lastReset.resetKey === resetKey
+      && lastReset.quizId === quizId
     ) {
       return;
     }
-    lastResetRef.current = { controller, promptText, resetKey };
+    lastResetRef.current = { controller, quizId };
     activeAttemptRef.current += 1;
     spokenPromptRef.current = null;
     speakingPromptRef.current = null;
     setHasHeardPrompt(false);
     setPromptPlaying(true);
     setRetryVersion(0);
-  }, [controller, promptText, resetKey]);
+  }, [controller, quizId]);
 
   useEffect(() => {
-    const trimmed = promptText.trim();
+    const trimmed = quizId.trim();
     if (!trimmed) {
       setHasHeardPrompt(true);
       setPromptPlaying(false);
       return;
     }
-    if (spokenPromptRef.current === promptText || speakingPromptRef.current === promptText) return;
+    if (spokenPromptRef.current === quizId || speakingPromptRef.current === quizId) return;
     if (state !== 'awaiting') return;
 
     const attempt = activeAttemptRef.current + 1;
     activeAttemptRef.current = attempt;
-    speakingPromptRef.current = promptText;
+    speakingPromptRef.current = quizId;
     setPromptPlaying(true);
 
     Promise.resolve()
-      .then(() => controller.speakStatic(promptText))
+      .then(() => controller.presentQuiz(quizId))
       .then(() => {
         if (!isCurrentAttempt(mountedRef, activeAttemptRef, attempt)) return;
-        spokenPromptRef.current = promptText;
+        spokenPromptRef.current = quizId;
         setHasHeardPrompt(true);
         setPromptPlaying(false);
       })
@@ -101,7 +98,7 @@ export function useStaticPromptSpeech(
         if (!isCurrentAttempt(mountedRef, activeAttemptRef, attempt)) return;
         speakingPromptRef.current = null;
       });
-  }, [controller, promptText, retryVersion, state]);
+  }, [controller, quizId, retryVersion, state]);
 
   return { state, promptPlaying, hasHeardPrompt };
 }

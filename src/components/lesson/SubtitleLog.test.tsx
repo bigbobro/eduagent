@@ -1,6 +1,6 @@
 import { act, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { LessonController } from '@/lib/voice/lesson-controller';
+import type { Classroom } from '@/lib/voice/classroom';
 import { SubtitleLog } from './SubtitleLog';
 
 function controller() {
@@ -16,7 +16,7 @@ describe('SubtitleLog', () => {
   it('uses the lesson child name while recognizing and after finalizing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: 'b', name: '安安' }]))));
     const source = controller();
-    render(<SubtitleLog controller={source as unknown as LessonController} learnerId="b" />);
+    render(<SubtitleLog controller={source as unknown as Classroom} learnerId="b" />);
     await act(async () => {});
     act(() => source.emit('subtitle', { text: 'cat', source: 'user' }));
     expect(await screen.findByText('安安 · 识别中')).toBeTruthy();
@@ -26,7 +26,7 @@ describe('SubtitleLog', () => {
   });
   it('keeps teacher sentences, replaces partial recognition, and finalizes a child turn', () => {
     const source = controller();
-    render(<SubtitleLog controller={source as unknown as LessonController} />);
+    render(<SubtitleLog controller={source as unknown as Classroom} />);
     act(() => { source.emit('subtitle', { text: 'Look at the cat.', source: 'ai' }); source.emit('subtitle-clear'); source.emit('subtitle', { text: 'ca', source: 'user' }); source.emit('subtitle', { text: 'cat', source: 'user' }); });
     expect(screen.getByText('你 · 识别中')).toBeTruthy();
     expect(screen.queryByText('ca')).toBeNull();
@@ -38,7 +38,7 @@ describe('SubtitleLog', () => {
   });
   it('bounds history and unsubscribes when the lesson view leaves', () => {
     const source = controller();
-    const { unmount } = render(<SubtitleLog controller={source as unknown as LessonController} />);
+    const { unmount } = render(<SubtitleLog controller={source as unknown as Classroom} />);
     act(() => { for (let i = 0; i < 55; i++) source.emit('subtitle', { text: `Sentence ${i}`, source: 'ai' }); });
     expect(within(screen.getByRole('log')).getAllByText(/^Sentence /)).toHaveLength(50);
     expect(screen.queryByText('Sentence 0')).toBeNull();

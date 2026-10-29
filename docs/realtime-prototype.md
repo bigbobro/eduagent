@@ -127,3 +127,38 @@ PCM in headless Chrome and asserts that generation completion does not unlock
 playback: the player must stay busy until the actual WebAudio queue drains. It
 reports scheduled duration and observed idle time. No API or microphone is used.
 Physical speaker sound and subjective voice quality still require user acceptance.
+
+## Reproducible input and classification diagnostics
+
+Use `--fixtures <manifest.json>` to reuse identical PCM instead of synthesizing it
+again. `--case word-fixtures` selects the 30 existing word recordings and ten
+mismatched target pairs. Individual fixture IDs or comma-separated IDs also work.
+`--inspect-input` retrieves the committed server audio and records byte counts,
+SHA256 and RMS locally. Reports contain hashes and measurements, never payloads.
+`--reference-input` tests an explicit item reference. Neither option is needed in
+normal teaching; they isolate transport from model interpretation.
+
+`--prompt-profile rubric` defines correct/close/wrong/off-topic/silence explicitly,
+including English within Chinese speech. `--prompt-profile no-fallback` removes
+only the uncertain-to-silence sentence from the clarified-goal block, for a
+single-factor comparison. `--assessment-audio` changes the forced-tool response's
+output modality; it can emit audio before the receipt and is diagnostic only.
+These alternatives are explicit experiment arms, not silent fallback behavior.
+
+`--skip-digital-silence` ignores an all-zero PCM buffer before any API connection,
+returning `kind: no-input` with no assessment or usage. It does not detect room
+noise or quiet speech. Such inputs are excluded from model accuracy, and cannot
+write mastery. The flag defaults off so raw model silence failures stay measurable.
+Incomplete responses retain sanitized status/reason and known usage; missing final
+usage keeps total cost incomplete even if an explicit later retry succeeds.
+
+```sh
+pnpm exec tsx scripts/realtime-prototype/run.ts --live --case word-fixtures --prompt-profile rubric --inspect-input --skip-digital-silence --out /tmp/realtime-words
+pnpm exec tsx scripts/realtime-prototype/summarize.ts /tmp/realtime-words/results.json
+```
+
+The offline summary separates exact category agreement, correct-target passes,
+incorrect-target passes, missing assessments, server-audio hash mismatches and
+nonzero inputs classified as silence. Cost is calculated only with complete
+supported usage and the documented GPT-Realtime-2.1 rates; otherwise it is null.
+It is a token-price estimate, not account billing or pronunciation certification.

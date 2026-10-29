@@ -4,27 +4,16 @@ import { foodCourse } from '@/data/courses/food';
 import { fruitsCourse } from '@/data/courses/fruits';
 import type { LessonStateName } from '@/lib/voice/lesson-controller';
 import {
-  ReinforceFrame,
   buildRepeatAfterMePrompt,
   buildRepeatAfterMeScoring,
   isRepeatAfterMeCorrect,
-} from './ReinforceFrame';
+} from '@/lib/voice/legacy-teaching';
+import { ReinforceFrame } from './ReinforceFrame';
 
 const quiz = foodCourse.phases.reinforcement.quizzes.find((item) => item.type === 'repeat-after-me') as Extract<
   (typeof foodCourse.phases.reinforcement.quizzes)[number],
   { type: 'repeat-after-me' }
 >;
-
-// ASR sentence candidates the frame passes to startListening: current quiz sentence first,
-// the remaining repeat-after-me sentences of the group as secondary candidates.
-const expectedAsrSentenceTexts = [
-  quiz.targetText,
-  ...foodCourse.phases.reinforcement.quizzes
-    .filter((item): item is typeof quiz => item.type === 'repeat-after-me')
-    .map((item) => item.targetText)
-    .filter((text) => text !== quiz.targetText),
-];
-const expectedSpokenPrompt = buildRepeatAfterMePrompt(quiz.targetText);
 
 function mockController(state: LessonStateName): any {
   const handlers = new Map<string, (event: any) => void>();
@@ -32,9 +21,9 @@ function mockController(state: LessonStateName): any {
     handlers,
     on: vi.fn((event: string, handler: (payload: any) => void) => handlers.set(event, handler)),
     off: vi.fn((event: string) => handlers.delete(event)),
-    startListening: vi.fn(),
+    startQuizListening: vi.fn(),
     stopListening: vi.fn(),
-    speakStatic: vi.fn(async () => {}),
+    presentQuiz: vi.fn(async () => {}),
     getState: () => state,
   };
 }
@@ -42,21 +31,18 @@ function mockController(state: LessonStateName): any {
 describe('ReinforceFrame', () => {
   it('starts recording only after the prompt has played', async () => {
     const controller = mockController('awaiting');
-    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
+    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller}  />);
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith(expectedSpokenPrompt));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledWith(quiz.id));
     await waitFor(() => expect(screen.getByRole('button', { name: '按住空格说话' })).toHaveProperty('disabled', false));
 
     fireEvent.pointerDown(screen.getByRole('button', { name: '按住空格说话' }), { button: 0 });
-    expect(controller.startListening).toHaveBeenCalledWith({
-      routeToChat: false,
-      asrSentenceTexts: expectedAsrSentenceTexts,
-    });
+    expect(controller.startQuizListening).toHaveBeenCalledWith(quiz.id);
   });
 
   it('keeps recording while a captured pointer leaves the button', async () => {
     const controller = mockController('awaiting');
-    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
+    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller}  />);
 
     await waitFor(() => expect(screen.getByRole('button', { name: '按住空格说话' })).toHaveProperty('disabled', false));
     const button = screen.getByRole('button', { name: '按住空格说话' });
@@ -67,10 +53,7 @@ describe('ReinforceFrame', () => {
     fireEvent.pointerDown(button, { pointerId: 1, button: 0 });
     fireEvent.pointerLeave(button, { pointerId: 1 });
 
-    expect(controller.startListening).toHaveBeenCalledWith({
-      routeToChat: false,
-      asrSentenceTexts: expectedAsrSentenceTexts,
-    });
+    expect(controller.startQuizListening).toHaveBeenCalledWith(quiz.id);
     expect(controller.stopListening).not.toHaveBeenCalled();
 
     fireEvent.pointerUp(button, { pointerId: 1 });
@@ -81,15 +64,15 @@ describe('ReinforceFrame', () => {
   it('locks recording while the prompt is still playing', async () => {
     let resolvePrompt!: () => void;
     const controller = mockController('awaiting');
-    controller.speakStatic.mockReturnValueOnce(new Promise<void>((resolve) => {
+    controller.presentQuiz.mockReturnValueOnce(new Promise<void>((resolve) => {
       resolvePrompt = resolve;
     }));
-    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
+    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller}  />);
 
     const button = screen.getByRole('button', { name: '按住空格说话' });
     expect(button).toHaveProperty('disabled', true);
     fireEvent.pointerDown(button);
-    expect(controller.startListening).not.toHaveBeenCalled();
+    expect(controller.startQuizListening).not.toHaveBeenCalled();
 
     await act(async () => resolvePrompt());
     await waitFor(() => expect(button).toHaveProperty('disabled', false));
@@ -97,28 +80,27 @@ describe('ReinforceFrame', () => {
 
   it('disables recording while controller is speaking', () => {
     const controller = mockController('speaking');
-    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={() => {}} />);
+    render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller}  />);
 
     const button = screen.getByRole('button', { name: '按住空格说话' });
     expect(button).toHaveProperty('disabled', true);
     fireEvent.pointerDown(button);
-    expect(controller.startListening).not.toHaveBeenCalled();
+    expect(controller.startQuizListening).not.toHaveBeenCalled();
   });
 
-  it('marks the sentence picture card correct after a matching ASR final', async () => {
+  it('marks the sentence picture card correct after an acknowledged model result', async () => {
     const controller = mockController('awaiting');
-    const onAnswer = vi.fn();
-    const { container } = render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
+    const { container } = render(<ReinforceFrame quiz={quiz} course={foodCourse} controller={controller} />);
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith(expectedSpokenPrompt));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledWith(quiz.id));
     expect(screen.getAllByText(quiz.targetText).length).toBeGreaterThan(0);
     expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="listening"]')).toBeTruthy();
     act(() => {
-      controller.handlers.get('asr-final')?.({ text: quiz.targetText });
+      controller.handlers.get('quiz-result')?.({ quizId: quiz.id, ok: true, correct: true, source: 'model', next: 'advance' });
     });
 
     expect(container.querySelector('[data-picture-card-size="hero"][data-picture-card-state="correct"]')).toBeTruthy();
-    expect(onAnswer).toHaveBeenCalledWith({ correct: true, said: quiz.targetText });
+
   });
 });
 

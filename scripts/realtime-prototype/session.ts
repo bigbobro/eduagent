@@ -1,5 +1,5 @@
 /** Experimental protocol probe, not the production classroom controller. No durable writes. */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
 
@@ -24,6 +24,11 @@ export interface AudioTurnOptions extends AudioInput {
   timeoutMs?: number;
   /** Single-factor prompt experiment: clarify lexical target and silence handling. */
   clarifyGoal?: boolean;
+  inspectInput?: boolean;
+  referenceInput?: boolean;
+  assessmentAudio?: boolean;
+  skipDigitalSilence?: boolean;
+  promptProfile?: 'base' | 'rubric' | 'no-fallback';
   /** State-driven synthetic child. One connection; bounded to six child turns. */
   nextInput?: (previous: AudioTurnResult, completedTurns: number) => AudioInput | undefined;
 }
@@ -32,17 +37,25 @@ interface Event {
   delta?: string;
   transcript?: string;
   item_id?: string;
+  item?: { id: string; content?: Array<{ type: string; audio?: string }> };
   error?: { code?: string };
   response?: {
     id: string;
     status: string;
+    status_details?: { type?: string; reason?: string; error?: { code?: string } };
     metadata?: { turnId?: string };
     usage?: Record<string, unknown>;
     output?: Array<{ type: string; name?: string; call_id?: string; arguments?: string }>;
   };
 }
+export class RealtimeResponseError extends Error {
+  constructor(status: string, reason: string, readonly knownUsage: Record<string, unknown>[]) {
+    super(`Realtime response ${status}: ${reason}`);
+  }
+}
 export interface AudioTurnResult {
-  kind: 'child' | 'presentation';
+  inputEvidence?: { sentBytes: number; sentSha256: string; retrievedBytes: number; retrievedSha256: string; retrievedRms: number };
+  kind: 'child' | 'presentation' | 'no-input';
   followingTurns?: AudioTurnResult[];
   instructions: string;
   turnId: string;
@@ -63,6 +76,8 @@ export async function runAudioTurn(options: AudioTurnOptions): Promise<AudioTurn
   if (options.pcm.length < 4800 || options.pcm.length > 24_000 * 2 * 30 || options.pcm.length % 2) {
     throw new Error('Expected 0.1–30 seconds of 24 kHz mono PCM16');
   }
+  options.signal?.throwIfAborted();
+  if (!options.presentation && options.skipDigitalSilence && options.pcm.every((byte) => byte === 0)) return digitalSilenceResult();
   const signal = AbortSignal.any([AbortSignal.timeout(options.timeoutMs ?? 40_000), ...(options.signal ? [options.signal] : [])]);
   signal.throwIfAborted();
   const socket = new WebSocket(options.url ?? `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(options.model)}`, {
@@ -114,8 +129,11 @@ export async function runAudioTurn(options: AudioTurnOptions): Promise<AudioTurn
     await until('session.created');
     const runOne = async (inputAudio: AudioInput): Promise<AudioTurnResult> => {
       if (inputAudio.pcm.length < 4800 || inputAudio.pcm.length > 24_000 * 2 * 30 || inputAudio.pcm.length % 2) throw new Error('Invalid follow-up PCM');
-      let instructions = `You are a kind children's English tutor. The screen shows ${inputAudio.targetText ?? inputAudio.cardId} (card ID ${inputAudio.cardId}). Listen to the audio. Assess only this target. Do not count your own examples as the child speaking. Report what you heard as model self-report, not verified transcription. Use record_assessment once for this child turn. Decide yourself whether this goal is mastered and whether to retry, review, advance, or skip. Do not infer mastery merely from earlier turns about other goals. Do not claim anything was saved or a card changed before tool success. After success give one short Chinese sentence of feedback, mentioning the English target only if useful. Do not invent a next card. Silence/off-topic are not wrong attempts.` + (options.clarifyGoal
+      if (!options.presentation && options.skipDigitalSilence && inputAudio.pcm.every((byte) => byte === 0)) return digitalSilenceResult();
+      let instructions = `You are a kind children's English tutor. The screen shows ${inputAudio.targetText ?? inputAudio.cardId} (card ID ${inputAudio.cardId}). Listen to the audio. Assess only this target. Do not count your own examples as the child speaking. Report what you heard as model self-report, not verified transcription. Use record_assessment once for this child turn. Decide yourself whether this goal is mastered and whether to retry, review, advance, or skip. Do not infer mastery merely from earlier turns about other goals. Do not claim anything was saved or a card changed before tool success. After success give one short Chinese sentence of feedback, mentioning the English target only if useful. Do not invent a next card. Silence/off-topic are not wrong attempts.` + (options.clarifyGoal || options.promptProfile === 'no-fallback'
         ? ' The learning objective is producing the English target, alone OR inside a longer sentence, including mixed Chinese/English. Chinese translation alone is not a correct English attempt. For zero audio or silence say silence, heard must be empty. Never invent words, meowing or background sounds. If unsure say close or silence rather than inventing content.' : '');
+      if (options.promptProfile === 'no-fallback') instructions = instructions.replace(' If unsure say close or silence rather than inventing content.', '');
+      if (options.promptProfile === 'rubric') instructions = `You teach English to a Chinese-speaking child. Current task: say the English target "${inputAudio.targetText ?? inputAudio.cardId}" (card ID ${inputAudio.cardId}). Classify the current user audio: correct = an understandable complete English target, alone or inside a sentence or Chinese-English mix; close = a recognizable but incomplete or unclear English attempt; wrong = an audible answer to this task without the required English; off_topic = an unrelated request or comment; silence = no audible speech. Audible Chinese or speech you cannot understand is not silence. In heard, give your tentative perception, not a verified transcript. Do not guess words from the target when no speech exists. Call record_assessment once with your judgment, mastery decision and next action. The application executes operations; do not claim saved progress before tool success. Then briefly respond in Chinese. Do not claim professional pronunciation scores.`;
       if (options.presentation) instructions = `You are demonstrating a children's English task, not assessing a child. No child input exists. ${options.presentation === 'choice' ? 'Say the English target as a listen-and-pick-picture question. Do not reveal the position, Chinese translation, or picture description.' : options.presentation === 'segmented' ? 'Say the full target sentence, then slow short chunks, then the full sentence again.' : 'Pronounce the exact English target clearly.'} Target: ${inputAudio.targetText ?? inputAudio.cardId}. Do not call assessment tools or claim learning progress.`;
       send({ type: 'session.update', session: {
         type: 'realtime', instructions,
@@ -139,8 +157,22 @@ export async function runAudioTurn(options: AudioTurnOptions): Promise<AudioTurn
         send({ type: 'input_audio_buffer.commit' });
         input = await until('input_audio_buffer.committed');
       }
+      let inputEvidence: AudioTurnResult['inputEvidence'];
+      if (!options.presentation && options.inspectInput) {
+        if (!input.item_id) throw new Error('Committed audio item missing ID');
+        send({ type: 'conversation.item.retrieve', item_id: input.item_id });
+        const retrieved = await until('conversation.item.retrieved');
+        const content = retrieved.item?.content?.find((part) => part.type === 'input_audio' && typeof part.audio === 'string');
+        if (retrieved.item?.id !== input.item_id || !content?.audio) throw new Error('Server audio item unavailable for inspection');
+        const pcm = Buffer.from(content.audio, 'base64');
+        if (!pcm.length || pcm.length % 2) throw new Error('Invalid server audio representation');
+        let squares = 0;
+        for (let i = 0; i < pcm.length; i += 2) squares += pcm.readInt16LE(i) ** 2;
+        inputEvidence = { sentBytes: inputAudio.pcm.length, sentSha256: createHash('sha256').update(inputAudio.pcm).digest('hex'),
+          retrievedBytes: pcm.length, retrievedSha256: createHash('sha256').update(pcm).digest('hex'), retrievedRms: Math.sqrt(squares / (pcm.length / 2)) };
+      }
       const started = performance.now();
-      const result: AudioTurnResult = { kind: options.presentation ? 'presentation' : 'child', instructions, turnId: randomUUID(), inputItemId: input.item_id ?? '', assessments: [], mastered: false,
+      const result: AudioTurnResult = { inputEvidence, kind: options.presentation ? 'presentation' : 'child', instructions, turnId: randomUUID(), inputItemId: input.item_id ?? '', assessments: [], mastered: false,
         audio: Buffer.alloc(0), transcripts: [], usage: [], usageComplete: true, eventTypes: [], audioBeforeAssessment: false, firstAudioMs: null, durationMs: 0 };
       const audio: Buffer[] = [];
       let audioBytes = 0;
@@ -148,7 +180,8 @@ export async function runAudioTurn(options: AudioTurnOptions): Promise<AudioTurn
       const responseIds = new Set<string>();
       const respond = (continuation: boolean) => send({ type: 'response.create', response: {
         metadata: { turnId: result.turnId },
-        output_modalities: !options.presentation && !continuation && options.strategy === 'tool-first' ? ['text'] : ['audio'],
+        ...(!continuation && !options.presentation && options.referenceInput ? { input: [{ type: 'item_reference', id: result.inputItemId }] } : {}),
+        output_modalities: !options.presentation && !continuation && options.strategy === 'tool-first' && !options.assessmentAudio ? ['text'] : ['audio'],
         tool_choice: options.presentation || continuation ? 'none' : options.strategy === 'tool-first' ? { type: 'function', name: 'record_assessment' } : 'auto',
       } });
       respond(false);
@@ -172,7 +205,10 @@ export async function runAudioTurn(options: AudioTurnOptions): Promise<AudioTurn
         if (response.metadata?.turnId !== result.turnId) throw new Error('Realtime response turn mismatch');
         if (response.usage) result.usage.push(response.usage);
         else result.usageComplete = false;
-        if (response.status !== 'completed') throw new Error(`Realtime response did not complete`);
+        if (response.status !== 'completed') {
+          const safe = (value: string | undefined) => value && /^[a-z0-9_]{1,80}$/i.test(value) ? value : 'unknown';
+          throw new RealtimeResponseError(safe(response.status), safe(response.status_details?.reason ?? response.status_details?.error?.code), result.usage);
+        }
         const calls = (response.output ?? []).filter((item) => item.type === 'function_call');
         for (const call of calls) {
           if (!call.call_id) throw new Error('Realtime tool call missing ID');
@@ -224,4 +260,10 @@ export async function runAudioTurn(options: AudioTurnOptions): Promise<AudioTurn
 
 function parseArguments(value: string | undefined): unknown {
   try { return JSON.parse(value ?? ''); } catch { return null; }
+}
+
+function digitalSilenceResult(): AudioTurnResult {
+  return { kind: 'no-input', instructions: '', turnId: randomUUID(), inputItemId: '', assessments: [], mastered: false,
+    audio: Buffer.alloc(0), transcripts: [], usage: [], usageComplete: true, eventTypes: ['input.digital_silence'],
+    audioBeforeAssessment: false, firstAudioMs: null, durationMs: 0 };
 }

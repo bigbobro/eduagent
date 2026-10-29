@@ -3,7 +3,8 @@ import { StrictMode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
 import type { LessonStateName } from '@/lib/voice/lesson-controller';
-import { QuizPickWordFrame, buildPickWordPromptText } from './QuizPickWordFrame';
+import { QuizPickWordFrame } from './QuizPickWordFrame';
+import { buildPickWordPromptText } from '@/lib/voice/legacy-teaching';
 
 const quiz = foodCourse.phases.reinforcement.quizzes.find((item) => item.type === 'pick-word') as Extract<
   (typeof foodCourse.phases.reinforcement.quizzes)[number],
@@ -23,7 +24,7 @@ function mockController(initialState: LessonStateName = 'awaiting'): any {
       handlers.get(event)?.delete(handler);
     }),
     getState: () => state,
-    speakStatic: vi.fn(async () => {}),
+    presentQuiz: vi.fn(async () => {}),
     emitState(next: LessonStateName) {
       state = next;
       handlers.get('state')?.forEach((handler) => handler(next));
@@ -41,7 +42,7 @@ describe('QuizPickWordFrame', () => {
     const controller = mockController();
     const { container } = render(<QuizPickWordFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith('Where is the apple? apple.'));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledWith(quiz.id));
     await waitFor(() => expect(screen.getByRole('button', { name: /milk/i })).toHaveProperty('disabled', false));
 
     fireEvent.click(screen.getByRole('button', { name: /milk/i }));
@@ -70,12 +71,12 @@ describe('QuizPickWordFrame', () => {
     const controller = mockController('speaking');
     render(<QuizPickWordFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
 
-    expect(controller.speakStatic).not.toHaveBeenCalled();
+    expect(controller.presentQuiz).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /apple/i })).toHaveProperty('disabled', true);
 
     act(() => controller.emitState('awaiting'));
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledWith('Where is the apple? apple.'));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledWith(quiz.id));
     await waitFor(() => expect(screen.getByRole('button', { name: /apple/i })).toHaveProperty('disabled', false));
   });
 
@@ -83,12 +84,12 @@ describe('QuizPickWordFrame', () => {
     let resolvePrompt!: () => void;
     const onAnswer = vi.fn();
     const controller = mockController();
-    controller.speakStatic.mockReturnValueOnce(new Promise<void>((resolve) => {
+    controller.presentQuiz.mockReturnValueOnce(new Promise<void>((resolve) => {
       resolvePrompt = resolve;
     }));
     render(<QuizPickWordFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledTimes(1));
     act(() => controller.emitState('quiz-speaking'));
     expect(screen.getByRole('button', { name: /apple/i })).toHaveProperty('disabled', true);
 
@@ -108,19 +109,19 @@ describe('QuizPickWordFrame', () => {
       </StrictMode>,
     );
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledTimes(1));
   });
 
   it('retries a transient static speech failure before unlocking cards', async () => {
     const onAnswer = vi.fn();
     const controller = mockController();
-    controller.speakStatic.mockRejectedValueOnce(new Error('Static TTS already in progress'));
-    controller.speakStatic.mockResolvedValueOnce(undefined);
+    controller.presentQuiz.mockRejectedValueOnce(new Error('Static TTS already in progress'));
+    controller.presentQuiz.mockResolvedValueOnce(undefined);
     render(<QuizPickWordFrame quiz={quiz} course={foodCourse} controller={controller} onAnswer={onAnswer} />);
 
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('button', { name: /apple/i })).toHaveProperty('disabled', true);
-    await waitFor(() => expect(controller.speakStatic).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getByRole('button', { name: /apple/i })).toHaveProperty('disabled', false));
 
     fireEvent.click(screen.getByRole('button', { name: /apple/i }));

@@ -1,18 +1,23 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
-import { ReinforcementFlow, getRetryPrompt } from './ReinforcementFlow';
+import { ReinforcementFlow } from './ReinforcementFlow';
+import { getRetryPrompt } from '@/lib/voice/legacy-teaching';
+import { LegacyClassroom } from '@/lib/voice/legacy-classroom';
 
 function mockController(): any {
-  return {
-    on: vi.fn(),
-    off: vi.fn(),
-    startListening: vi.fn(),
-    stopListening: vi.fn(),
+  const listeners = new Map<string, Set<Function>>();
+  const engine: any = {
+    on(event: string, fn: Function) { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(fn); },
+    off(event: string, fn: Function) { listeners.get(event)?.delete(fn); },
+    startListening: vi.fn(), stopListening: vi.fn(),
     speakStatic: vi.fn(async () => {}),
     submitQuizAnswer: vi.fn(async () => ({ ok: true })),
     getState: () => 'awaiting',
   };
+  return Object.assign(new LegacyClassroom(foodCourse, engine), {
+    submitQuizAnswer: engine.submitQuizAnswer, speakStatic: engine.speakStatic,
+  });
 }
 
 describe('ReinforcementFlow', () => {

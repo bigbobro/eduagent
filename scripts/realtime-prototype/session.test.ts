@@ -166,3 +166,64 @@ it('presents a sentence without creating a child input or recording an assessmen
   expect(result.audio.length).toBe(4);
   expect(result.kind).toBe('presentation');
 });
+
+it('can bind assessment to the acknowledged audio item and retain server-side audio evidence', async () => {
+  const server = new WebSocketServer({ port: 0 }); servers.push(server);
+  await new Promise<void>((resolve) => server.on('listening', resolve));
+  const inputs: unknown[] = [];
+  const modalities: unknown[] = [];
+  server.on('connection', (socket) => {
+    const send = (e: object) => socket.send(JSON.stringify(e));
+    send({ type: 'session.created' });
+    socket.on('message', (raw) => {
+      const e = JSON.parse(String(raw));
+      if (e.type === 'session.update') send({ type: 'session.updated' });
+      if (e.type === 'input_audio_buffer.commit') send({ type: 'input_audio_buffer.committed', item_id: 'the-child-audio' });
+      if (e.type === 'conversation.item.retrieve') send({ type: 'conversation.item.retrieved', item: {
+        id: e.item_id, content: [{ type: 'input_audio', audio: Buffer.alloc(48000).toString('base64') }],
+      } });
+      if (e.type === 'response.create') {
+        inputs.push(e.response.input); modalities.push(e.response.output_modalities);
+        send({ type: 'response.done', response: { id: 'r1', status: 'completed', metadata: e.response.metadata, output: [] } });
+      }
+    });
+  });
+  const address = server.address() as { port: number };
+  const result = await runAudioTurn({ url: `ws://127.0.0.1:${address.port}`, apiKey: 'fake', model: 'test',
+    pcm: Buffer.alloc(48000), cardId: 'cat', strategy: 'tool-first', inspectInput: true, referenceInput: true, assessmentAudio: true });
+  expect(inputs).toEqual([[{ type: 'item_reference', id: 'the-child-audio' }]]);
+  expect(modalities).toEqual([['audio']]);
+  expect(result.inputEvidence).toMatchObject({ sentBytes: 48000, retrievedBytes: 48000, retrievedRms: 0 });
+  expect(result.inputEvidence?.sentSha256).toBe(result.inputEvidence?.retrievedSha256);
+});
+
+it('ignores digital silence without opening a provider connection or recording an assessment', async () => {
+  const result = await runAudioTurn({ url: 'ws://127.0.0.1:1', apiKey: 'unused', model: 'test',
+    pcm: Buffer.alloc(48000), cardId: 'cat', strategy: 'tool-first', skipDigitalSilence: true });
+  expect(result.kind).toBe('no-input');
+  expect(result.assessments).toEqual([]);
+  expect(result.usage).toEqual([]);
+  expect(result.usageComplete).toBe(true);
+  expect(result.eventTypes).toEqual(['input.digital_silence']);
+});
+
+it('retains sanitized failure reason and known usage when a provider response is incomplete', async () => {
+  const server = new WebSocketServer({ port: 0 }); servers.push(server);
+  await new Promise<void>((resolve) => server.on('listening', resolve));
+  server.on('connection', (socket) => {
+    const send = (e: object) => socket.send(JSON.stringify(e)); send({ type: 'session.created' });
+    socket.on('message', (raw) => {
+      const e = JSON.parse(String(raw));
+      if (e.type === 'session.update') send({ type: 'session.updated' });
+      if (e.type === 'input_audio_buffer.commit') send({ type: 'input_audio_buffer.committed', item_id: 'input' });
+      if (e.type === 'response.create') send({ type: 'response.done', response: { id: 'incomplete', status: 'incomplete',
+        status_details: { type: 'incomplete', reason: 'max_output_tokens' }, metadata: e.response.metadata,
+        usage: { input_tokens: 50, output_tokens: 400 }, output: [] } });
+    });
+  });
+  const address = server.address() as { port: number };
+  await expect(runAudioTurn({ url: `ws://127.0.0.1:${address.port}`, apiKey: 'fake', model: 'test',
+    pcm: Buffer.alloc(48000), cardId: 'cat', strategy: 'tool-first' })).rejects.toMatchObject({
+      message: 'Realtime response incomplete: max_output_tokens', knownUsage: [{ input_tokens: 50, output_tokens: 400 }],
+    });
+});
