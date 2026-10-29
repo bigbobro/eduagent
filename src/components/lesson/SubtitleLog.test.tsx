@@ -46,3 +46,29 @@ describe('SubtitleLog', () => {
     act(() => source.emit('subtitle', { text: 'late event', source: 'ai' }));
   });
 });
+
+it('updates one teacher bubble for cumulative chunks and keeps distinct replies separate', () => {
+  const source = controller();
+  render(<SubtitleLog controller={source as unknown as Classroom} />);
+  act(() => {
+    source.emit('subtitle', { text: '这次你说的是中文，请', source: 'ai', messageId: 'reply-1' });
+    source.emit('subtitle', { text: '这次你说的是中文，请再试着说一遍：fish。', source: 'ai', messageId: 'reply-1' });
+  });
+  expect(within(screen.getByRole('log')).getAllByText('麻吉')).toHaveLength(1);
+  expect(screen.queryByText('这次你说的是中文，请')).toBeNull();
+  expect(screen.getByText('这次你说的是中文，请再试着说一遍：fish。')).toBeTruthy();
+  act(() => source.emit('subtitle', { text: '再来练习 dog。', source: 'ai', messageId: 'reply-2' }));
+  expect(within(screen.getByRole('log')).getAllByText('麻吉')).toHaveLength(2);
+});
+
+it('replaces an identified teacher reply without overwriting an interleaved child message', () => {
+  const source = controller();
+  render(<SubtitleLog controller={source as unknown as Classroom} />);
+  act(() => {
+    source.emit('subtitle', { text: '请读', source: 'ai', messageId: 'reply-1' });
+    source.emit('subtitle', { text: 'fish', source: 'user', provenance: 'model' });
+    source.emit('subtitle', { text: '请读 fish。', source: 'ai', messageId: 'reply-1' });
+  });
+  expect(screen.getByText('fish')).toBeTruthy();
+  expect(within(screen.getByRole('log')).getAllByText('麻吉')).toHaveLength(1);
+});

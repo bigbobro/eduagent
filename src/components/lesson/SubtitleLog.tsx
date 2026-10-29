@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import maji from '../../../desktop/build-resources/icon-source.png';
 import { loadLearners } from '@/lib/current-learner';
-import type { Classroom } from '@/lib/voice/classroom';
+import type { Classroom, ClassroomEvents } from '@/lib/voice/classroom';
 
-interface Message { text: string; source: 'user' | 'ai'; provenance?: 'asr' | 'model'; live: boolean }
+type Message = ClassroomEvents['subtitle'] & { live: boolean };
 
 export function SubtitleLog({ controller, learnerId }: { controller: Classroom; learnerId?: string }) {
   const [name, setName] = useState('你');
@@ -20,11 +20,16 @@ export function SubtitleLog({ controller, learnerId }: { controller: Classroom; 
   const pending = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const subtitle = (next: { text: string; source: 'user' | 'ai'; provenance?: 'asr' | 'model' }) => {
+    const subtitle = (next: ClassroomEvents['subtitle']) => {
       if (!next.text) return;
       const replace = next.source === 'user' && pending.current;
       pending.current = next.source === 'user' && next.provenance !== 'model';
-      setMessages((prev) => [...(replace ? prev.slice(0, -1) : prev), { ...next, live: next.source === 'user' && next.provenance !== 'model' }].slice(-50));
+      setMessages((prev) => {
+        const message: Message = { ...next, live: next.source === 'user' && next.provenance !== 'model' };
+        const index = next.messageId ? prev.findIndex((item) => item.source === next.source && item.messageId === next.messageId) : -1;
+        if (index >= 0) return prev.map((item, position) => position === index ? message : item);
+        return [...(replace ? prev.slice(0, -1) : prev), message].slice(-50);
+      });
     };
     const finish = () => {
       pending.current = false;

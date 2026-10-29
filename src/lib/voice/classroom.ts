@@ -12,7 +12,7 @@ export interface QuizResult {
 }
 export interface ClassroomEvents {
   state: LessonStateName;
-  subtitle: { text: string; source: 'user' | 'ai'; provenance?: 'asr' | 'model' };
+  subtitle: { text: string; source: 'user' | 'ai'; provenance?: 'asr' | 'model'; messageId?: string };
   'subtitle-clear': undefined;
   'asr-final': { text: string };
   actions: ToolAction[];

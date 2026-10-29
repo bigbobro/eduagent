@@ -135,7 +135,7 @@ export class RealtimeClassroom implements Classroom {
               if (pcm.length % 2) throw new Error('REALTIME_PROTOCOL');
               run.player.enqueue(pcm.buffer); this.state(run, intent.kind === 'present-quiz' ? 'quiz-speaking' : 'speaking');
             }
-            if (event.type === 'transcript') { transcript += event.text; this.emit('subtitle', { text: transcript, source: 'ai' }); }
+            if (event.type === 'transcript') { transcript += event.text; this.emit('subtitle', { text: transcript, source: 'ai', messageId: turnId }); }
             if (event.type === 'error') throw new Error(event.code);
             if (event.type === 'done') done = true;
           }

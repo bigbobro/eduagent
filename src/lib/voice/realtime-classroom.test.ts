@@ -112,3 +112,18 @@ it('finishes the new-card demonstration after a committed assessment feedback re
   expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string).intent).toEqual({ kind: 'repeat', cardId: 'milk' });
   expect(classroom.getState()).toBe('awaiting'); await classroom.endLesson();
 });
+
+it('identifies cumulative teacher subtitles by response turn without merging later replies', async () => {
+  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
+  const subtitles: Array<{ text: string; messageId?: string }> = [];
+  classroom.on('subtitle', (event) => subtitles.push(event));
+  extra.push(() => stream([{ type: 'transcript', text: '请' }, { type: 'transcript', text: '读 fish。' }, { type: 'done' }]));
+  await classroom.repeatCard('apple');
+  extra.push(() => stream([{ type: 'transcript', text: '请读 dog。' }, { type: 'done' }]));
+  await classroom.repeatCard('milk');
+  expect(subtitles.map((event) => event.text)).toEqual(['请', '请读 fish。', '请读 dog。']);
+  expect(subtitles[0].messageId).toEqual(expect.any(String));
+  expect(subtitles[0].messageId).toBe(subtitles[1].messageId);
+  expect(subtitles[2].messageId).not.toBe(subtitles[0].messageId);
+  await classroom.endLesson();
+});

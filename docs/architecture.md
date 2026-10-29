@@ -803,3 +803,5 @@ v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真�
 审查后的边界补充：音频上传使用普通fetch POST，只有小型end请求使用keepalive（Chrome对较大keepalive body会直接拒绝）。取消SSE或请求abort通过expire同时清理两个全局注册表；正常end仍写最终日志。所有quiz异步回调检查所属run。反馈失败时发布已提交进度但保持旧卡，重试反馈后才切新卡并完成其示范。skip与mastered=true的矛盾参数在执行前拒绝；提供方完成却无音频时按失败恢复，不当作老师已播放。
 
 损坏断点在Realtime start同样返回409 INVALID_COURSE_PROGRESS，创建会话之前退出并保留原记录；前端显示数据读取错误。已有完整usage但没有该模型费率时显示暂无估价，不冒充用量缺失。
+
+Realtime老师字幕事件携带当前应用turnId作为messageId。转写delta在控制器内累计，同一messageId在SubtitleLog原气泡更新；不同回复保留独立气泡。没有messageId的旧模式事件行为不变。字幕更新不代表额外模型请求或学习交互。
