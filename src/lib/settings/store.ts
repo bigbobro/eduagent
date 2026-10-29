@@ -51,6 +51,8 @@ const LLM_ENV_NAMES = [
 export function defaultSettings(): SettingsValues {
   const channel = newChannel('siliconflow', DEFAULT_CHANNEL_ID);
   return {
+    openaiApiKey: '',
+    realtimeModel: 'gpt-realtime-2.1',
     llmChannels: [channel],
     activeLlmChannelId: channel.id,
     doubaoAuthMode: 'apikey',
@@ -89,6 +91,8 @@ const channelSchema = z.object({
 });
 
 export const settingsInputSchema = z.object({
+  openaiApiKey: field.default(''),
+  realtimeModel: field.min(1).max(200).default('gpt-realtime-2.1'),
   llmChannels: z.array(channelSchema).min(1).max(20),
   activeLlmChannelId: field.min(1).max(80),
   doubaoAuthMode: z.enum(['apikey', 'legacy']),
@@ -109,7 +113,7 @@ export const settingsInputSchema = z.object({
 });
 
 export const settingsTestSchema = settingsInputSchema.and(z.object({
-  scope: z.enum(['all', 'channel', 'voice']).optional(),
+  scope: z.enum(['all', 'channel', 'voice', 'realtime']).optional(),
   channelId: field.max(80).optional(),
 }));
 
@@ -130,6 +134,7 @@ export function isMaskedValue(value: string): boolean {
 export function maskValues(values: SettingsValues): SettingsValues {
   return {
     ...values,
+    openaiApiKey: maskSecret(values.openaiApiKey ?? ''),
     llmChannels: values.llmChannels.map((channel) => ({ ...channel, apiKey: maskSecret(channel.apiKey) })),
     doubaoApiKey: maskSecret(values.doubaoApiKey),
     doubaoAppId: maskSecret(values.doubaoAppId),
@@ -147,6 +152,8 @@ export function mergeSubmitted(saved: SettingsValues, submitted: SettingsValues)
   const savedById = new Map(saved.llmChannels.map((channel) => [channel.id, channel]));
   return {
     ...submitted,
+    openaiApiKey: keepSecret(submitted.openaiApiKey ?? '', saved.openaiApiKey ?? ''),
+    realtimeModel: submitted.realtimeModel || saved.realtimeModel || 'gpt-realtime-2.1',
     llmChannels: submitted.llmChannels.map((channel) => {
       const previous = savedById.get(channel.id);
       if (!previous) return channel;
@@ -178,7 +185,8 @@ export function normalizeSettings(raw: unknown): SettingsValues {
   const defaults = defaultSettings();
   if (!raw || typeof raw !== 'object') return defaults;
   const record = raw as Record<string, unknown>;
-  const voice = { ...voiceFrom(record, defaults), ...authFrom(record) };
+  const voice = { ...voiceFrom(record, defaults), ...authFrom(record),
+    openaiApiKey: text(record.openaiApiKey), realtimeModel: text(record.realtimeModel) || 'gpt-realtime-2.1' };
   if (Array.isArray(record.llmChannels)) {
     const channels = record.llmChannels.map(parseChannel).filter((channel): channel is LlmChannel => channel !== null);
     const llmChannels = channels.length > 0 ? channels : defaults.llmChannels;
@@ -273,6 +281,8 @@ export function writeSettingsFile(path: string, values: SettingsValues): void {
 export function applySettingsToEnv(): void {
   const path = getSettingsPath();
   if (getSettingsMode() !== 'app' || !path) return;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_REALTIME_MODEL;
   for (const name of LLM_ENV_NAMES) delete process.env[name];
   for (const name of Object.values(VOICE_ENV)) delete process.env[name];
   delete process.env.DOUBAO_API_KEY;
@@ -316,6 +326,8 @@ function isLegacyDocument(raw: unknown): boolean {
 }
 
 function applyValues(values: SettingsValues): void {
+  if (values.openaiApiKey) process.env.OPENAI_API_KEY = values.openaiApiKey;
+  process.env.OPENAI_REALTIME_MODEL = values.realtimeModel || 'gpt-realtime-2.1';
   const channel = activeChannel(values);
   if (channel.apiKey) process.env.LLM_API_KEY = channel.apiKey;
   if (channel.baseUrl) process.env.LLM_BASE_URL = channel.baseUrl;
@@ -352,6 +364,8 @@ function settingsFromEnv(): SettingsValues {
     : { ...defaults.llmChannels[0], id: 'env-llm' };
   return {
     ...defaults,
+    openaiApiKey: config.openaiApiKey,
+    realtimeModel: config.realtimeModel,
     llmChannels: [channel],
     activeLlmChannelId: channel.id,
     doubaoAuthMode: config.doubaoAuthMode,

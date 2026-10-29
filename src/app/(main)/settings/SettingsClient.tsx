@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AudioLines, Bot, Info, Mic, Users } from 'lucide-react';
+import { RealtimeSettingsPanel } from '@/components/settings/RealtimeSettingsPanel';
 import { AboutSection } from '@/components/settings/AboutSection';
 import { LearnersSection } from '@/components/settings/LearnersSection';
 import { MicSection } from '@/components/settings/MicSection';
@@ -10,10 +11,11 @@ import { VoiceSettingsPanel } from '@/components/settings/VoiceSettingsPanel';
 import { useSettingsDraft } from '@/components/settings/useSettingsDraft';
 import '@/components/settings/settings.css';
 
-type SectionId = 'teacher' | 'voice' | 'mic' | 'learners' | 'about';
+type SectionId = 'teacher' | 'realtime' | 'voice' | 'mic' | 'learners' | 'about';
 
 const SECTIONS: { id: SectionId; label: string; color: string; icon: typeof Bot }[] = [
   { id: 'teacher', label: 'AI 老师', color: '#6842FF', icon: Bot },
+  { id: 'realtime', label: 'Realtime', color: '#6842FF', icon: Bot },
   { id: 'voice', label: '语音', color: '#38BDF8', icon: AudioLines },
   { id: 'mic', label: '麦克风', color: '#FF9F2E', icon: Mic },
   { id: 'learners', label: '孩子', color: '#2DD4BF', icon: Users },
@@ -24,6 +26,7 @@ function sectionFromHash(hash: string): SectionId {
   if (hash === '#learner-name' || hash === '#learners') return 'learners';
   if (hash === '#mic' || hash === '#microphone') return 'mic';
   if (hash === '#about') return 'about';
+  if (hash === '#realtime') return 'realtime';
   if (hash === '#voice') return 'voice';
   return 'teacher';
 }
@@ -75,6 +78,8 @@ export function SettingsClient() {
       <main className="settings-main">
         {section === 'teacher' ? (
           <TeacherSection draft={draft} />
+        ) : section === 'realtime' ? (
+          <RealtimeSettingsPanel draft={draft} />
         ) : section === 'voice' ? (
           <VoiceSettingsPanel draft={draft} />
         ) : (

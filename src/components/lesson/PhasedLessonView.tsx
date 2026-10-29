@@ -6,6 +6,7 @@ import { Course, PhaseName } from '@/types/course';
 import { llmFailureNeedsSettings } from '@/lib/llm-errors';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import type { Classroom } from '@/lib/voice/classroom';
+import { RealtimeClassroom } from '@/lib/voice/realtime-classroom';
 import { LegacyClassroom } from '@/lib/voice/legacy-classroom';
 import { DoneLesson } from './DoneLesson';
 import { IntroFrame } from './IntroFrame';
@@ -29,6 +30,8 @@ interface PhasedLessonViewProps {
 
 export function PhasedLessonView({ course, learnerId, fresh, onStarted }: PhasedLessonViewProps) {
   const router = useRouter();
+  const [mode, setMode] = useState<'legacy' | 'realtime'>('legacy');
+  useEffect(() => { try { if (localStorage.getItem('eduagent.classroomMode') === 'realtime') setMode('realtime'); } catch {} }, []);
   const v2Ref = useRef<Classroom | null>(null);
   const [introSubtitle, setIntroSubtitle] = useState('');
   const [quizIndex, setQuizIndex] = useState(0);
@@ -56,7 +59,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   const wordCardIds = useMemo(() => new Set(wordCards.map((card) => card.id)), [wordCards]);
 
   useEffect(() => {
-    const v2 = new LegacyClassroom(course);
+    const v2: Classroom = mode === 'realtime' ? new RealtimeClassroom(course) : new LegacyClassroom(course);
     const phased = v2;
     // R1 (2026-07-20 session persistence): a resumed session's very first 'phase-change' event
     // IS the resume application itself (PhasedLessonController.applyResumeInfo emits it
@@ -90,7 +93,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       setLessonError(err);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       // Configuration problems need to remain visible long enough to act on them.
-      if (!llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
+      if (mode === 'legacy' && !llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
     };
     v2Ref.current = v2;
     const onSubtitle = (next: { text: string; source: string }) => { if (next.source === 'ai') setIntroSubtitle(next.text); };
@@ -113,7 +116,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       phased.off('intro-active-card-change', onIntroActiveCardChange);
       phased.endLesson().catch(() => {});
     };
-  }, [course, lessonRun, wordCardIds]);
+  }, [course, lessonRun, wordCardIds, mode]);
 
   const handleStart = async () => {
     setLessonError(null);
@@ -160,9 +163,16 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     <main className="p2-app">
       <LessonToolbar course={course} learnerId={learnerId} phase={phase} cleared={clearedWordCount} quizIndex={quizIndex} onLeave={handleLeave} />
       {lessonError && (
-        <div className="p2-error"><Banner action={llmFailureNeedsSettings(lessonError.code) ? <a href="/settings" className="ui-button ui-button-glass ui-button-sm">去设置</a> : undefined}>{lessonError.message}</Banner></div>
+        <div className="p2-error"><Banner action={llmFailureNeedsSettings(lessonError.code) ? <a href={mode === 'realtime' ? '/settings#realtime' : '/settings'} className="ui-button ui-button-glass ui-button-sm">去设置</a> : mode === 'realtime' && started ? lessonError.code === 'SESSION_EXPIRED' ? <Button size="sm" onClick={handleRestart}>重新进入课堂</Button> : <Button size="sm" onClick={() => { setLessonError(null); void v2Ref.current?.retryLastTurn?.(); }}>重试这一步</Button> : undefined}>{lessonError.message}</Banner></div>
       )}
 
+      <div className="px-6 py-2 text-sm">
+        {!started ? <label>课堂模式 <select aria-label="课堂模式" value={mode} onChange={(event) => {
+          const next = event.target.value === 'realtime' ? 'realtime' : 'legacy';
+          setMode(next); try { localStorage.setItem('eduagent.classroomMode', next); } catch {}
+        }}><option value="legacy">原有课堂 · 豆包语音</option><option value="realtime">Realtime 实验课堂 · OpenAI</option></select></label>
+          : <span>{mode === 'realtime' ? 'Realtime 实验课堂 · OpenAI' : '原有课堂 · 豆包语音'}</span>}
+      </div>
       <div className={`p2-content ${started && phase !== 'intro' && phase !== 'done' ? 'p2-lesson' : ''}`}>
         {transitionRetry && (
           <div role="alert" className="p2-retry"><EmptyState title="老师还没准备好下一步,再试一次吧" action={<Button disabled={retrying} onClick={async () => {

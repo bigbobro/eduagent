@@ -113,3 +113,11 @@ export function isResumableProgress(row: CourseProgressRow): boolean {
     row.snapshot.passedQuizIds.length > 0
   );
 }
+
+/** Recovery exception: completed quizzes must not strand unfinished words in reinforcement. */
+export function resolveResumePhase(course: Course, memory: LessonMemory, phase: import('@/types/course').PhaseName): import('@/types/course').PhaseName {
+  if (phase !== 'reinforcement' && phase !== 'done') return phase;
+  const hasQuizzes = course.phases.reinforcement.quizzes.some((quiz) => !memory.passedQuizIds.includes(quiz.id));
+  if (hasQuizzes) return 'reinforcement';
+  return isCourseComplete(course, memory) ? 'done' : 'interactive';
+}

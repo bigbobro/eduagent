@@ -84,7 +84,7 @@ export default function HomePage() {
     let active = true;
     setReady(false);
     void (async () => {
-      let settings: { configured?: boolean } | null = null;
+      let settings: { configured?: boolean; realtimeConfigured?: boolean } | null = null;
       try {
         const response = await fetch('/api/settings');
         settings = response.ok ? await response.json() : null;
@@ -97,7 +97,7 @@ export default function HomePage() {
         setReady(true);
         return;
       }
-      const configured = settings.configured !== false;
+      const configured = settings.configured !== false || settings.realtimeConfigured === true;
       const preliminary = readOnboardingGate({
         configured,
         mic: null,

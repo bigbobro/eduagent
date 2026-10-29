@@ -116,3 +116,10 @@ describe('classroom-owned recorder', () => {
     expect(mic.track.stop).toHaveBeenCalledTimes(1);
   });
 });
+
+it('requests native 24kHz capture for Realtime while the default remains 16kHz', async () => {
+  const mic = media(); getUserMedia.mockResolvedValue(mic.stream);
+  const recorder = new LessonRecorder(24000); await recorder.prewarm();
+  expect(getUserMedia).toHaveBeenCalledWith({ audio: expect.objectContaining({ sampleRate: 24000 }) });
+  await recorder.dispose();
+});

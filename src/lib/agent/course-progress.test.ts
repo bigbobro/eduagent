@@ -205,3 +205,12 @@ describe('isResumableProgress', () => {
     expect(isResumableProgress(makeRow('reinforcement'))).toBe(true);
   });
 });
+
+it('resumes remaining words when all reinforcement quizzes were already passed', async () => {
+  const { resolveResumePhase } = await import('./course-progress');
+  const memory = initializeCardProgress(createMemory(), foodCourse);
+  memory.passedQuizIds = foodCourse.phases.reinforcement.quizzes.map((q) => q.id);
+  expect(resolveResumePhase(foodCourse, memory, 'reinforcement')).toBe('interactive');
+  for (const card of foodCourse.cards.filter((c) => c.kind === 'word')) memory.cardProgress[card.id] = 'cleared';
+  expect(resolveResumePhase(foodCourse, memory, 'reinforcement')).toBe('done');
+});

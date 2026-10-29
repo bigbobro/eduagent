@@ -1,6 +1,6 @@
-// PCM 录音 worklet。AudioContext 已是 16kHz,所以直接量化即可。
-// 200ms × 16000Hz = 3200 samples 一包(每 sample 2 字节,共 6400 字节)
-const SAMPLES_PER_CHUNK = 3200;
+// PCM recorder: quantize at the owning AudioContext rate (legacy 16kHz, Realtime 24kHz).
+// Preserve 200ms chunks for both pipelines.
+const SAMPLES_PER_CHUNK = Math.round(sampleRate * 0.2);
 
 class PcmRecorder extends AudioWorkletProcessor {
   constructor() {

@@ -38,13 +38,13 @@ export function OnboardingScreen() {
     setError('');
     try {
       const response = await fetch('/api/settings');
-      const settings = response.ok ? await response.json() as { configured?: boolean; mock?: boolean } : null;
+      const settings = response.ok ? await response.json() as { configured?: boolean; realtimeConfigured?: boolean; mock?: boolean } : null;
       if (!settings) {
         router.replace('/');
         return;
       }
       const learners = await loadLearners();
-      const configured = settings.configured !== false;
+      const configured = settings.configured !== false || settings.realtimeConfigured === true;
       const gateSoFar = readOnboardingGate({
         configured,
         mic: null,
@@ -125,7 +125,7 @@ export function OnboardingScreen() {
               </p>
             )}
             {!step && !error && <p role="status">正在准备…</p>}
-            {step === 1 && <ConnectStep onSkip={skip} />}
+            {step === 1 && <><ConnectStep onSkip={skip} /><a href="/settings#realtime" className="ui-button ui-button-glass">配置 OpenAI Realtime 实验课堂</a></>}
             {step === 2 && (
               <MicStep
                 onAllowed={() => { markMicFinished(); void load(); }}

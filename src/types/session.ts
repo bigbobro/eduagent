@@ -101,6 +101,7 @@ export interface InteractionLog {
     tts?: { latency: number; characters: number };
     // R6 observability (2026-07-03): per-turn guard counters (R-C rejects / speech rewrites)
     // so lesson reports can see guard activity (speechCardMismatchCount=0 blind spot fix).
+    assessment?: { source: 'model' | 'application'; turnId: string; target_id: string; result: string; heard?: string; evidence?: string; mastered?: boolean; next_action?: string; next_card_id?: string | null; next_phase?: PhaseName | null };
     guards?: { rcRejected?: string[]; rcSuppressed?: string[]; speechRewrite?: string };
   };
 }
@@ -131,6 +132,7 @@ export interface PromptInputBreakdown {
 }
 
 export interface TokenUsage {
+  realtime?: { model: string; usage: import('@/lib/realtime-protocol').RealtimeUsage[]; complete: boolean; pending?: number };
   asr: { requests: number; tokens: number };
   llm: { requests: number; inputTokens: number; outputTokens: number };
   tts: { requests: number; characters: number };

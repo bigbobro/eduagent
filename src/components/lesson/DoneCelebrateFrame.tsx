@@ -37,6 +37,7 @@ export function DoneCelebrateFrame({ course, session, next, onHome, onAgain, onN
             <h1>{title}课,{remaining === 0 ? `${learned} 个词全部过关` : `过关 ${learned} 个词`}</h1>
             <p>
               {duration}
+              {session?.mode === 'realtime' && <span> · Realtime 模型评估{session.realtimeUsage?.tokenPriceUsd != null ? ` · token 估算 $${session.realtimeUsage.tokenPriceUsd.toFixed(3)}` : ' · 用量不完整'}</span>}
               {duration && later && ' · '}
               {later}
             </p>

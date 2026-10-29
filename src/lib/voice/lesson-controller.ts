@@ -289,7 +289,7 @@ export class LessonController {
       if (phase === 'intro' || phase === 'interactive' || phase === 'reinforcement' || phase === 'done') {
         acceptedPhase = phase;
       }
-      if (body.action === 'phase-transition' && acceptedPhase !== body.to) {
+      if (body.action === 'phase-transition' && acceptedPhase !== body.to && !(body.to === 'reinforcement' && acceptedPhase === 'done')) {
         throw new Error('Phase acknowledgement missing or mismatched');
       }
       await this.consumeSSE(res.body, () => {}, run);

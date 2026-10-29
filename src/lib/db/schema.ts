@@ -139,6 +139,16 @@ const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS lesson_logs_learner ON lesson_logs(learner_id)');
     },
   },
+  {
+    version: 6,
+    name: 'classroom_mode',
+    up(db) {
+      const columns = db.prepare('PRAGMA table_info(lesson_logs)').all() as { name: string }[];
+      if (!columns.some((column) => column.name === 'lesson_mode')) {
+        db.exec("ALTER TABLE lesson_logs ADD COLUMN lesson_mode TEXT NOT NULL DEFAULT 'legacy'");
+      }
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

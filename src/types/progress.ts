@@ -32,6 +32,8 @@ export interface ProgressSnapshot {
 }
 
 export interface SessionSummary {
+  mode?: 'legacy' | 'realtime';
+  realtimeUsage?: ReturnType<typeof import('@/lib/realtime/usage').summarizeRealtimeUsage>;
   lessonId: string;
   courseId: string;
   courseTitle: string;

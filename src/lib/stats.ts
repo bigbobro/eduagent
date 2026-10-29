@@ -1,3 +1,4 @@
+import { summarizeRealtimeUsage } from './realtime/usage';
 import type { Database } from './db/sqlite';
 import type { Course } from '@/types/course';
 import type { StatsSnapshot, SessionSummary } from '@/types/progress';
@@ -54,8 +55,15 @@ export function buildSessionList(db: Database, courses: Course[], learnerId: str
 
   return rows.map((r) => {
     const perf = getLessonWordPerfCount(db, r.id);
+    let realtimeUsage;
+    if (r.lesson_mode === 'realtime') {
+      let raw: unknown; try { raw = JSON.parse(r.token_usage ?? '{}').realtime; } catch { raw = undefined; }
+      realtimeUsage = summarizeRealtimeUsage(raw);
+    }
     return {
       lessonId: r.id,
+      mode: r.lesson_mode === 'realtime' ? 'realtime' : 'legacy',
+      ...(realtimeUsage ? { realtimeUsage } : {}),
       courseId: r.courseId,
       courseTitle: titleByCourse.get(r.courseId) ?? r.courseId,
       startTime: r.startTime,

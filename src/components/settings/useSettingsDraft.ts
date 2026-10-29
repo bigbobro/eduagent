@@ -7,10 +7,11 @@ import type { DoubaoAuthMode, SettingsValues, VoiceField } from '@/lib/settings/
 
 export type { LlmChannel, LlmProviderId, VoiceField };
 export interface CheckResult { ok: boolean; reason: string }
-export interface TestReport { llm?: CheckResult; tts?: CheckResult; asr?: CheckResult }
+export interface TestReport { realtime?: CheckResult; llm?: CheckResult; tts?: CheckResult; asr?: CheckResult }
 export interface SettingsResponse {
   mode: 'app' | 'web';
   configured: boolean;
+  realtimeConfigured?: boolean;
   mock?: boolean;
   values: SettingsValues;
 }
@@ -41,6 +42,8 @@ export interface SettingsDraft {
   maskedKeys: Record<string, string>;
   activeLlmChannelId: string;
   voice: VoiceDraft;
+  realtime: { apiKey: string; model: string };
+  setRealtime: (patch: Partial<{ apiKey: string; model: string }>) => void;
   maskedVoice: Partial<Pick<SettingsValues, 'doubaoApiKey' | 'doubaoAppId' | 'doubaoAccessKey'>>;
   report: TestReport | null;
   channelReports: Record<string, CheckResult>;
@@ -55,7 +58,7 @@ export interface SettingsDraft {
 }
 
 interface TestOptions {
-  scope?: 'all' | 'channel' | 'voice';
+  scope?: 'all' | 'channel' | 'voice' | 'realtime';
   channelId?: string;
   channels?: LlmChannel[];
   activeLlmChannelId?: string;
@@ -68,6 +71,8 @@ interface SaveOptions {
 }
 
 export function useSettingsDraft(): SettingsDraft {
+  const [realtime, setRealtimeState] = useState({ apiKey: '', model: 'gpt-realtime-2.1' });
+  const setRealtime = (patch: Partial<typeof realtime>) => setRealtimeState((current) => ({ ...current, ...patch }));
   const [info, setInfo] = useState<SettingsResponse | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [channels, setChannels] = useState<LlmChannel[]>([]);
@@ -81,8 +86,8 @@ export function useSettingsDraft(): SettingsDraft {
   const [phase, setPhase] = useState<SettingsDraft['phase']>('idle');
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
-  const snapshot = useRef({ channels, activeLlmChannelId, voice });
-  snapshot.current = { channels, activeLlmChannelId, voice };
+  const snapshot = useRef({ channels, activeLlmChannelId, voice, realtime });
+  snapshot.current = { channels, activeLlmChannelId, voice, realtime };
 
   useEffect(() => {
     alive.current = true;
@@ -103,6 +108,7 @@ export function useSettingsDraft(): SettingsDraft {
           doubaoTtsSpeaker: data.values.doubaoTtsSpeaker || '',
         };
         setInfo(data);
+        setRealtimeState({ apiKey: '', model: data.values.realtimeModel || 'gpt-realtime-2.1' });
         setChannels(nextChannels);
         setMaskedKeys(hidden);
         setActiveLlmChannelId(data.values.activeLlmChannelId || nextChannels[0]?.id || '');
@@ -139,6 +145,8 @@ export function useSettingsDraft(): SettingsDraft {
       llmChannels: options?.channels ?? current.channels,
       activeLlmChannelId: options?.activeLlmChannelId ?? current.activeLlmChannelId,
       ...current.voice,
+      openaiApiKey: current.realtime.apiKey,
+      realtimeModel: current.realtime.model,
     };
   };
 
@@ -214,6 +222,8 @@ export function useSettingsDraft(): SettingsDraft {
 
   return {
     info,
+    realtime,
+    setRealtime,
     loadError,
     channels,
     maskedKeys,

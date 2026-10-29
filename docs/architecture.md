@@ -66,7 +66,7 @@
 | `src/lib/llm.ts` | OpenAI 兼容 chat/completions 调用(当前 SiliconFlow DeepSeek),`streamLLM` 异步生成 token delta + final usage;`LLM_*` / 旧 `MIMO_*` 整组 fallback 见 `config.ts` |
 | `src/lib/audio/recorder.ts` | **课堂实例拥有 mic + AudioContext + worklet**，`LessonRecorder.prewarm()` 提前就绪，同课多轮复用，旧课清理不触碰新课资源 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
-| `public/worklets/pcm-recorder.worklet.js` | 16kHz Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
+| `public/worklets/pcm-recorder.worklet.js` | 按所属 AudioContext 的16kHz（旧）／24kHz（Realtime）Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
 | `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,`tone` 是课程色板键,不对应 Tailwind 颜色类 |
 | `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
@@ -85,7 +85,7 @@
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
 | `src/lib/db/index.ts` | SQLite 连接持有者。`getDb()` **每次调用时**解析 `DATABASE_PATH`(相对 `process.cwd()`),路径与已开连接不同则 close 旧的重开——正常运行路径恒定,行为仍是进程内单连接;开库前 `mkdirSync(dirname, {recursive:true})`(better-sqlite3 只建文件不建目录,而 `db/` 不在 git 里,fresh checkout 没有该目录);导出 `closeDb()` 供测试在切临时 DB 前后显式释放,堵住"模块加载期捕获路径"导致的跨测试文件泄漏 |
 | `src/lib/db/learners.ts` | 孩子档案 CRUD 与单事务连带删除 |
-| `src/lib/db/schema.ts` + `queries.ts` | `schema.ts`:SQLite migration runner / 表结构 / `schema_migrations` 版本记录(v5 按孩子隔离，断点表主键为 `(learner_id, course_id)`);`queries.ts`:全部业务 SQL 的单一边界——写入 + 断点读写(`upsert`/`getCourseProgress`)+ 报表只读(`getLessonTimings` / `getRecentLessons` / `getLessonWordPerfCount` / `getWordPerformanceByCourse` / **`getLessonCountByCourse` / `getAllCourseProgress`**),调用方注入 `db` 只做 JS 聚合,自己不写 SQL |
+| `src/lib/db/schema.ts` + `queries.ts` | `schema.ts`:SQLite migration runner / 表结构 / `schema_migrations` 版本记录(v6 加课堂模式标识，v5 按孩子隔离，断点表主键为 `(learner_id, course_id)`);`queries.ts`:全部业务 SQL 的单一边界——写入 + 断点读写(`upsert`/`getCourseProgress`)+ 报表只读(`getLessonTimings` / `getRecentLessons` / `getLessonWordPerfCount` / `getWordPerformanceByCourse` / **`getLessonCountByCourse` / `getAllCourseProgress`**),调用方注入 `db` 只做 JS 聚合,自己不写 SQL |
 
 ---
 
@@ -194,19 +194,9 @@ ASR final 到达 client
             error / 无 done 截断 → 命令失败，丢弃未确认 actions、停止失败语音、恢复操作入口
 ```
 
-强化巩固里的 `repeat-after-me` 复用同一套 ASR 录音管线,但调用
-`LessonController.startListening({ routeToChat:false })`。这类录音仍会 emit
-`asr-final` 在 `LegacyClassroom` 中做旧模式短句判定并由
-`ReinforcementFlow` 记录 `quiz-answer`,但不会再进入 `/api/chat?action=message`
-触发额外 LLM/TTS 回合。
+强化巩固的共享视图发出 `presentQuiz`、`startQuizListening` 与 `submitPick` 意图。旧模式由 `LegacyClassroom` 调用 `LessonController.startListening({routeToChat:false})`，收到 `asr-final` 后按 `legacy-teaching` 的短句规则判定、保存 `quiz-answer`，再发布来源为 legacy-asr 的 `quiz-result`；不触发额外文本 LLM 回合。共享视图不按转写判分。
 
-强化巩固的 quiz 引导不走 LLM。`QuizPickWordFrame` mount 后调用
-`LegacyClassroom.presentQuiz` 转换为旧 `LessonController.speakStatic`；`ReinforceFrame` mount 后
-调用 `speakStatic(targetText)`;两者都等 `state=awaiting` 才发起静态 TTS,播放中进入
-`quiz-speaking` 并锁住选择/录音。`useStaticPromptSpeech` 只在 `speakStatic()`
-resolve 后标记 prompt 已听完;如果 controller 还没回到 `awaiting` 或静态 TTS 忙导致
-短暂 reject,继续锁住 UI 并在 `awaiting` 后重试。错答且仍可重试时,
-`ReinforcementFlow` 播 `再听一次: ${prompt || targetText}` 后再允许下一次作答。
+旧模式的选词引导和跟读示范仍不走 LLM，适配器将题目转换为既有 `speakStatic`：选词为 prompt 加目标英文，跟读为完整句、慢速分段、完整句。视图的 `useStaticPromptSpeech` 等 `presentQuiz` resolve 后才解锁；控制器忙时继续锁定并在 awaiting 后重试。旧模式适配器保存答案后才累计重试、播放固定重试提示，并按原次数规则给出 retry/advance；共享 `ReinforcementFlow` 只据保存确认呈现结果与推进。
 
 ### 3.3 结束课程
 
@@ -786,6 +776,26 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 
 ## 课堂视图的意图接口（2026-10-29）
 
-课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习和带来源的练习结果，发送介绍、重讲、录音、呈现题目及点击答案等意图。当前入口仍只构造 LegacyClassroom；Realtime 课堂尚未接入。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
+课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习和带来源的练习结果，发送介绍、重讲、录音、呈现题目及点击答案等意图。入口按开课前选择构造 LegacyClassroom 或 RealtimeClassroom，整堂课模式固定。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
 
 LegacyClassroom 拥有旧重讲提示词、句子 ASR 匹配、候选句、静态题目话术、保存后重试计数及已清词不可重看的过滤。共享组件不读取 asr-final 来判跟读，不提交模型口头表扬为成绩，也不写 raw LLM 指令。选词仍按课程客观答案确定显示；保存及下一题决定来自控制器的 quiz-result。保存失败留在同题、重试不提前累计，旧模式第三次错误仍按原规则前进。已经通过的非连续题目在续课中被跳过；无待做练习时触发完成出口。
+
+## Realtime 实验课堂（2026-10-29）
+
+上文豆包 WS 与文本 agent 时序属于原有模式。新模式在 `RealtimeClassroom` 内实现同一 Classroom 接口，使用单一24kHz麦克风采集，HTTP POST `/api/realtime` 上传有界 PCM，SSE 返回音频、字幕、工具执行回执和完成事件。浏览器不拿长期密钥。Next 服务端 `realtime/classroom-session.ts` 拥有一堂课的远端连接、输入目标、串行 turn 和去重账本；`connection.ts` 使用官方 OpenAI WebSocket，不增加浏览器 WS 代理或新 SDK。选择该传输是复用已验证 PCM 播放与本地事务边界的最小方案；WebRTC 仅保留独立连通性实验。
+
+直接语音作答先请求同一模型的不发声工具回应，应用以 turnId/metadata 关联真实输入，事务提交参数后把实际结果返回，再请求该模型语音。工具参数包括目标、结果、模型听到的内容、依据、独立掌握判断、retry/review/advance/skip、可选下一卡与阶段。后端仅校验结构、课程成员、当前呈现目标、有效阶段、会话归属与幂等；不再做字面命中或固定次数复核。题目演示、介绍和重讲直接发声，不计作答。选词按课程答案客观判定。未掌握目标显式进入模型指令，避免只列全课内容却漏学目标。
+
+应用在收到生成 done、没有待续回应、真实播放器排空后发布本轮画面／阶段／练习结果并解锁。切到新卡后单独示范该卡，再解锁孩子录音；答题反馈不介绍下一目标。没有辅助 ASR 或 OpenAI 输入转写；模型自述字幕带来源，豆包配置与既有 ASR 机制完全保留。首版没有全双工、课中换模式或自动跨服务回退。全零数字 PCM 不送提供方、不写成绩；该检查不等于实际环境静音检测。
+
+`realtime/teaching.ts` 经既有 SQL helper 事务写 interaction、word_performance、lesson summary 与 course_progress，提交后才替换内存。correct累计尝试和正确，close/wrong只累计尝试，off_topic/silence不累计；model mastered写实际卡片完成状态，不编造cardCorrectCount或park字段；skip保留未完成。quiz correct写passedQuizIds。反馈后续写回原交互，不重奖。同轮同目标仅第一份评估生效；保存成功而反馈失败，显式重试创建新的远端会话只补反馈。断点沿用旧序列化结构，两模式计数不互相伪造；星级仍基于真实已提交尝试比例。
+
+`SessionStore.save` 同时使同孩子同课程旧会话失效并终止其连接，进程内注册表在 Next 路由间共享。新旧模式旧提交／迟到end均不可覆盖新断点。恢复阶段为 reinforcement/done 且所有题已过而词未完时，回 interactive剩余词；进入reinforcement没有待做题时直接done。phase变更也事务落断点。done为本堂结束，课程completed仍必须全部word已掌握且quiz全过。
+
+v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真实Realtime usage存token_usage.realtime，含模型、音频／文本／缓存明细和完整性标志；每次response.create之前持久标记pending，防止进程中断后把缺失usage当成完整费用；旧LLM/TTS/ASR字段不冒记新服务用量。缺usage不按零价格显示。记录和报告标明模式及模型评估，token价格估算与账户抵扣分开。报告的Realtime掌握来自模型掌握记录，不回退旧correct>=2清卡算法。
+
+`/api/realtime` 严格校验loopback Origin和孩子／会话归属；body即使无Content-Length也限制2MB，PCM限0.1–30秒。提供方握手10秒、每轮45秒、输出音频60秒、事件队列4096；浏览器网络／播放各65秒期限。远端会话最多500回应，空闲120秒失效并释放连接。所有退出先取消run，再清理录音／播放器和远端；麦克风延迟启动只可清理自身资源。错误提供同模式重试或已保存断点重新开课，不调用另一引擎。
+
+配置：旧模式isConfigured保留；Realtime只看OPENAI_API_KEY。入门门槛任一模式就绪即可，开课时分别检查实际模式。App配置写入独立openaiApiKey/realtimeModel，空值或打码保留密钥，重启加载；模式偏好localStorage不触发重启。设置连接测试建立真实会话并session.update，不生成回应。日志仅记录动作、标识和安全错误码，不记音频、凭据或完整提供方错误正文。
+
+自动化入口：`realtime-lesson-smoke.ts`（显式live/mock、有界整课、隔离临时DB读回、完成标记断言）；`realtime-browser-smoke.ts`（实际fake-media录音和WebAudio、整课或真实服务最小链路、轨道释放，可在Electron开发壳运行）。合成成人音频与fake media不替代儿童真实发音或物理麦克风／扬声器体验验收。独立协议实验不等于上述课堂集成证据。

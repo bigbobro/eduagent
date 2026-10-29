@@ -20,6 +20,9 @@ const configSchema = z.object({
   // 缺省 custom。.env.local 不写 LLM_PROVIDER 时 server 仍能启动。
   llmProvider: z.enum(['siliconflow', 'volc-ark', 'deepseek', 'custom']).default('custom'),
 
+  openaiApiKey: z.string().default(''),
+  realtimeModel: z.string().min(1).default('gpt-realtime-2.1'),
+
   // Doubao Voice (ASR + TTS)
   doubaoAuthMode: z.enum(['apikey', 'legacy']).default('apikey'),
   doubaoApiKey: z.string().default(''),
@@ -66,6 +69,9 @@ export function getConfig(): AppConfig {
       ? (process.env.MIMO_MODEL ?? 'mimo-v2.5-pro')
       : (process.env.LLM_MODEL ?? 'deepseek-ai/DeepSeek-V3.2'),
     llmProvider: readLlmProvider(process.env.LLM_PROVIDER),
+
+    openaiApiKey: process.env.OPENAI_API_KEY,
+    realtimeModel: process.env.OPENAI_REALTIME_MODEL,
 
     doubaoAuthMode: resolveDoubaoAuthMode(),
     doubaoApiKey: process.env.DOUBAO_API_KEY,
@@ -120,4 +126,8 @@ export function resetConfig(): void {
 function readLlmProvider(value: string | undefined): LlmProviderId {
   if (value && isLlmProviderId(value)) return value
   return 'custom'
+}
+
+export function isRealtimeConfigured(): boolean {
+  return process.env.VOICE_MOCK === 'true' || Boolean(process.env.OPENAI_API_KEY?.trim());
 }

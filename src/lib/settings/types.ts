@@ -5,6 +5,8 @@ export type { DoubaoAuthMode };
 
 /** settings.json 与 /api/settings 共用的文档。渠道 apiKey 与豆包凭据按密钥处理。 */
 export interface SettingsValues {
+  openaiApiKey?: string;
+  realtimeModel?: string;
   llmChannels: LlmChannel[];
   activeLlmChannelId: string;
   doubaoAuthMode: DoubaoAuthMode;

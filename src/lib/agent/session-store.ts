@@ -3,6 +3,7 @@ import type { LessonMemory, TokenUsage } from '@/types/session';
 
 export interface Session {
   id: string;
+  mode?: 'legacy' | 'realtime';
   lifetime: AbortController;
   courseId: string;
   learnerId: string;
@@ -29,6 +30,12 @@ export class InMemorySessionStore implements SessionStore {
   }
 
   save(session: Session): void {
+    for (const [id, previous] of Array.from(this.sessions)) {
+      if (id !== session.id && previous.learnerId === session.learnerId && previous.courseId === session.courseId) {
+        previous.lifetime.abort();
+        this.sessions.delete(id);
+      }
+    }
     this.sessions.set(session.id, session);
   }
 
@@ -37,4 +44,5 @@ export class InMemorySessionStore implements SessionStore {
   }
 }
 
-export const sessionStore = new InMemorySessionStore();
+const globals = globalThis as typeof globalThis & { __eduagentSessions?: InMemorySessionStore };
+export const sessionStore = globals.__eduagentSessions ??= new InMemorySessionStore();

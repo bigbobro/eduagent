@@ -38,6 +38,7 @@ export interface Classroom {
   stopListening(): Promise<void>;
   repeatCard(cardId: string): Promise<void>;
   requestIntroCard(cardId: string): Promise<boolean>;
+  retryLastTurn?(): Promise<void>;
   retryTransition(): Promise<void>;
   completeReinforcement(): Promise<void>;
   presentQuiz(quizId: string): Promise<void>;

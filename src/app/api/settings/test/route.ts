@@ -1,3 +1,4 @@
+import { RealtimeConnection } from '@/lib/realtime/connection';
 import { NextResponse } from 'next/server';
 import { rejectBadOrigin } from '@/lib/settings/origin-guard';
 import { LLM_PROVIDERS } from '@/lib/llm-providers';
@@ -16,6 +17,18 @@ export async function POST(req: Request) {
   const { scope, channelId, ...document } = parsed.data;
   const merged = fillDefaults(mergeSubmitted(currentValues(), document));
   const targetId = channelId || merged.activeLlmChannelId;
+  if (scope === 'realtime') {
+    if (process.env.VOICE_MOCK === 'true') return NextResponse.json({ realtime: { ok: true, reason: '离线演示模式，未连接 OpenAI' } });
+    if (!merged.openaiApiKey) return NextResponse.json({ realtime: { ok: false, reason: '尚未配置 OpenAI API Key' } });
+    const signal = AbortSignal.timeout(10000);
+    const connection = new RealtimeConnection(merged.openaiApiKey, merged.realtimeModel || 'gpt-realtime-2.1', signal);
+    try {
+      await connection.probe(signal);
+      return NextResponse.json({ realtime: { ok: true, reason: '已建立真实 Realtime 会话，未生成回应' } });
+    } catch {
+      return NextResponse.json({ realtime: { ok: false, reason: 'Realtime 连接失败，请检查密钥、模型权限及网络' } });
+    } finally { connection.close(); }
+  }
   if (scope === 'channel') {
     const llm = await runChannelTest(merged, targetId);
     console.log('[settings] test-connection', { scope, provider: merged.llmChannels.find((channel) => channel.id === targetId)?.provider ?? 'custom', llm: llm.ok });

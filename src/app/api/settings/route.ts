@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isConfigured } from '@/lib/config';
+import { isConfigured, isRealtimeConfigured } from '@/lib/config';
 import { rejectBadOrigin } from '@/lib/settings/origin-guard';
 import { scheduleRestart } from '@/lib/settings/restart';
 import {
@@ -20,6 +20,7 @@ export async function GET() {
   return NextResponse.json({
     mode: getSettingsMode(),
     configured: isConfigured(),
+    realtimeConfigured: isRealtimeConfigured(),
     mock: process.env.VOICE_MOCK === 'true',
     values: maskValues(currentValues()),
   });

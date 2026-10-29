@@ -11,6 +11,8 @@ export class LessonRecorder {
   private disposed = false;
   private taps = new Set<RecorderHandle>();
 
+  constructor(private readonly sampleRate = 16000) {}
+
   private assertActive(): void {
     if (this.disposed) throw new DOMException('Recorder disposed', 'AbortError');
   }
@@ -20,14 +22,14 @@ export class LessonRecorder {
     this.source?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
     if (this.ctx) void this.ctx.close().catch(() => {});
-    const ctx = new AudioContext({ sampleRate: 16000 });
+    const ctx = new AudioContext({ sampleRate: this.sampleRate });
     this.ctx = ctx;
     if (ctx.state === 'suspended') await ctx.resume();
     this.assertActive();
     await ctx.audioWorklet.addModule('/worklets/pcm-recorder.worklet.js');
     this.assertActive();
     const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: 16000 },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, sampleRate: this.sampleRate },
     });
     if (this.disposed) {
       stream.getTracks().forEach((track) => track.stop());

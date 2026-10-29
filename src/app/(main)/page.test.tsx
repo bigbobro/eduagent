@@ -86,3 +86,15 @@ it('opens a fresh review lesson with fresh=1 for a course that has a breakpoint'
   fireEvent.click(await screen.findByRole('button', { name: '从头复习' }));
   expect(push).toHaveBeenCalledWith('/lesson/food?learnerId=a&fresh=1');
 });
+
+it('allows onboarding to finish when only the Realtime service is configured', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url === '/api/settings') return response({ configured: false, realtimeConfigured: true });
+    if (url === '/api/courses') return response([foodCourse]);
+    if (url === '/api/learners') return response(profiles);
+    return response(snapshot);
+  }));
+  render(<HomePage />);
+  await screen.findByRole('button', { name: '开始上课' });
+  expect(replace).not.toHaveBeenCalled();
+});

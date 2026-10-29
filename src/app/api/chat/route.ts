@@ -69,14 +69,14 @@ async function handleChatAction(body: LessonRequest) {
       const resumeCardId = resolveResumeCardId(course, session.memory);
       console.log('[chat] resume hit', {
         courseId: course.id,
-        phase: progress.phase,
+        phase: session.currentPhase,
         resumeCardId,
         clearedCount: session.memory.clearedCardIds.length,
         passedQuizCount: session.memory.passedQuizIds.length,
       });
       resumeHeader = JSON.stringify({
         resumed: true,
-        phase: progress.phase,
+        phase: session.currentPhase,
         clearedCardIds: session.memory.clearedCardIds,
         resumeCardId,
         passedQuizIds: session.memory.passedQuizIds,
@@ -109,6 +109,7 @@ async function handleChatAction(body: LessonRequest) {
       console.warn('[chat] 404 session not found (message):', body.sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
+    if (session.mode === 'realtime') return NextResponse.json({ code: 'MODE_MISMATCH' }, { status: 409 });
     // body.system marks a teacher-initiated turn ("请老师再说") that is NOT the child speaking;
     // pass rawAsrText '' so its instruction text (which names the target word) is not R2-counted.
     const stream = streamUserInputToSSE(body.sessionId, body.text, body.asrResult, body.system ? '' : body.text);
@@ -127,6 +128,7 @@ async function handleChatAction(body: LessonRequest) {
       console.warn('[chat] 404 session not found (phase-transition):', body.sessionId);
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
+    if (session.mode === 'realtime') return NextResponse.json({ code: 'MODE_MISMATCH' }, { status: 409 });
     setSessionPhase(body.sessionId, body.to);
     // System turn → rawAsrText '' so the transition prompt never counts an R2 hit.
     // phaseOpening: transition opening speech legitimately mentions other words —

@@ -60,5 +60,5 @@ export class LlmServiceError extends Error {
 }
 
 export function llmFailureNeedsSettings(code?: string): boolean {
-  return code === 'LLM_INSUFFICIENT_BALANCE' || code === 'LLM_AUTH_FAILED' || code === 'LLM_MODEL_UNAVAILABLE';
+  return Boolean(code && /^(NOT_CONFIGURED|REALTIME_AUTH_FAILED|REALTIME_MODEL_UNAVAILABLE|REALTIME_QUOTA_EXCEEDED|PROVIDER_(INVALID_API_KEY|INSUFFICIENT_QUOTA|MODEL_NOT_FOUND))$/.test(code)) || code === 'LLM_INSUFFICIENT_BALANCE' || code === 'LLM_AUTH_FAILED' || code === 'LLM_MODEL_UNAVAILABLE';
 }

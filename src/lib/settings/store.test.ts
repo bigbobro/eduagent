@@ -203,3 +203,13 @@ describe('settings store', () => {
     expect(canDeleteChannel(two, FAKE.activeLlmChannelId)).toBe(false);
   });
 });
+
+it('preserves separate OpenAI credentials on empty/masked submission and normalizes old settings', () => {
+  const saved = { ...SETTINGS_DEFAULTS, openaiApiKey: 'fake-openai-long-key-1234', realtimeModel: 'gpt-realtime-2.1' };
+  const masked = maskValues(saved);
+  expect(masked.openaiApiKey).toBe('••••1234');
+  expect(JSON.stringify(masked)).not.toContain(saved.openaiApiKey);
+  expect(mergeSubmitted(saved, { ...masked, openaiApiKey: '' }).openaiApiKey).toBe(saved.openaiApiKey);
+  expect(mergeSubmitted(saved, masked).openaiApiKey).toBe(saved.openaiApiKey);
+  expect(normalizeSettings({ llmApiKey: 'fake-old-key' }).openaiApiKey).toBe('');
+});

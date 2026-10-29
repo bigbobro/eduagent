@@ -6,11 +6,11 @@ import type { CourseProgressRow } from '@/types/session';
 import { parseCourseProgressRow, InvalidCourseProgressError, type StoredCourseProgressRow } from './progress-snapshot';
 export type { CourseProgressRow } from '@/types/session';
 
-export function createLessonLog(id: string, courseId: string, learnerId: string): void {
+export function createLessonLog(id: string, courseId: string, learnerId: string, mode: 'legacy' | 'realtime' = 'legacy'): void {
   const db = getDb();
   db.prepare(
-    'INSERT INTO lesson_logs (id, course_id, start_time, learner_id) VALUES (?, ?, ?, ?)'
-  ).run(id, courseId, new Date().toISOString(), learnerId);
+    'INSERT INTO lesson_logs (id, course_id, start_time, learner_id, lesson_mode) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, courseId, new Date().toISOString(), learnerId, mode);
 }
 
 export function finishLessonLog(id: string, interactionCount: number, tokenUsage: TokenUsage): void {
@@ -181,6 +181,8 @@ export function getLessonTimings(db: Database, learnerId: string): LessonTimingR
 }
 
 export interface RecentLessonRow {
+  lesson_mode?: 'legacy' | 'realtime';
+  token_usage?: string;
   id: string;
   courseId: string;
   startTime: string;
@@ -191,7 +193,7 @@ export interface RecentLessonRow {
 export function getRecentLessons(db: Database, limit: number, learnerId: string): RecentLessonRow[] {
   return db
     .prepare(
-      `SELECT id, course_id AS courseId, start_time AS startTime, end_time AS endTime, interaction_count AS interactionCount
+      `SELECT *, course_id AS courseId, start_time AS startTime, end_time AS endTime, interaction_count AS interactionCount
        FROM lesson_logs WHERE learner_id = ?
        ORDER BY start_time DESC
        LIMIT ?`,
@@ -236,4 +238,9 @@ export function getWordPerformanceByCourse(db: Database, learnerId: string): Wor
        GROUP BY wp.word, ll.course_id`,
     )
     .all(learnerId) as WordPerfByCourseRow[];
+}
+
+/** Feedback can complete after its assessment transaction; never changes its award. */
+export function updateRealtimeFeedback(lessonId: string, turnId: string, text: string): void {
+  getDb().prepare("UPDATE interaction_logs SET ai_response = ? WHERE lesson_id = ? AND json_extract(model_calls, '$.assessment.turnId') = ?").run(text, lessonId, turnId);
 }

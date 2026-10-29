@@ -23,7 +23,7 @@ function legacyDb() {
   const db = new Database(':memory:');
   runMigrations(db);
   db.exec(`DROP TABLE course_progress; DROP TABLE lesson_logs; DROP TABLE learners;
-    DELETE FROM schema_migrations WHERE version = 5;
+    DELETE FROM schema_migrations WHERE version >= 5;
     CREATE TABLE lesson_logs (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, start_time TEXT NOT NULL,
       end_time TEXT, interaction_count INTEGER DEFAULT 0, token_usage TEXT DEFAULT '{}', ended_gracefully INTEGER DEFAULT 0);
     CREATE TABLE course_progress (course_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL, phase TEXT NOT NULL,

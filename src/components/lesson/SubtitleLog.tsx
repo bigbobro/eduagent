@@ -6,7 +6,7 @@ import maji from '../../../desktop/build-resources/icon-source.png';
 import { loadLearners } from '@/lib/current-learner';
 import type { Classroom } from '@/lib/voice/classroom';
 
-interface Message { text: string; source: 'user' | 'ai'; live: boolean }
+interface Message { text: string; source: 'user' | 'ai'; provenance?: 'asr' | 'model'; live: boolean }
 
 export function SubtitleLog({ controller, learnerId }: { controller: Classroom; learnerId?: string }) {
   const [name, setName] = useState('你');
@@ -20,11 +20,11 @@ export function SubtitleLog({ controller, learnerId }: { controller: Classroom; 
   const pending = useRef(false);
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const subtitle = (next: { text: string; source: 'user' | 'ai' }) => {
+    const subtitle = (next: { text: string; source: 'user' | 'ai'; provenance?: 'asr' | 'model' }) => {
       if (!next.text) return;
       const replace = next.source === 'user' && pending.current;
-      pending.current = next.source === 'user';
-      setMessages((prev) => [...(replace ? prev.slice(0, -1) : prev), { ...next, live: next.source === 'user' }].slice(-50));
+      pending.current = next.source === 'user' && next.provenance !== 'model';
+      setMessages((prev) => [...(replace ? prev.slice(0, -1) : prev), { ...next, live: next.source === 'user' && next.provenance !== 'model' }].slice(-50));
     };
     const finish = () => {
       pending.current = false;
@@ -37,6 +37,6 @@ export function SubtitleLog({ controller, learnerId }: { controller: Classroom; 
   }, [controller]);
   useEffect(() => { bottom.current?.scrollIntoView?.({ block: 'end' }); }, [messages]);
   return <aside className="p2-log" aria-label="课堂字幕"><header><Image src={maji} width={36} height={36} alt="" /><b>麻吉老师</b><span className="p2-tag">字幕</span></header>
-    <div className="p2-msgs" role="log" aria-live="polite">{messages.map((message, i) => <div key={i} className={`p2-message ${message.source === 'user' ? 'p2-me' : ''} ${message.live ? 'p2-live' : ''}`}><small>{message.source === 'ai' ? '麻吉' : message.live ? `${name} · 识别中` : name}</small>{message.text}</div>)}<div ref={bottom} /></div>
+    <div className="p2-msgs" role="log" aria-live="polite">{messages.map((message, i) => <div key={i} className={`p2-message ${message.source === 'user' ? 'p2-me' : ''} ${message.live ? 'p2-live' : ''}`}><small>{message.source === 'ai' ? '麻吉' : message.provenance === 'model' ? `${name} · 模型听到` : message.live ? `${name} · 识别中` : name}</small>{message.text}</div>)}<div ref={bottom} /></div>
   </aside>;
 }

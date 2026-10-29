@@ -724,3 +724,22 @@ describe('buildReport — guard activity aggregation', () => {
     expect(r.eval.nextIterationSignals.map((s) => s.key)).not.toContain('guard_activity');
   });
 });
+
+it('reports Realtime model mastery and usage without falling back to two legacy hits', async () => {
+  const db = createMemDb();
+  try {
+    db.exec("ALTER TABLE lesson_logs ADD COLUMN lesson_mode TEXT DEFAULT 'legacy'");
+    seedSession(db, { id: 'rt', courseId: 'food', startTime: '2026-01-01T00:00:00Z', endTime: '2026-01-01T00:01:00Z',
+      tokenUsage: { realtime: { model: 'gpt-realtime-2.1', usage: [], complete: false } },
+      interactions: [{ user: 'apple', ai: '读得不错。', modelCalls: { assessment: { source: 'model', target_id: 'apple', mastered: true } } }] });
+    db.exec("UPDATE lesson_logs SET lesson_mode = 'realtime' WHERE id = 'rt'");
+    seedWordPerformance(db, 'rt', [{ word: 'apple', attempts: 1, correct: 1 }]);
+    const report = await buildReport(db, 'rt', defaultCourseLoader);
+    expect(report.session.mode).toBe('realtime');
+    expect(report.eval.teachingLoop.clearRateSource).toBe('realtime_model');
+    expect(report.eval.teachingLoop.words.find((word) => word.word === 'apple')?.cleared).toBe(true);
+    expect(report.tokens.realtime?.tokenPriceUsd).toBeNull();
+    expect(report.anomalies.asrUsageNotTracked).toBe(false);
+    expect(report.anomalies.ttsUsageNotTracked).toBe(false);
+  } finally { db.close(); }
+});

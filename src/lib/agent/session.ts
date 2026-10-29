@@ -12,7 +12,7 @@ import {
   initializeCardProgress,
   allWordsFinished,
 } from './memory';
-import { deserializeProgress, isCourseComplete, serializeProgress } from './course-progress';
+import { deserializeProgress, isCourseComplete, serializeProgress, resolveResumePhase } from './course-progress';
 import { buildPromptInput } from './prompt';
 import { streamLLM } from '@/lib/llm';
 import { LlmServiceError } from '@/lib/llm-errors';
@@ -42,10 +42,11 @@ function freshTokenUsage(): TokenUsage {
   };
 }
 
-export function createSession(course: Course, learnerId: string): Session {
+export function createSession(course: Course, learnerId: string, mode: 'legacy' | 'realtime' = 'legacy'): Session {
   const id = uuidv4();
   const session: Session = {
     id,
+    mode,
     lifetime: new AbortController(),
     courseId: course.id,
     learnerId,
@@ -57,7 +58,7 @@ export function createSession(course: Course, learnerId: string): Session {
     startTime: new Date(),
     currentPhase: 'intro',
   };
-  createLessonLog(id, course.id, learnerId);
+  createLessonLog(id, course.id, learnerId, mode);
   sessionStore.save(session);
   return session;
 }
@@ -66,12 +67,13 @@ export function createSession(course: Course, learnerId: string): Session {
 // breakpoint instead of starting fresh. Conversation history (messages/interestSignals) is
 // NOT restored — PRD R1 is "跳到上次位置,重新开个头", not a seamless resume. New cards added
 // to the course since the snapshot was taken are backfilled via initializeCardProgress.
-export function createSessionFromSnapshot(course: Course, progress: CourseProgressRow, learnerId: string): Session {
+export function createSessionFromSnapshot(course: Course, progress: CourseProgressRow, learnerId: string, mode: 'legacy' | 'realtime' = 'legacy'): Session {
   const id = uuidv4();
   const restoredMemory = deserializeProgress(createMemory(), progress.snapshot);
   const memory = initializeCardProgress(restoredMemory, course);
   const session: Session = {
     id,
+    mode,
     lifetime: new AbortController(),
     courseId: course.id,
     learnerId,
@@ -81,9 +83,9 @@ export function createSessionFromSnapshot(course: Course, progress: CourseProgre
     lessonInteractionCount: 0,
     revision: 0,
     startTime: new Date(),
-    currentPhase: progress.phase,
+    currentPhase: resolveResumePhase(course, memory, progress.phase),
   };
-  createLessonLog(id, course.id, learnerId);
+  createLessonLog(id, course.id, learnerId, mode);
   sessionStore.save(session);
   console.log('[session] resumed from breakpoint', {
     courseId: course.id,
@@ -125,6 +127,8 @@ export function endSession(sessionId: string): void {
 export function setSessionPhase(sessionId: string, phase: PhaseName): void {
   const session = getSession(sessionId);
   if (!session || session.lifetime.signal.aborted) return;
+  if (phase === 'reinforcement' && session.course.phases.reinforcement.quizzes.every((q) => session.memory.passedQuizIds.includes(q.id))) phase = 'done';
+  getDb().transaction(() => upsertCourseProgress(session.courseId, serializeProgress(session.memory), phase, isCourseComplete(session.course, session.memory), session.learnerId))();
   session.currentPhase = phase;
   session.revision += 1;
 }
@@ -136,7 +140,7 @@ export function recordQuizAnswer(
   correct: boolean,
 ): boolean {
   const session = getSession(sessionId);
-  if (!session || session.lifetime.signal.aborted) return false;
+  if (!session || session.lifetime.signal.aborted || session.mode === 'realtime') return false;
   const nextMemory = {
     ...session.memory,
     totalInteractions: session.memory.totalInteractions + 1,
@@ -206,7 +210,7 @@ export async function* streamUserInput(
 ): AsyncGenerator<StreamUserEvent> {
   // 1. Session lookup + user message
   const session = sessionStore.get(sessionId);
-  if (!session) {
+  if (!session || session.mode === 'realtime') {
     yield { type: 'error', message: `Session ${sessionId} not found` };
     return;
   }

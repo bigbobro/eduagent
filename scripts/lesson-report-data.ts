@@ -1,5 +1,6 @@
 /// <reference types="node" />
 import path from 'path';
+import { summarizeRealtimeUsage } from '../src/lib/realtime/usage';
 import fs from 'fs';
 import type { Database } from '../src/lib/db/sqlite';
 import { getCourseById } from '../src/data/courses';
@@ -8,6 +9,7 @@ import type { WordCard } from '../src/types/course';
 export interface ReportData {
   session: {
     id: string;
+    mode: 'legacy' | 'realtime';
     courseId: string;
     learnerId: string | null;
     courseTitle: string;
@@ -19,6 +21,7 @@ export interface ReportData {
     ended: boolean;
   };
   tokens: {
+    realtime?: ReturnType<typeof summarizeRealtimeUsage>;
     llm: {
       requests: number;
       input: number;
@@ -75,6 +78,8 @@ interface EvalScorecard {
     interactionCountMatchesLog: boolean;
     llmRequestsPerInteraction: number;
     providerUsageTracked: {
+      realtimeApplicable?: boolean;
+      realtime?: boolean;
       asr: boolean;
       tts: boolean;
     };
@@ -107,7 +112,7 @@ interface EvalScorecard {
     attemptsPerClearedWord: number;
     totalAttempts: number;
     totalCorrect: number;
-    clearRateSource: 'rc' | 'legacy_llm_correct' | 'mixed' | 'none';
+    clearRateSource: 'rc' | 'legacy_llm_correct' | 'realtime_model' | 'mixed' | 'none';
     words: Array<{
       word: string;
       attempts: number;
@@ -184,6 +189,7 @@ interface PromptInputBreakdownSummary {
 }
 
 interface LessonRow {
+  lesson_mode?: 'legacy' | 'realtime';
   id: string;
   course_id: string;
   learner_id?: string | null;
@@ -244,6 +250,8 @@ export async function buildReport(
   }));
 
   const usage = parseTokenUsage(lesson.token_usage);
+  const mode = lesson.lesson_mode === 'realtime' ? 'realtime' : 'legacy';
+  const realtime = mode === 'realtime' ? summarizeRealtimeUsage((safeJsonParse(lesson.token_usage, {}) as { realtime?: unknown }).realtime) : undefined;
   const modelCalls = rows.map((r) => safeJsonParse(r.model_calls, {}) as ModelCallsRow);
   const inputs = modelCalls.map((mc) => {
     return mc.llm?.inputTokens ?? 0;
@@ -257,8 +265,9 @@ export async function buildReport(
   const startMs = Date.parse(lesson.start_time);
   const endMs = lesson.end_time ? Date.parse(lesson.end_time) : null;
   const durationSec = endMs !== null ? Math.round((endMs - startMs) / 1000) : null;
-  const session = {
+  const session: ReportData['session'] = {
     id: lesson.id,
+    mode,
     courseId: lesson.course_id,
     learnerId: lesson.learner_id ?? null,
     courseTitle,
@@ -270,6 +279,7 @@ export async function buildReport(
     ended: lesson.end_time !== null,
   };
   const tokens = {
+    ...(realtime ? { realtime } : {}),
     llm: {
       requests: usage.llm.requests,
       input: usage.llm.inputTokens,
@@ -283,8 +293,8 @@ export async function buildReport(
   };
   const anomalies = {
     highAvgInput: avgInputPerRound > 1000,
-    asrUsageNotTracked: usage.asr.requests === 0,
-    ttsUsageNotTracked: usage.tts.requests === 0,
+    asrUsageNotTracked: mode === 'legacy' && usage.asr.requests === 0,
+    ttsUsageNotTracked: mode === 'legacy' && usage.tts.requests === 0,
     tokensCorrupted: usage.corrupted,
   };
   return {
@@ -328,6 +338,7 @@ function buildCourseWordCards(course: CourseDefinition | null, targetWords: stri
 }
 
 interface ModelCallsRow {
+  assessment?: { source?: string; target_id?: string; mastered?: boolean };
   // R6 埋点(2026-07-03):session.ts commitTurn 写入的守卫活动。
   guards?: { rcRejected?: string[]; rcSuppressed?: string[]; speechRewrite?: string };
   llm?: {
@@ -460,7 +471,8 @@ function buildEvalScorecard(args: {
 }): EvalScorecard {
   const sessionHealth = buildSessionHealth(args.lesson, args.session, args.tokens, args.anomalies);
   const costContext = buildCostContext(args.tokens, args.modelCalls, args.anomalies);
-  const teachingLoop = buildTeachingLoop(args.targetWords, args.wordCards, args.wordPerformanceRows, args.interactions);
+  const modelMastered = args.session.mode === 'realtime' ? new Set(args.modelCalls.filter((call) => call.assessment?.source === 'model' && call.assessment.mastered).map((call) => normalizeWord(args.wordCards.find((card) => card.id === call.assessment?.target_id)?.english ?? ''))) : undefined;
+  const teachingLoop = buildTeachingLoop(args.targetWords, args.wordCards, args.wordPerformanceRows, args.interactions, modelMastered);
   const agentBehavior = buildAgentBehavior(args.interactions, args.wordCards, teachingLoop.clearRate, args.modelCalls);
   const nextIterationSignals = buildNextIterationSignals({
     sessionHealth,
@@ -508,6 +520,8 @@ function buildSessionHealth(
     interactionCountMatchesLog,
     llmRequestsPerInteraction: roundRatio(tokens.llm.requests, session.interactionCount),
     providerUsageTracked: {
+      realtimeApplicable: session.mode === 'realtime',
+      realtime: tokens.realtime?.complete,
       asr: tokens.asr.tracked,
       tts: tokens.tts.tracked,
     },
@@ -569,10 +583,11 @@ function buildTeachingLoop(
   wordCards: CourseWord[],
   wordPerformanceRows: WordPerformanceRow[],
   interactions: ReportData['interactions'],
+  modelMastered?: Set<string>,
 ): EvalScorecard['teachingLoop'] {
   const performanceByWord = new Map(wordPerformanceRows.map((row) => [normalizeWord(row.word), row]));
   const targetSet = new Set(targetWords.map(normalizeWord));
-  const words = targetWords.map((word) => scoreWordRow(word, performanceByWord.get(normalizeWord(word))));
+  const words = targetWords.map((word) => ({ ...scoreWordRow(word, performanceByWord.get(normalizeWord(word))), ...(modelMastered ? { cleared: modelMastered.has(normalizeWord(word)) } : {}) }));
 
   const nonTargetRows = wordPerformanceRows
     .filter((row) => !targetSet.has(normalizeWord(row.word)))
@@ -588,7 +603,7 @@ function buildTeachingLoop(
   // 数据源只看尝试过的词:未尝试的词两本账都不会有行,不应把 source 拉成 mixed。
   const attemptedForSource = scoredWords.filter((word) => word.attempted);
   const trackedCount = attemptedForSource.filter((word) => word.rcTracked).length;
-  const clearRateSource = attemptedForSource.length === 0 ? 'none'
+  const clearRateSource = modelMastered ? 'realtime_model' : attemptedForSource.length === 0 ? 'none'
     : trackedCount === attemptedForSource.length ? 'rc'
       : trackedCount === 0 ? 'legacy_llm_correct' : 'mixed';
   return {
@@ -685,8 +700,8 @@ function buildNextIterationSignals(evalParts: {
   if (sessionHealth.tokensCorrupted) {
     signals.push(signal('token_data_integrity', 'critical', 'token_usage JSON is corrupted', 'tokensCorrupted', true));
   }
-  if (!sessionHealth.providerUsageTracked.asr || !sessionHealth.providerUsageTracked.tts) {
-    signals.push(signal('provider_tracking', 'warn', 'ASR or TTS usage is not tracked for this session', 'providerUsageTracked', `${sessionHealth.providerUsageTracked.asr}/${sessionHealth.providerUsageTracked.tts}`));
+  if (sessionHealth.providerUsageTracked.realtimeApplicable ? !sessionHealth.providerUsageTracked.realtime : !sessionHealth.providerUsageTracked.asr || !sessionHealth.providerUsageTracked.tts) {
+    signals.push(signal('provider_tracking', 'warn', sessionHealth.providerUsageTracked.realtimeApplicable ? 'Realtime usage is incomplete for this session' : 'ASR or TTS usage is not tracked for this session', 'providerUsageTracked', `${sessionHealth.providerUsageTracked.asr}/${sessionHealth.providerUsageTracked.tts}`));
   }
   if (costContext.highAvgInput) {
     signals.push(signal('prompt_input_slimming', 'warn', 'Average LLM input per round is above the current 1000-token threshold', 'avgInputPerRound', costContext.avgInputPerRound));

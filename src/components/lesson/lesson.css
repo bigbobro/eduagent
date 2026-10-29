@@ -1,4 +1,4 @@
-.p2-app { height:100dvh; display:grid; grid-template-rows:52px minmax(0,1fr); color:#1E293B; --p2-lift:0 10px 32px -10px rgba(104,66,255,.18),0 2px 6px rgba(30,41,59,.04); }
+.p2-app { height:100dvh; display:grid; grid-template-rows:52px auto minmax(0,1fr); color:#1E293B; --p2-lift:0 10px 32px -10px rgba(104,66,255,.18),0 2px 6px rgba(30,41,59,.04); }
 .p2-toolbar { grid-template-columns:auto 1fr auto; }
 .p2-progress { justify-self:center; display:flex; align-items:center; gap:12px; font-size:13px; font-weight:600; }
 .p2-progress h1 { font:inherit; }

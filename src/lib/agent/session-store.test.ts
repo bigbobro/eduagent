@@ -43,3 +43,12 @@ describe('InMemorySessionStore', () => {
     expect(store.delete('session-1')).toBe(false);
   });
 });
+
+it('revokes an older classroom for the same child/course, without touching another child', () => {
+  const store = new InMemorySessionStore();
+  const old = makeSession('old'); const other = { ...makeSession('other'), learnerId: 'another-child' };
+  store.save(old); store.save(other); store.save(makeSession('new'));
+  expect(old.lifetime.signal.aborted).toBe(true);
+  expect(store.get('old')).toBeUndefined();
+  expect(store.get('other')).toBe(other);
+});
