@@ -58,3 +58,15 @@ it('restores progress in both directions and rejects the revoked remote classroo
   expect(getSession(restoredId)).toBeDefined();
   endSession(restoredId);
 }, 15000);
+
+it('preserves a corrupt breakpoint and reports its data error before creating any classroom', async () => {
+  const { getDb } = await import('@/lib/db'); const db = getDb();
+  const before = db.prepare('SELECT COUNT(*) AS n FROM lesson_logs').get();
+  db.prepare(`INSERT INTO course_progress (course_id, learner_id, snapshot, phase, completed, updated_at)
+    VALUES ('animals', 'test-learner', '{invalid', 'interactive', 0, '2026-01-01T00:00:00Z')
+    ON CONFLICT(learner_id, course_id) DO UPDATE SET snapshot = excluded.snapshot, completed = 0`).run();
+  const response = await POST(request({ action: 'start', courseId: 'animals', learnerId: 'test-learner' }));
+  expect(response.status).toBe(409); expect((await response.json()).code).toBe('INVALID_COURSE_PROGRESS');
+  expect(db.prepare('SELECT COUNT(*) AS n FROM lesson_logs').get()).toEqual(before);
+  expect(db.prepare("SELECT snapshot FROM course_progress WHERE course_id='animals' AND learner_id='test-learner'").get()).toEqual({ snapshot: '{invalid' });
+});

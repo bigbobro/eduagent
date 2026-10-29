@@ -3,7 +3,7 @@
 import type { Classroom, ClassroomEvents, LessonStateName } from './classroom';
 import type { Course, PhaseName } from '@/types/course';
 import type { ResumeInfo } from '@/lib/lesson-protocol';
-import { parseResumeInfo } from '@/lib/lesson-protocol';
+import { parseResumeInfo, invalidProgressMessage } from '@/lib/lesson-protocol';
 import { parseRealtimeEvent, type RealtimeIntent, type RealtimeEvent } from '@/lib/realtime-protocol';
 import { LessonRecorder, type RecorderHandle } from '@/lib/audio/recorder';
 import { PcmPlayer } from '@/lib/audio/pcm-player';
@@ -166,7 +166,7 @@ export class RealtimeClassroom implements Classroom {
   private error(error: unknown): void {
     const code = error instanceof Error && /^[A-Z0-9_]{1,180}$/.test(error.message) ? error.message : 'REALTIME_FAILED';
     const settings = /NOT_CONFIGURED|AUTH|QUOTA|BALANCE|MODEL_UNAVAILABLE/.test(code);
-    this.emit('error', { code, message: code === 'SESSION_EXPIRED' ? '实时会话已结束，请重新进入课堂，继续已保存的进度。' : settings ? '请到设置检查 OpenAI 密钥、模型权限或额度。' : '实时老师暂时没连上，可以重试这一步或退出后继续。' });
+    this.emit('error', { code, message: code === 'INVALID_COURSE_PROGRESS' ? invalidProgressMessage : code === 'SESSION_EXPIRED' ? '实时会话已结束，请重新进入课堂，继续已保存的进度。' : settings ? '请到设置检查 OpenAI 密钥、模型权限或额度。' : '实时老师暂时没连上，可以重试这一步或退出后继续。' });
   }
   private async perform(work: (run: Run) => Promise<void>): Promise<void> {
     const run = this.run;

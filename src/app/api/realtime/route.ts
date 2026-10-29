@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { InvalidCourseProgressError } from '@/lib/db/progress-snapshot';
 import { getConfig, isRealtimeConfigured } from '@/lib/config';
 import { isAllowedHttpOrigin } from '@/lib/voice/ws-origin';
 import { ensureInitialized } from '@/lib/init';
@@ -56,6 +57,10 @@ export async function POST(req: Request) {
     });
     return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform' } });
   } catch (error) {
+    if (error instanceof InvalidCourseProgressError) {
+      log.warn('invalid checkpoint', { courseId: error.courseId, fields: error.fields });
+      return NextResponse.json({ code: error.code, error: error.message }, { status: 409 });
+    }
     const code = error instanceof Error && /^[A-Z0-9_]{1,180}$/.test(error.message) ? error.message : 'REALTIME_FAILED';
     log.warn('request failed', { action: body.action, code });
     return NextResponse.json({ code, error: '课堂暂时无法继续，请重试。' }, { status: code === 'NOT_FOUND' ? 404 : code === 'SESSION_EXPIRED' ? 409 : 500 });

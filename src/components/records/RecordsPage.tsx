@@ -147,7 +147,7 @@ export function RecordsPage({ name, progress, stats, sessions, error, onRetry, o
           {sessions.slice(0, 4).map(session => (
             <div key={session.lessonId}>
               <span>{sessionWhen(session.startTime)}</span>
-              <span>{session.courseTitle}{session.mode === 'realtime' && <small className="block">Realtime · 模型评估{session.realtimeUsage?.tokenPriceUsd != null ? ` · 估算 $${session.realtimeUsage.tokenPriceUsd.toFixed(3)}` : ' · 用量不完整'}</small>}</span>
+              <span>{session.courseTitle}{session.mode === 'realtime' && <small className="block">Realtime · 模型评估{session.realtimeUsage?.tokenPriceUsd != null ? ` · 估算 $${session.realtimeUsage.tokenPriceUsd.toFixed(3)}` : session.realtimeUsage?.complete ? ' · 暂无该模型估价' : ' · 用量不完整'}</small>}</span>
               <span>{Math.round(session.durationMs / 60000)} 分钟</span>
               <span>{session.wordsMastered} 个词</span>
             </div>
