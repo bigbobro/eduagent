@@ -58,6 +58,7 @@ export function submitAssessment(session: Session, turn: InputTurn, raw: unknown
   requireOwner(session.id, session.learnerId);
   if (turn.receipt) return turn.receipt;
   const assessment = realtimeAssessmentSchema.parse(raw);
+  if (assessment.mastered && assessment.next_action === 'skip') throw new Error('INVALID_ASSESSMENT');
   if (turn.kind !== 'audio' || assessment.target_id !== turn.targetId) throw new Error('INVALID_INPUT_ASSOCIATION');
   const quiz = session.course.phases.reinforcement.quizzes.find((item) => item.id === turn.targetId);
   const card = session.course.cards.find((item) => item.id === turn.targetId);

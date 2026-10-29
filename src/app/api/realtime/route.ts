@@ -40,6 +40,9 @@ export async function POST(req: Request) {
     const run = new AbortController();
     const signal = AbortSignal.any([req.signal, run.signal]);
     let open = true;
+    const cancelled = () => classroom.expire();
+    signal.addEventListener('abort', cancelled, { once: true });
+    if (signal.aborted) cancelled();
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         const emit = (event: RealtimeEvent) => { if (open) controller.enqueue(new TextEncoder().encode(encodeRealtimeEvent(event))); };
@@ -47,9 +50,9 @@ export async function POST(req: Request) {
           const code = error instanceof Error && /^[A-Z0-9_]{1,180}$/.test(error.message) ? error.message : 'REALTIME_FAILED';
           log.warn('turn failed', { sessionId: body.sessionId, turnId: body.turnId, code });
           emit({ type: 'error', code, message: '实时老师暂时断开了，请重新进入课堂，从已保存的进度继续。' });
-        }).finally(() => { if (open) { open = false; controller.close(); } });
+        }).finally(() => { signal.removeEventListener('abort', cancelled); if (open) { open = false; controller.close(); } });
       },
-      cancel() { open = false; run.abort(); classroom.close(); },
+      cancel() { open = false; run.abort(); classroom.expire(); },
     });
     return new Response(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform' } });
   } catch (error) {

@@ -68,3 +68,14 @@ describe('official Realtime protocol adapter', () => {
     expect(usages).toEqual([null]);
   });
 });
+
+it('fails a completed audio response with no audio instead of unlocking a silent teacher', async () => {
+  const { connection } = await fixture((socket, event) => {
+    if (event.type !== 'response.create' || event.response.output_modalities[0] !== 'audio') return false;
+    const response = { id: 'empty-speech', status: 'completed', metadata: event.response.metadata, usage, output: [] };
+    socket.send(JSON.stringify({ type: 'response.created', response }));
+    socket.send(JSON.stringify({ type: 'response.done', response })); return true;
+  });
+  await expect(connection.turn({ turnId: 'turn-1', instructions: 'test', signal: new AbortController().signal,
+    assess: () => ({ ok: true }), audio: () => { throw new Error('no audio expected'); }, transcript: () => {}, usage: () => {} })).rejects.toThrow('PROVIDER_MISSING_AUDIO');
+});

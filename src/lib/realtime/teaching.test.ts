@@ -63,3 +63,9 @@ describe('Realtime teaching transactions', () => {
     expect(restored.currentPhase).toBe('interactive'); restored.lifetime.abort(); sessionStore.delete(restored.id);
   });
 });
+
+it('rejects contradictory skip and mastery fields without awarding the input', () => {
+  const turn = input();
+  expect(() => submitAssessment(session, turn, { ...assessment, next_action: 'skip', mastered: true })).toThrow('INVALID_ASSESSMENT');
+  expect(session.memory.clearedCardIds).toEqual([]); expect(turn.receipt).toBeUndefined();
+});

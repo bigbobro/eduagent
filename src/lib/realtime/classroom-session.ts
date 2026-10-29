@@ -50,9 +50,12 @@ export class RealtimeClassroomSession {
     if (this.idle) clearTimeout(this.idle);
     this.idle = null; this.expired = true; this.provider?.close(); this.provider = null;
   }
+  expire(): void {
+    this.close(); this.session.lifetime.abort(); sessionStore.delete(this.session.id);
+  }
   private armIdle() {
     if (this.idle) clearTimeout(this.idle);
-    this.idle = setTimeout(() => { this.close(); this.session.lifetime.abort(); sessionStore.delete(this.session.id); }, 120_000);
+    this.idle = setTimeout(() => this.expire(), 120_000);
     this.idle.unref?.();
   }
   async turn(turnId: string, intent: RealtimeIntent, emit: (event: RealtimeEvent) => void, signal: AbortSignal): Promise<void> {

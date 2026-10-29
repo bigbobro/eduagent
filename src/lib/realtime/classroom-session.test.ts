@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { sessionStore } from '@/lib/agent/session-store';
-import { RealtimeClassroomSession } from './classroom-session';
+import { RealtimeClassroomSession, registerClassroom, realtimeClassrooms } from './classroom-session';
 import type { ProviderTurn, RealtimeProvider } from './connection';
 import { changePhase } from './teaching';
 const active: RealtimeClassroomSession[] = [];
@@ -48,4 +48,12 @@ describe('classroom input ownership and retry boundary', () => {
     await expect(classroom.turn(randomUUID(), { kind: 'audio', targetId: 'q5', pcm }, () => {}, new AbortController().signal)).rejects.toThrow('INVALID_INPUT_ASSOCIATION');
     expect(factory).not.toHaveBeenCalled();
   });
+});
+
+it('expires both global registries when a cancelled stream has no subsequent end request', () => {
+  const { classroom } = setup(async () => {}); registerClassroom(classroom);
+  classroom.expire();
+  expect(classroom.session.lifetime.signal.aborted).toBe(true);
+  expect(realtimeClassrooms.has(classroom.session.id)).toBe(false);
+  expect(sessionStore.get(classroom.session.id)).toBeUndefined();
 });

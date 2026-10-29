@@ -15,7 +15,7 @@ vi.mock('@/lib/audio/recorder', () => ({ LessonRecorder: class {
 } }));
 const receipt = (phase = 'intro', cardId = 'apple') => ({ ok: true, cardId, progress: { clearedCardIds: [], totalAttempts: 0, currentPhase: phase } });
 function stream(events: object[]) { return new Response(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } }); }
-const extra: Array<(body: any) => Response> = [];
+const extra: Array<(body: any) => Response | Promise<Response>> = [];
 const fetchMock = vi.fn(async (_url: string, options: RequestInit) => {
   const body = JSON.parse(options.body as string);
   if (body.action === 'start') return new Response(JSON.stringify({ sessionId: 'session-1', resume: null, receipt: receipt() }));
@@ -73,4 +73,42 @@ describe('Realtime classroom view contract', () => {
     expect(result).toHaveBeenCalledWith(committed.quiz); expect(asr).not.toHaveBeenCalled();
     await classroom.endLesson();
   });
+});
+
+it('keeps ordinary audio/body uploads out of Fetch keepalive quota and uses it only for teardown', async () => {
+  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
+  const turns = fetchMock.mock.calls.filter(([, options]) => JSON.parse(options.body as string).action === 'turn');
+  expect(turns.every(([, options]) => !options.keepalive)).toBe(true);
+  await classroom.endLesson();
+  expect(fetchMock.mock.calls.at(-1)![1].keepalive).toBe(true);
+});
+
+it('does not publish stale picture-choice events into a restarted classroom', async () => {
+  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
+  let release!: (response: Response) => void;
+  extra.push(() => new Promise<Response>((resolve) => { release = resolve; }));
+  const pick = classroom.submitPick('q1', 'apple');
+  await vi.waitFor(() => expect(release).toBeDefined());
+  await classroom.endLesson(); await classroom.startLesson('child');
+  const saving = vi.fn(); const result = vi.fn(); classroom.on('quiz-saving', saving); classroom.on('quiz-result', result);
+  release(stream([{ type: 'error', code: 'PROVIDER_CLOSED', message: 'cancelled' }])); await pick;
+  expect(saving).not.toHaveBeenCalled(); expect(result).not.toHaveBeenCalled();
+  expect(classroom.getState()).toBe('awaiting'); await classroom.endLesson();
+});
+
+it('finishes the new-card demonstration after a committed assessment feedback retry', async () => {
+  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
+  const actions = vi.fn(); classroom.on('actions', actions);
+  doubles.recorders[0].start.mockImplementationOnce(async (options: { onChunk: (pcm: ArrayBuffer) => void }) => {
+    options.onChunk(new Uint8Array(4800).fill(1).buffer); return { stop: async () => {} };
+  });
+  const committed = { ...receipt('interactive', 'milk'), progress: { ...receipt('interactive').progress, clearedCardIds: ['apple'] } };
+  extra.push(() => stream([{ type: 'receipt', receipt: committed }, { type: 'error', code: 'PROVIDER_DISCONNECTED', message: 'failed' }]));
+  await classroom.startListening(); await classroom.stopListening();
+  expect(actions).not.toHaveBeenCalled();
+  const failed = JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string);
+  extra.push((body) => { expect(body.turnId).toBe(failed.turnId); return stream([{ type: 'receipt', receipt: committed }, { type: 'done' }]); });
+  await classroom.retryLastTurn();
+  expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string).intent).toEqual({ kind: 'repeat', cardId: 'milk' });
+  expect(classroom.getState()).toBe('awaiting'); await classroom.endLesson();
 });

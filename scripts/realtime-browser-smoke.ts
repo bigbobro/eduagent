@@ -23,7 +23,7 @@ async function main() {
   const browser = desktop ? null : await chromium.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
     args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', `--use-file-for-fake-audio-capture=${path.resolve('tests/fixtures/audio/animals_cat.wav')}`] });
   const events: object[] = []; const errors: string[] = [];
-  let quizId: string | undefined;
+  let quizId: string | undefined; let maxUploadBytes = 0;
   try {
     const context = desktop ? desktop.context() : await browser!.newContext({ permissions: ['microphone'], viewport: { width: 1100, height: 720 } });
     const page = desktop ? await desktop.firstWindow() : await context.newPage();
@@ -32,6 +32,7 @@ async function main() {
       if (!req.url().includes('/api/')) return;
       if (req.url().endsWith('/api/realtime')) {
         const body = req.postDataJSON();
+        if (body.intent?.kind === 'audio') maxUploadBytes = Math.max(maxUploadBytes, req.postDataBuffer()?.byteLength ?? 0);
         events.push({ action: body.action, intent: body.intent?.kind, targetId: body.intent?.targetId, quizId: body.intent?.quizId });
         if (body.intent?.kind === 'present-quiz') quizId = body.intent.quizId;
       } else if (/\/api\/(chat|voice\/)/.test(req.url())) throw new Error('Realtime used a legacy voice/model endpoint');
@@ -53,7 +54,7 @@ async function main() {
     const speak = async () => {
       await ready(); await page.keyboard.down('Space');
       await page.waitForSelector('[data-picture-card-state="recording"]', { timeout: 5000 });
-      await page.waitForTimeout(args.includes('--mock') ? 450 : 1800);
+      await page.waitForTimeout(Number(option('--hold-ms', args.includes('--mock') ? '450' : '1800')));
       if (!await page.locator('[data-picture-card-state="recording"]').count()) throw new Error('Recording stopped before release');
       const answer = page.waitForResponse((response) => response.url().endsWith('/api/realtime') && response.request().postDataJSON()?.intent?.kind === 'audio');
       await page.keyboard.up('Space');
@@ -65,6 +66,7 @@ async function main() {
     };
     await ready(); await page.screenshot({ path: path.join(out, 'interactive.png') });
     await speak();
+    if (Number(option('--hold-ms', args.includes('--mock') ? '450' : '1800')) >= 1500 && maxUploadBytes <= 65536) throw new Error('Long recording did not exercise a body over 64KiB');
     if (args.includes('--full')) {
       for (let i = 0; i < 45; i++) {
         if (await page.getByText('课堂完成', { exact: true }).count()) break;
@@ -96,7 +98,7 @@ async function main() {
     if (trackCount !== 1) throw new Error('Expected one microphone capture for the classroom');
     await page.waitForFunction(() => (window as unknown as { __smokeTracks: MediaStreamTrack[] }).__smokeTracks.every((track) => track.readyState === 'ended'));
     if (errors.length) throw new Error(`Page runtime errors: ${errors.join('; ')}`);
-    writeFileSync(path.join(out, 'results.json'), JSON.stringify({ provider: settings.mock ? 'mock' : 'live', learnerId: learner.id, full: args.includes('--full'), electronDevelopment: Boolean(desktop), trackCount, events, progress: course, errors, microphoneStopped: true }, null, 2));
+    writeFileSync(path.join(out, 'results.json'), JSON.stringify({ provider: settings.mock ? 'mock' : 'live', learnerId: learner.id, full: args.includes('--full'), electronDevelopment: Boolean(desktop), trackCount, maxUploadBytes, events, progress: course, errors, microphoneStopped: true }, null, 2));
     console.log(`[realtime browser] passed; evidence ${out}`);
   } finally { await desktop?.close(); await browser?.close(); }
 }

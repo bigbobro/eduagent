@@ -799,3 +799,5 @@ v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真�
 配置：旧模式isConfigured保留；Realtime只看OPENAI_API_KEY。入门门槛任一模式就绪即可，开课时分别检查实际模式。App配置写入独立openaiApiKey/realtimeModel，空值或打码保留密钥，重启加载；模式偏好localStorage不触发重启。设置连接测试建立真实会话并session.update，不生成回应。日志仅记录动作、标识和安全错误码，不记音频、凭据或完整提供方错误正文。
 
 自动化入口：`realtime-lesson-smoke.ts`（显式live/mock、有界整课、隔离临时DB读回、完成标记断言）；`realtime-browser-smoke.ts`（实际fake-media录音和WebAudio、整课或真实服务最小链路、轨道释放，可在Electron开发壳运行）。合成成人音频与fake media不替代儿童真实发音或物理麦克风／扬声器体验验收。独立协议实验不等于上述课堂集成证据。
+
+审查后的边界补充：音频上传使用普通fetch POST，只有小型end请求使用keepalive（Chrome对较大keepalive body会直接拒绝）。取消SSE或请求abort通过expire同时清理两个全局注册表；正常end仍写最终日志。所有quiz异步回调检查所属run。反馈失败时发布已提交进度但保持旧卡，重试反馈后才切新卡并完成其示范。skip与mastered=true的矛盾参数在执行前拒绝；提供方完成却无音频时按失败恢复，不当作老师已播放。

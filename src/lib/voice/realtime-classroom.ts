@@ -79,7 +79,7 @@ export class RealtimeClassroom implements Classroom {
       body: JSON.stringify({ action: 'end', sessionId, learnerId }), signal: AbortSignal.timeout(5000) }).catch(() => {});
   }
   private async post(run: Run, body: object): Promise<Response> {
-    const response = await fetch('/api/realtime', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    const response = await fetch('/api/realtime', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       signal: AbortSignal.any([run.abort.signal, AbortSignal.timeout(65000)]) });
     if (!response.ok) {
       const problem: unknown = await response.json().catch(() => null);
@@ -88,7 +88,7 @@ export class RealtimeClassroom implements Classroom {
     }
     return response;
   }
-  private apply(run: Run, receipt: Receipt, includeQuiz = true): void {
+  private apply(run: Run, receipt: Receipt): void {
     if (!this.current(run)) return;
     const previousPhase = run.phase;
     run.phase = receipt.progress.currentPhase;
@@ -100,7 +100,7 @@ export class RealtimeClassroom implements Classroom {
       this.emit('subtitle', { text: receipt.assessment.heard, source: 'user', provenance: 'model' });
       this.emit('subtitle-clear', undefined);
     }
-    if (includeQuiz && receipt.quiz) this.emit('quiz-result', receipt.quiz);
+    if (receipt.quiz) this.emit('quiz-result', receipt.quiz);
   }
   private async request(run: Run, intent: RealtimeIntent, turnId = crypto.randomUUID()): Promise<void> {
     if (!this.current(run) || !run.sessionId) throw new Error('SESSION_EXPIRED');
@@ -148,7 +148,7 @@ export class RealtimeClassroom implements Classroom {
       run.failed = null;
     } catch (error) {
       await run.player.stop();
-      if (receipt && this.current(run)) this.apply(run, receipt, false);
+      if (receipt && this.current(run)) this.emit('progress', receipt.progress);
       throw error;
     }
   }
@@ -184,19 +184,29 @@ export class RealtimeClassroom implements Classroom {
   async retryTransition(): Promise<void> { await this.retryLastTurn(); }
   async retryLastTurn(): Promise<void> {
     const failed = this.run?.failed; if (!failed) return;
-    await this.perform((run) => this.request(run, failed.intent, failed.turnId)).catch(() => {});
+    await this.perform(async (run) => {
+      await this.request(run, failed.intent, failed.turnId);
+      if (failed.intent.kind === 'audio' && run.phase === 'interactive' && run.cardId !== failed.intent.targetId) {
+        await this.request(run, { kind: 'repeat', cardId: run.cardId });
+      }
+    }).catch(() => {});
   }
   async completeReinforcement(): Promise<void> { await this.perform((run) => this.request(run, { kind: 'phase', to: 'done' })).catch(() => {}); }
   async presentQuiz(quizId: string): Promise<void> {
     await this.perform(async (run) => { await this.request(run, { kind: 'present-quiz', quizId }); run.quizId = quizId; });
   }
   async submitPick(quizId: string, picked: string): Promise<void> {
+    const owner = this.run; if (!owner || !this.current(owner)) return;
     this.emit('quiz-saving', true);
     try { await this.perform((run) => this.request(run, { kind: 'pick', quizId, cardId: picked })); }
-    catch { this.emit('quiz-result', { quizId, ok: false, correct: false, source: 'application', next: 'retry' }); }
-    finally { this.emit('quiz-saving', false); }
+    catch { if (this.current(owner)) this.emit('quiz-result', { quizId, ok: false, correct: false, source: 'application', next: 'retry' }); }
+    finally { if (this.current(owner)) this.emit('quiz-saving', false); }
   }
-  async retryQuiz(): Promise<void> { this.emit('quiz-saving', true); await this.retryLastTurn(); this.emit('quiz-saving', false); }
+  async retryQuiz(): Promise<void> {
+    const owner = this.run; if (!owner || !this.current(owner)) return;
+    this.emit('quiz-saving', true); await this.retryLastTurn();
+    if (this.current(owner)) this.emit('quiz-saving', false);
+  }
   async startListening(): Promise<void> { await this.beginRecording(null); }
   async startQuizListening(quizId: string): Promise<void> { await this.beginRecording(quizId); }
   private async beginRecording(quizId: string | null): Promise<void> {
