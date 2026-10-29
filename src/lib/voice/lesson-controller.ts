@@ -34,8 +34,8 @@ async function responseFailure(res: Response, fallback: string): Promise<Error> 
   return new Error(fallback);
 }
 
-export type LessonStateName =
-  | 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending';
+import type { LessonStateName } from './classroom';
+export type { LessonStateName } from './classroom';
 
 type EventName =
   | 'state'

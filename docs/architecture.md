@@ -196,12 +196,12 @@ ASR final 到达 client
 
 强化巩固里的 `repeat-after-me` 复用同一套 ASR 录音管线,但调用
 `LessonController.startListening({ routeToChat:false })`。这类录音仍会 emit
-`asr-final` 给 `ReinforceFrame` 做本地短句判定并由
+`asr-final` 在 `LegacyClassroom` 中做旧模式短句判定并由
 `ReinforcementFlow` 记录 `quiz-answer`,但不会再进入 `/api/chat?action=message`
 触发额外 LLM/TTS 回合。
 
 强化巩固的 quiz 引导不走 LLM。`QuizPickWordFrame` mount 后调用
-`LessonController.speakStatic(prompt + correctEnglish)`,`ReinforceFrame` mount 后
+`LegacyClassroom.presentQuiz` 转换为旧 `LessonController.speakStatic`；`ReinforceFrame` mount 后
 调用 `speakStatic(targetText)`;两者都等 `state=awaiting` 才发起静态 TTS,播放中进入
 `quiz-speaking` 并锁住选择/录音。`useStaticPromptSpeech` 只在 `speakStatic()`
 resolve 后标记 prompt 已听完;如果 controller 还没回到 `awaiting` 或静态 TTS 忙导致
@@ -361,7 +361,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 - **`enable_ddc: false`**,儿童语料场景关掉语义顺滑(否则停顿/重复词被删字)。
 - **current/next hot_words 注入**:浏览器 ASR WS 带 `courseId` / `cardId` / `clearedCardIds` query;proxy 优先按当前卡 + 下一张未 cleared 词卡形成 W2 hot_words 窗口,无 `cardId` 时 fallback 全课 word cards。full client request 写入 `request.corpus.context = "{\"hotwords\":[...]}"`。豆包本地协议文档没有 per-word weight 字段,也没有 `language_hint`;当前继续不传 `audio.language`,使用默认中英文识别能力。
 - **reinforcement 阶段丢弃词卡上下文**:`cardId` 上下文只在 interactive 由 `show_card` 更新;跟读(`startListening({routeToChat:false})`)读的是整句、不是单张词卡,若沿用 interactive 末尾冻结的词卡(如 `magic` 课的 `princess`),会把那一个词当成唯一热词、反而把句子识别带偏。故 `startListening` 在 `routeToChat===false` 时清掉 `currentAsrCardId`,让热词 fallback 到全课词表(覆盖句子里的各目标词)。(2026-06-21 修)
-- **repeat-after-me 句子候选注入 + 降难度提示/判分(2026-07-03 / 2026-07-05)**:sports 真人课(session `1b096ae7`)quiz 轮 "I play tennis." 被识别成 "I'll play Thomas."——热词从不含句子是缺口。现在 `ReinforceFrame` 把当前 quiz 的 `targetText`(在前)+ 同组其余 repeat-after-me 句(次级候选)经 `startListening({routeToChat:false, asrSentenceTexts})` → `new AsrClient(context)` 的课堂内快照 → WS query `sentenceText`(每句一个 param,整值保留、不做逗号切分)传给 proxy;`buildHotWords` 把句子候选放在最前,后接原有整课词表 fallback(2026-06-21 行为不变),word 卡轮完全零回归(不带 `sentenceTexts` 时热词构造逐字节不变)。**注入格式采用"整句 + 内容词"双注入**(R4 决策):本地协议摘要没有条目长度/格式限制与 per-entry weight,故整句(去尾部标点)作短语级候选,同时拆 ≥3 字母的内容词。2026-07-05 fruits 真人课暴露 q7 `I see the grape.` 被 `See the.` 过宽判 correct;现 repeat-after-me 初次静态 TTS 改为"完整句 → 慢速拆分 → 完整句",降低孩子跟读难度,同时前端判分要求目标词/核心内容词出现并覆盖足够句子内容,`See the.` 这类缺目标词片段不再 correct。直连探针(TTS 念 "I play tennis." → ASR)实证:整句(含空格)hotword 条目豆包不报协议错、识别命中;儿童真实发音效果继续靠真人课验证。
+- **repeat-after-me 句子候选注入 + 降难度提示/判分(2026-07-03 / 2026-07-05)**:sports 真人课(session `1b096ae7`)quiz 轮 "I play tennis." 被识别成 "I'll play Thomas."——热词从不含句子是缺口。现在 `LegacyClassroom.startQuizListening` 把当前 quiz 的 `targetText`(在前)+ 同组其余 repeat-after-me 句(次级候选)经 `startListening({routeToChat:false, asrSentenceTexts})` → `new AsrClient(context)` 的课堂内快照 → WS query `sentenceText`(每句一个 param,整值保留、不做逗号切分)传给 proxy;`buildHotWords` 把句子候选放在最前,后接原有整课词表 fallback(2026-06-21 行为不变),word 卡轮完全零回归(不带 `sentenceTexts` 时热词构造逐字节不变)。**注入格式采用"整句 + 内容词"双注入**(R4 决策):本地协议摘要没有条目长度/格式限制与 per-entry weight,故整句(去尾部标点)作短语级候选,同时拆 ≥3 字母的内容词。2026-07-05 fruits 真人课暴露 q7 `I see the grape.` 被 `See the.` 过宽判 correct;现 repeat-after-me 初次静态 TTS 改为"完整句 → 慢速拆分 → 完整句",降低孩子跟读难度,同时旧模式 `legacy-teaching` 判分要求目标词/核心内容词出现并覆盖足够句子内容,`See the.` 这类缺目标词片段不再 correct。直连探针(TTS 念 "I play tennis." → ASR)实证:整句(含空格)hotword 条目豆包不报协议错、识别命中;儿童真实发音效果继续靠真人课验证。
 - **真实回归基线(2026-05-05)**:hotwords 注入对 `hour -> Our.`、`One thousand is ten hundreds -> 1000 is 10.` 未生效——豆包 ASR 在英文短词与数字归一化场景上 weak,protocol 层 hot_words 不解决根因。曾尝试过的"final 阶段窄规则纠正(`Our.` → `hour`)"已撤销,因为字典化纠正会过拟合到一节课的具体误识结果,且让下游 LLM 看不见 ASR 真实输出,反而损害"基于 raw ASR 自行容错判定"的 mastery 检测路径。真实 ASR 容错改由教学循环 v1.1 的 LLM 容错判定承担(见 TODO P1 §3)。
 - **客户端不能直接 close WS**:必须发 `{type:'finish'}` 控制帧给 proxy,proxy 发 -seq 给豆包后等 final 自然回来,client 收到 final 才 close。直接 close 会让上游 session 立刻断,final 永远收不到,UI 卡 thinking。
 - **proxy 必须 buffer upstream 握手期间的 PCM**:client WS 几十 ms 就 open,但 proxy → 豆包 upstream 握手 + 发 full client request 要 1-3 秒。这段时间 client 已经在送 PCM,如果 proxy 直接 drop,前 1-3 秒说话会丢失。
@@ -402,7 +402,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 | ASR/TTS usage | ASR 记请求数 + 识别文本长度,TTS 记请求数 + speech 字符数 | 当前没有 provider-native ASR token/TTS usage,先保证课后报告可观测 |
 | 画布比例 | 1:1 正方形,图片区 75%(4:3),文字区 25% | 幼儿教学:图片为主角(75%),文字为锚点(25%);图片生成统一 4:3 横版(1024×768)填满图片区 |
 | 三阶段 phase 切换 | 规则驱动,`PhasedLessonController` 判定 | LLM 自主切换不可预测;规则可测、可回滚 |
-| reinforcement 静态 TTS | quiz prompt / retry hint 由 `LessonController.speakStatic` 走既有长连 TTS,不调 LLM;repeat-after-me 初次提示由前端把 `targetText` 扩展成"完整句 → 慢速拆分 → 完整句"后播放,显示文本与 ASR 候选仍保留原始 `targetText` | 强化阶段提示语是课程数据里的确定文本,复用音频链路即可,避免额外 LLM 延迟与不可预测文案;句子跟读只播一次对儿童偏难,但无需改 TTS 协议即可用文本节奏降难度 |
+| reinforcement 静态 TTS | quiz prompt / retry hint 由 `LessonController.speakStatic` 走既有长连 TTS,不调 LLM;repeat-after-me 初次提示由旧模式 `legacy-teaching` 把 `targetText` 扩展成"完整句 → 慢速拆分 → 完整句"后播放,显示文本与 ASR 候选仍保留原始 `targetText` | 强化阶段提示语是课程数据里的确定文本,复用音频链路即可,避免额外 LLM 延迟与不可预测文案;句子跟读只播一次对儿童偏难,但无需改 TTS 协议即可用文本节奏降难度 |
 | 新标准唯一化 | 课程通过 registry(`index.ts` 的 `allCourses`)统一暴露,数量以该文件为准;旧 `transportation` / `timeNumbers` 数据与 `LessonView` fallback 已退役 | 避免长期维护两套课程路径 |
 | LessonController 定位 | 继续复用 ASR/TTS/SSE 管线,不作为独立 lesson UI 入口 | 降低重写音频链路风险 |
 
