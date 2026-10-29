@@ -1,59 +1,68 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
 import { sessionStore } from '@/lib/agent/session-store';
+import { resetConfig } from '@/lib/config';
+import type { RealtimeEvent } from '@/lib/realtime-protocol';
 import { RealtimeClassroomSession, registerClassroom, realtimeClassrooms } from './classroom-session';
-import type { ProviderTurn, RealtimeProvider } from './connection';
-import { changePhase } from './teaching';
+import type { CallOptions } from './call';
+import { summarizeRealtimeUsage } from './usage';
 const active: RealtimeClassroomSession[] = [];
-afterEach(() => active.splice(0).forEach((c) => { c.session.lifetime.abort(); sessionStore.delete(c.session.id); }));
-const pcm = Buffer.alloc(4800, 1).toString('base64');
-function setup(run: (turn: ProviderTurn) => Promise<void>) {
-  const factory = vi.fn((): RealtimeProvider => ({ turn: vi.fn(run), close: vi.fn() }));
-  const classroom = new RealtimeClassroomSession('food', 'test-learner', true, factory); active.push(classroom);
-  changePhase(classroom.session, 'interactive');
-  return { classroom, factory };
+afterEach(() => { active.splice(0).forEach((c) => { c.session.lifetime.abort(); sessionStore.delete(c.session.id); }); vi.unstubAllEnvs(); resetConfig(); });
+function setup() {
+  const provider = { options: null as CallOptions | null, sent: [] as Array<Record<string, any>>, close: vi.fn() };
+  const classroom = new RealtimeClassroomSession('food', 'test-learner', true, async (options) => {
+    provider.options = options;
+    return { answer: 'v=0 answer', call: { send: (event) => provider.sent.push(event as Record<string, any>), close: provider.close } };
+  });
+  active.push(classroom); registerClassroom(classroom);
+  const events: RealtimeEvent[] = [];
+  return { classroom, provider, events, connect: () => classroom.connect('v=0 offer', (event) => events.push(event)) };
 }
-describe('classroom input ownership and retry boundary', () => {
-  it('retries failed feedback without reassessing or awarding a committed input again', async () => {
-    let first = true;
-    const { classroom, factory } = setup(async (turn) => {
-      if (turn.assess) turn.assess({ target_id: 'apple', result: 'correct', heard: 'apple', evidence: 'clear', mastered: true, next_action: 'advance', next_card_id: 'milk', next_phase: null });
-      if (first) { first = false; throw new Error('PROVIDER_DISCONNECTED'); }
-      expect(turn.assess).toBeUndefined(); expect(turn.pcm).toBeUndefined();
-      turn.audio(Buffer.alloc(4800));
-    });
-    const intent = { kind: 'audio' as const, targetId: 'apple', pcm }; const turnId = randomUUID();
-    await expect(classroom.turn(turnId, intent, () => {}, new AbortController().signal)).rejects.toThrow();
-    await classroom.turn(turnId, intent, () => {}, new AbortController().signal);
-    expect(factory).toHaveBeenCalledTimes(2);
-    expect(classroom.session.memory.wordPerformance.get('apple')?.attempts).toBe(1);
+
+describe('Realtime classroom call ownership', () => {
+  it('connects once, moves past the intro and asks the model to open the lesson', async () => {
+    const { provider, events, connect } = setup();
+    expect(await connect()).toBe('v=0 answer');
+    expect(provider.options?.session).toMatchObject({ audio: { input: { turn_detection: { type: 'semantic_vad', create_response: true, interrupt_response: true } } } });
+    expect((provider.options?.session as { audio: { input: object } }).audio.input).not.toHaveProperty('transcription');
+    expect(provider.sent.find((e) => e.type === 'session.update')?.session.instructions).toContain('phase interactive');
+    expect(events[0]).toMatchObject({ type: 'receipt', receipt: { progress: { currentPhase: 'interactive' } } });
+    expect(provider.sent.find((e) => e.type === 'response.create')?.response.metadata.kind).toBe('opening');
+    await expect(connect()).rejects.toThrow('CALL_EXISTS');
   });
-  it('never connects or assesses a digital-zero recording', async () => {
-    const { classroom, factory } = setup(async () => {});
-    await classroom.turn(randomUUID(), { kind: 'audio', targetId: 'apple', pcm: Buffer.alloc(4800).toString('base64') }, () => {}, new AbortController().signal);
-    expect(factory).not.toHaveBeenCalled(); expect(classroom.session.lessonInteractionCount).toBe(0);
+  it('forwards only conversation state events to the browser', async () => {
+    const { provider, events, connect } = setup(); await connect(); events.length = 0;
+    provider.options!.onEvent({ type: 'input_audio_buffer.speech_started', item_id: 'i1' });
+    provider.options!.onEvent({ type: 'rate_limits.updated' });
+    provider.options!.onEvent({ type: 'response.function_call_arguments.delta', delta: '{"secret' });
+    expect(events).toEqual([{ type: 'provider', event: { type: 'input_audio_buffer.speech_started', item_id: 'i1' } }]);
   });
-  it('serializes concurrent turns and prevents turn-id reuse with different audio', async () => {
-    let release!: () => void;
-    const { classroom } = setup(() => new Promise<void>((resolve) => { release = resolve; }));
-    const turnId = randomUUID(); const signal = new AbortController().signal;
-    const pending = classroom.turn(turnId, { kind: 'repeat', cardId: 'apple' }, () => {}, signal);
-    await expect(classroom.turn(randomUUID(), { kind: 'repeat', cardId: 'milk' }, () => {}, signal)).rejects.toThrow('TURN_BUSY');
-    release(); await pending;
-    await expect(classroom.turn(turnId, { kind: 'repeat', cardId: 'milk' }, () => {}, signal)).rejects.toThrow('TURN_REUSED');
+  it('reports a provider loss, marks usage incomplete and expires both registries', async () => {
+    const { classroom, provider, events, connect } = setup(); await connect();
+    provider.options!.onEvent({ type: 'response.created', response: { id: 'r1' } });
+    provider.options!.onClose('PROVIDER_DISCONNECTED');
+    expect(events.at(-1)).toMatchObject({ type: 'error', code: 'PROVIDER_DISCONNECTED' });
+    expect(summarizeRealtimeUsage(classroom.session.tokenUsage.realtime).complete).toBe(false);
+    expect(provider.close).toHaveBeenCalled();
+    expect(realtimeClassrooms.has(classroom.session.id)).toBe(false); expect(sessionStore.get(classroom.session.id)).toBeUndefined();
+    expect(() => classroom.presented({ kind: 'card', id: 'apple' })).toThrow('SESSION_EXPIRED');
   });
-  it('rejects speech for a quiz that has not actually been presented', async () => {
-    const { classroom, factory } = setup(async () => {});
-    changePhase(classroom.session, 'reinforcement');
-    await expect(classroom.turn(randomUUID(), { kind: 'audio', targetId: 'q5', pcm }, () => {}, new AbortController().signal)).rejects.toThrow('INVALID_INPUT_ASSOCIATION');
-    expect(factory).not.toHaveBeenCalled();
+  it('ignores late provider events after the classroom ended', async () => {
+    const { classroom, provider, events, connect } = setup(); await connect();
+    classroom.expire(); events.length = 0;
+    provider.options!.onEvent({ type: 'response.done', response: { id: 'late', status: 'completed', output: [{ type: 'function_call', name: 'show_card', call_id: 'c', arguments: '{"card_id":"milk"}' }] } });
+    expect(events).toEqual([]); expect(classroom.session.memory.currentCardId).toBe('apple');
   });
 });
 
-it('expires both global registries when a cancelled stream has no subsequent end request', () => {
-  const { classroom } = setup(async () => {}); registerClassroom(classroom);
-  classroom.expire();
-  expect(classroom.session.lifetime.signal.aborted).toBe(true);
-  expect(realtimeClassrooms.has(classroom.session.id)).toBe(false);
-  expect(sessionStore.get(classroom.session.id)).toBeUndefined();
+it('runs the controlled offline provider through the same conversation path', async () => {
+  vi.stubEnv('VOICE_MOCK', 'true'); resetConfig();
+  const classroom = new RealtimeClassroomSession('food', 'test-learner', true); active.push(classroom);
+  expect(classroom.transport).toBe('mock');
+  const events: RealtimeEvent[] = [];
+  expect(await classroom.connect(null, (event) => events.push(event))).toBeNull();
+  classroom.presented({ kind: 'card', id: 'apple' });
+  await expect.poll(() => events.some((e) => e.type === 'provider' && e.event.type === 'output_audio_buffer.stopped'), { timeout: 3000 }).toBe(true);
+  classroom.mockSpeech({ kind: 'attempt' });
+  await expect.poll(() => classroom.session.memory.clearedCardIds, { timeout: 3000 }).toEqual(['apple']);
+  expect(events.some((e) => e.type === 'receipt' && e.receipt.assessment?.target_id === 'apple')).toBe(true);
 });

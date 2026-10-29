@@ -11,6 +11,7 @@ import type { QuizResult } from '@/lib/voice/classroom';
 export interface TeachingReceipt {
   ok: boolean;
   error?: string;
+  revision: number;
   progress: LessonProgressSnapshot;
   cardId: string;
   quiz?: QuizResult;
@@ -26,7 +27,7 @@ export function requireOwner(sessionId: string, learnerId: string): Session {
   return session;
 }
 export function snapshot(session: Session): TeachingReceipt {
-  return { ok: true, cardId: session.memory.currentCardId, progress: {
+  return { ok: true, cardId: session.memory.currentCardId, revision: session.revision, progress: {
     clearedCardIds: [...session.memory.clearedCardIds],
     totalAttempts: Array.from(session.memory.wordPerformance.values()).reduce((n, word) => n + word.attempts, 0),
     currentPhase: session.currentPhase,
@@ -53,7 +54,7 @@ export function showCard(session: Session, cardId: string): TeachingReceipt {
   session.memory = memory; session.revision++;
   return snapshot(session);
 }
-/** First assessment for a real input wins; backend checks structure/ownership, not pronunciation. */
+/** First assessment for a real input wins; backend checks structure/ownership, not pronunciation. The caller owns input-to-target binding. */
 export function submitAssessment(session: Session, turn: InputTurn, raw: unknown): TeachingReceipt {
   requireOwner(session.id, session.learnerId);
   if (turn.receipt) return turn.receipt;
@@ -64,7 +65,8 @@ export function submitAssessment(session: Session, turn: InputTurn, raw: unknown
   const card = session.course.cards.find((item) => item.id === turn.targetId);
   if (quiz) {
     if (session.currentPhase !== 'reinforcement' || quiz.type !== 'repeat-after-me') throw new Error('INVALID_TARGET');
-  } else if (!card || session.currentPhase !== 'interactive' || session.memory.currentCardId !== turn.targetId) throw new Error('INVALID_TARGET');
+    // The conversation binds speech to the card the browser rendered at speech start, which may trail a just-committed switch.
+  } else if (!card || session.currentPhase !== 'interactive') throw new Error('INVALID_TARGET');
   if (assessment.next_card_id && !session.course.cards.some((item) => item.id === assessment.next_card_id)) throw new Error('INVALID_NEXT_CARD');
   if (quiz && assessment.next_card_id) throw new Error('INVALID_NEXT_CARD');
   const phases: PhaseName[] = ['intro', 'interactive', 'reinforcement', 'done'];
@@ -137,9 +139,19 @@ export function recordUsage(session: Session, usage: RealtimeUsage | null): void
   session.tokenUsage = tokenUsage;
 }
 
+/** Spoken feedback for a committed input is attached to its interaction row; it never counts again. */
 export function saveFeedback(session: Session, turnId: string, text: string): void {
   requireOwner(session.id, session.learnerId);
   updateRealtimeFeedback(session.id, turnId, text);
+}
+
+/** An abnormal provider end can hide responses that were never reported; never present that cost as complete. */
+export function markUsageIncomplete(session: Session): void {
+  const tokenUsage = structuredClone(session.tokenUsage);
+  if (!tokenUsage.realtime || !tokenUsage.realtime.complete) return;
+  tokenUsage.realtime.complete = false;
+  getDb().transaction(() => touchLessonLog(session.id, session.lessonInteractionCount, tokenUsage))();
+  session.tokenUsage = tokenUsage;
 }
 
 export function beginResponseUsage(session: Session): void {

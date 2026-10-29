@@ -6,6 +6,7 @@ import type { Classroom } from '@/lib/voice/classroom';
 import Image from 'next/image';
 import { Check } from 'lucide-react';
 import { useStaticPromptSpeech } from './useStaticPromptSpeech';
+import { ConversationDock } from './ConversationDock';
 
 interface QuizPickWordFrameProps {
   disabled?: boolean;
@@ -31,7 +32,7 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer, disabled
     answeredRef.current = false;
   }, [quiz.id, attempt]);
 
-  return <section className="p2-quiz">
+  return <section className={`p2-quiz ${controller.interaction === 'conversation' ? 'p2-quiz-convo' : ''}`}>
     <div className="p2-ask"><b>{quiz.prompt}</b><span>听一听,点出老师说的那张卡</span></div>
     <div className="p2-options">{options.map(card => {
       const selected = selectedId === card.id;
@@ -44,6 +45,7 @@ export function QuizPickWordFrame({ quiz, course, controller, onAnswer, disabled
         onAnswer({ correct: card.id === quiz.correctCardId, picked: card.id });
       }}><div className="p2-option-pic"><Image src={card.imageUrl} alt="" fill sizes="280px" unoptimized /></div><div><b>{card.english}</b><small>{card.chinese}</small>{correct && <span className="p2-check" aria-label="答对了"><Check size={16} strokeWidth={3} /></span>}</div></button>;
     })}</div>
+    {controller.interaction === 'conversation' && <div className="p2-dock"><ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} /></div>}
   </section>;
 }
 

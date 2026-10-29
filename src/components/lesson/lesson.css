@@ -89,3 +89,7 @@
 .p2-wt.p2-extra-long .p2-label b { font-size:14px; }
 .p2-option.p2-long b { font-size:min(30px,5.5cqw); }
 .p2-option.p2-extra-long b { font-size:min(26px,4.8cqw); }
+.p2-convo { display:flex; align-items:center; justify-content:center; gap:12px; width:min(720px,100%); }
+.p2-convo .ui-ptt { grid-template-columns: auto 1fr; }
+.p2-quiz-convo { grid-template-rows:auto minmax(0,1fr) auto; gap:16px; padding-bottom:8px; }
+.p2-quiz-convo .p2-dock { padding:0; }

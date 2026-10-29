@@ -1,129 +1,173 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
 import { RealtimeClassroom } from './realtime-classroom';
-const doubles = vi.hoisted(() => ({ players: [] as any[], recorders: [] as any[] }));
-vi.mock('@/lib/audio/pcm-player', () => ({ PcmPlayer: class {
-  idle = true; listeners = new Set<() => void>(); dispose = vi.fn(async () => {}); stop = vi.fn(async () => { this.idle = true; });
-  prewarm = vi.fn(async () => {}); enqueue = vi.fn(() => { this.idle = false; });
-  isIdle() { return this.idle; } onIdle(fn: () => void) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
-  finish() { this.idle = true; this.listeners.forEach((fn) => fn()); }
-  constructor() { doubles.players.push(this); }
-} }));
-vi.mock('@/lib/audio/recorder', () => ({ LessonRecorder: class {
-  start = vi.fn(async () => ({ stop: vi.fn(async () => {}) })); prewarm = vi.fn(async () => {}); dispose = vi.fn(async () => {});
-  constructor() { doubles.recorders.push(this); }
-} }));
-const receipt = (phase = 'intro', cardId = 'apple') => ({ ok: true, cardId, progress: { clearedCardIds: [], totalAttempts: 0, currentPhase: phase } });
-function stream(events: object[]) { return new Response(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } }); }
-const extra: Array<(body: any) => Response | Promise<Response>> = [];
+
+const receipt = (revision: number, phase = 'interactive', cardId = 'apple', extra: object = {}) => ({ ok: true, cardId, revision, progress: { clearedCardIds: [], totalAttempts: 0, currentPhase: phase }, ...extra });
+let push: (event: object) => void; let finish: () => void; let transport: 'mock' | 'webrtc';
+const bodies: Array<Record<string, any>> = []; const tracks: Array<{ stop: ReturnType<typeof vi.fn>; enabled: boolean; kind: string }> = [];
 const fetchMock = vi.fn(async (_url: string, options: RequestInit) => {
-  const body = JSON.parse(options.body as string);
-  if (body.action === 'start') return new Response(JSON.stringify({ sessionId: 'session-1', resume: null, receipt: receipt() }));
-  if (body.action === 'end') return new Response('{"ok":true}');
-  if (extra.length) return extra.shift()!(body);
-  if (body.intent.kind === 'phase') return stream([{ type: 'receipt', receipt: receipt(body.intent.to) }, { type: 'done' }]);
-  return stream([{ type: 'done' }]);
+  const body = JSON.parse(options.body as string); bodies.push({ ...body, keepalive: options.keepalive });
+  if (body.action === 'start') return new Response(JSON.stringify({ sessionId: 'session-1', resume: null, receipt: receipt(0, 'intro'), transport }));
+  if (body.action === 'connect') {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({ start(controller) {
+      push = (event) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      finish = () => controller.close();
+      push({ type: 'answer', sdp: transport === 'webrtc' ? 'v=0 answer' : null });
+    } });
+    return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
+  }
+  if (body.action === 'pick') return new Response(JSON.stringify({ receipt: receipt(7, 'reinforcement', 'apple', { quiz: { quizId: 'q1', ok: true, correct: true, source: 'application', next: 'advance' } }) }));
+  if (body.action === 'phase') return new Response(JSON.stringify({ receipt: receipt(9, 'done') }));
+  return new Response('{"ok":true}');
 });
-beforeEach(() => { doubles.players.length = 0; doubles.recorders.length = 0; extra.length = 0; fetchMock.mockClear(); vi.stubGlobal('fetch', fetchMock); });
+const peers: any[] = [];
+class FakePeer {
+  tracks: unknown[] = []; channel = { readyState: 'open', send: vi.fn(), close: vi.fn() }; closed = false; remote: unknown; ontrack: unknown; onconnectionstatechange: unknown;
+  constructor() { peers.push(this); }
+  addTrack(track: unknown) { this.tracks.push(track); }
+  createDataChannel(name: string) { expect(name).toBe('oai-events'); return this.channel; }
+  async createOffer() { return { type: 'offer', sdp: 'v=0 offer' }; }
+  async setLocalDescription() {}
+  async setRemoteDescription(description: unknown) { this.remote = description; }
+  close() { this.closed = true; }
+}
+beforeEach(() => {
+  transport = 'mock'; bodies.length = 0; tracks.length = 0; peers.length = 0; fetchMock.mockClear();
+  vi.stubGlobal('fetch', fetchMock);
+  vi.stubGlobal('RTCPeerConnection', FakePeer);
+  vi.stubGlobal('Audio', class { autoplay = false; srcObject: unknown = null; pause = vi.fn(); });
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: vi.fn(async () => {
+    const track = { stop: vi.fn(), enabled: true, kind: 'audio' }; tracks.push(track);
+    return { getTracks: () => [track], getAudioTracks: () => [track] };
+  }) } });
+});
 afterEach(() => vi.unstubAllGlobals());
+const provider = (event: object) => push({ type: 'provider', event });
+async function started() {
+  const classroom = new RealtimeClassroom(foodCourse);
+  const states: string[] = []; classroom.on('state', (s) => states.push(s));
+  expect(await classroom.startLesson('child')).toBe(true);
+  return { classroom, states };
+}
 
-describe('Realtime classroom view contract', () => {
-  it('waits for actual playback after generation done before unlocking input', async () => {
-    const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-    extra.push(() => stream([{ type: 'audio', pcm: btoa('\0\0\0\0') }, { type: 'done' }]));
-    const repeat = classroom.repeatCard('apple');
-    await vi.waitFor(() => expect(doubles.players[0].enqueue).toHaveBeenCalled());
-    expect(classroom.getState()).toBe('speaking');
-    await classroom.startListening(); expect(doubles.recorders[0].start).not.toHaveBeenCalled();
-    doubles.players[0].finish(); await repeat;
+describe('natural Realtime classroom', () => {
+  it('keeps one open microphone through teacher speech and derives turns from provider events, without any key press', async () => {
+    const { classroom } = await started();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
     expect(classroom.getState()).toBe('awaiting');
+    provider({ type: 'response.created', response: { id: 'r1', metadata: { kind: 'opening' } } });
+    provider({ type: 'output_audio_buffer.started', response_id: 'r1' });
+    await vi.waitFor(() => expect(classroom.getState()).toBe('speaking'));
+    expect(tracks[0].enabled).toBe(true); // still capturing while the teacher speaks
+    provider({ type: 'input_audio_buffer.speech_started', item_id: 'i1' });
+    await vi.waitFor(() => expect(classroom.getState()).toBe('listening'));
+    provider({ type: 'response.done', response: { id: 'r1', status: 'cancelled' } }); provider({ type: 'output_audio_buffer.cleared', response_id: 'r1' });
+    provider({ type: 'input_audio_buffer.speech_stopped', item_id: 'i1' });
+    await vi.waitFor(() => expect(classroom.getState()).toBe('thinking'));
+    provider({ type: 'response.created', response: { id: 'r2', metadata: null } }); provider({ type: 'response.done', response: { id: 'r2', status: 'completed' } });
+    await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
+    expect(tracks).toHaveLength(1); await classroom.endLesson();
+  });
+  it('shows committed card switches once in order and ignores a stale or repeated revision', async () => {
+    const { classroom } = await started();
+    const shown: string[] = []; classroom.on('actions', (actions) => shown.push(actions[0].params.card_id));
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'milk') });
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'egg') });
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'milk') });
+    push({ type: 'receipt', receipt: receipt(4, 'interactive', 'cake') });
+    await vi.waitFor(() => expect(shown).toEqual(['milk', 'cake']));
     await classroom.endLesson();
   });
-  it('retains the exact input identity on feedback retry and does not unlock on a truncated stream', async () => {
-    const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-    const errors: unknown[] = []; classroom.on('error', (e) => errors.push(e));
-    extra.push(() => stream([{ type: 'receipt', receipt: receipt('interactive') }, { type: 'error', code: 'PROVIDER_DISCONNECTED', message: 'failed' }]));
-    await classroom.repeatCard('apple');
-    expect(classroom.getState()).toBe('idle'); expect(errors).toHaveLength(1);
-    const failed = JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string);
-    extra.push((body) => { expect(body.turnId).toBe(failed.turnId); expect(body.intent).toEqual(failed.intent); return stream([{ type: 'done' }]); });
-    await classroom.retryLastTurn(); expect(classroom.getState()).toBe('awaiting');
+  it('reports the rendered target once and binds nothing itself', async () => {
+    const { classroom } = await started();
+    classroom.presented({ kind: 'card', id: 'apple' }); classroom.presented({ kind: 'card', id: 'apple' }); classroom.presented({ kind: 'card', id: 'milk' });
+    await vi.waitFor(() => expect(bodies.filter((b) => b.action === 'presented').map((b) => b.target.id)).toEqual(['apple', 'milk']));
     await classroom.endLesson();
   });
-  it('stops a late microphone startup after exit without modifying the next run', async () => {
-    const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-    let resolve!: (tap: { stop: () => Promise<void> }) => void;
-    doubles.recorders[0].start.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
-    const press = classroom.startListening();
-    await classroom.stopListening(); await classroom.endLesson();
-    const stopped = vi.fn(async () => {}); resolve({ stop: stopped }); await press;
-    expect(stopped).toHaveBeenCalledTimes(1);
-    expect(doubles.players[0].dispose).toHaveBeenCalledTimes(1);
-    expect(doubles.recorders[0].dispose).toHaveBeenCalledTimes(1);
-    expect(classroom.getState()).toBe('idle');
-  });
-  it('never treats a model result as an ASR final or emits a quiz result before playback ends', async () => {
-    const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-    const asr = vi.fn(); const result = vi.fn(); classroom.on('asr-final', asr); classroom.on('quiz-result', result);
-    const committed = { ...receipt('reinforcement'), quiz: { quizId: 'q1', ok: true, correct: true, source: 'application', next: 'advance' } };
-    extra.push(() => stream([{ type: 'receipt', receipt: committed }, { type: 'audio', pcm: btoa('\0\0') }, { type: 'done' }]));
-    const answering = classroom.submitPick('q1', 'apple');
-    await vi.waitFor(() => expect(doubles.players[0].enqueue).toHaveBeenCalled());
-    expect(result).not.toHaveBeenCalled(); doubles.players[0].finish(); await answering;
-    expect(result).toHaveBeenCalledWith(committed.quiz); expect(asr).not.toHaveBeenCalled();
+  it('unlocks a quiz prompt only after that prompt finished playing, not after other speech', async () => {
+    const { classroom } = await started();
+    let resolved = false; const prompt = classroom.presentQuiz('q1').then(() => { resolved = true; });
+    await vi.waitFor(() => expect(bodies.some((b) => b.action === 'present-quiz')).toBe(true));
+    provider({ type: 'response.created', response: { id: 'other', metadata: { kind: 'pick-feedback' } } });
+    provider({ type: 'response.done', response: { id: 'other', status: 'completed' } });
+    provider({ type: 'response.created', response: { id: 'p1', metadata: { kind: 'present-quiz', quiz_id: 'q1' } } });
+    provider({ type: 'output_audio_buffer.started', response_id: 'p1' }); provider({ type: 'response.done', response: { id: 'p1', status: 'completed' } });
+    await new Promise((r) => setTimeout(r, 20)); expect(resolved).toBe(false);
+    provider({ type: 'output_audio_buffer.stopped', response_id: 'p1' });
+    await prompt; expect(resolved).toBe(true);
     await classroom.endLesson();
   });
-});
-
-it('keeps ordinary audio/body uploads out of Fetch keepalive quota and uses it only for teardown', async () => {
-  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-  const turns = fetchMock.mock.calls.filter(([, options]) => JSON.parse(options.body as string).action === 'turn');
-  expect(turns.every(([, options]) => !options.keepalive)).toBe(true);
-  await classroom.endLesson();
-  expect(fetchMock.mock.calls.at(-1)![1].keepalive).toBe(true);
-});
-
-it('does not publish stale picture-choice events into a restarted classroom', async () => {
-  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-  let release!: (response: Response) => void;
-  extra.push(() => new Promise<Response>((resolve) => { release = resolve; }));
-  const pick = classroom.submitPick('q1', 'apple');
-  await vi.waitFor(() => expect(release).toBeDefined());
-  await classroom.endLesson(); await classroom.startLesson('child');
-  const saving = vi.fn(); const result = vi.fn(); classroom.on('quiz-saving', saving); classroom.on('quiz-result', result);
-  release(stream([{ type: 'error', code: 'PROVIDER_CLOSED', message: 'cancelled' }])); await pick;
-  expect(saving).not.toHaveBeenCalled(); expect(result).not.toHaveBeenCalled();
-  expect(classroom.getState()).toBe('awaiting'); await classroom.endLesson();
-});
-
-it('finishes the new-card demonstration after a committed assessment feedback retry', async () => {
-  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-  const actions = vi.fn(); classroom.on('actions', actions);
-  doubles.recorders[0].start.mockImplementationOnce(async (options: { onChunk: (pcm: ArrayBuffer) => void }) => {
-    options.onChunk(new Uint8Array(4800).fill(1).buffer); return { stop: async () => {} };
+  it('merges subtitles per response and marks an interrupted reply', async () => {
+    const { classroom } = await started();
+    const subtitles: Array<{ text: string; messageId?: string }> = []; classroom.on('subtitle', (s) => subtitles.push(s));
+    provider({ type: 'response.output_audio_transcript.delta', response_id: 'r1', delta: '这是' });
+    provider({ type: 'response.output_audio_transcript.delta', response_id: 'r1', delta: ' dog。' });
+    provider({ type: 'output_audio_buffer.cleared', response_id: 'r1' });
+    provider({ type: 'response.output_audio_transcript.delta', response_id: 'r2', delta: '这是 cat。' });
+    await vi.waitFor(() => expect(subtitles.map((s) => s.text)).toEqual(['这是', '这是 dog。', '这是 dog。 …', '这是 cat。']));
+    expect(new Set(subtitles.slice(0, 3).map((s) => s.messageId)).size).toBe(1);
+    await classroom.endLesson();
   });
-  const committed = { ...receipt('interactive', 'milk'), progress: { ...receipt('interactive').progress, clearedCardIds: ['apple'] } };
-  extra.push(() => stream([{ type: 'receipt', receipt: committed }, { type: 'error', code: 'PROVIDER_DISCONNECTED', message: 'failed' }]));
-  await classroom.startListening(); await classroom.stopListening();
-  expect(actions).not.toHaveBeenCalled();
-  const failed = JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string);
-  extra.push((body) => { expect(body.turnId).toBe(failed.turnId); return stream([{ type: 'receipt', receipt: committed }, { type: 'done' }]); });
-  await classroom.retryLastTurn();
-  expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body as string).intent).toEqual({ kind: 'repeat', cardId: 'milk' });
-  expect(classroom.getState()).toBe('awaiting'); await classroom.endLesson();
+  it('pauses capture and teacher playback, then resumes', async () => {
+    transport = 'webrtc'; const { classroom } = await started();
+    await classroom.setPaused!(true);
+    expect(tracks[0].enabled).toBe(false); expect(classroom.getState()).toBe('paused');
+    expect(peers[0].channel.send).toHaveBeenCalledWith(JSON.stringify({ type: 'output_audio_buffer.clear' }));
+    await classroom.setPaused!(false);
+    expect(tracks[0].enabled).toBe(true); expect(bodies.filter((b) => b.action === 'pause').map((b) => b.paused)).toEqual([true, false]);
+    await classroom.endLesson();
+  });
+  it('negotiates WebRTC with the single microphone track and releases peer, mic and call on exit', async () => {
+    transport = 'webrtc'; const { classroom } = await started();
+    expect(peers).toHaveLength(1); expect(peers[0].tracks).toEqual([tracks[0]]);
+    expect(bodies.find((b) => b.action === 'connect')?.sdp).toBe('v=0 offer');
+    expect(peers[0].remote).toEqual({ type: 'answer', sdp: 'v=0 answer' });
+    const errors = vi.fn(); classroom.on('error', errors);
+    await classroom.endLesson();
+    expect(peers[0].closed).toBe(true); expect(tracks[0].stop).toHaveBeenCalled();
+    expect(bodies.at(-1)).toMatchObject({ action: 'end', keepalive: true });
+    try { push({ type: 'receipt', receipt: receipt(5, 'interactive', 'milk') }); } catch { /* the stream was cancelled by the exit */ }
+    expect(errors).not.toHaveBeenCalled(); expect(classroom.getState()).toBe('idle');
+  });
+  it('treats a lost event stream as a restart from the saved checkpoint and releases the microphone', async () => {
+    const { classroom } = await started();
+    const errors: Array<{ code?: string }> = []; classroom.on('error', (e) => errors.push(e));
+    finish();
+    await vi.waitFor(() => expect(errors).toEqual([expect.objectContaining({ code: 'SESSION_EXPIRED' })]));
+    await vi.waitFor(() => expect(tracks[0].stop).toHaveBeenCalled());
+  });
+  it('applies a picture choice once and ends the call after the goodbye at completion', async () => {
+    const { classroom } = await started();
+    const results = vi.fn(); classroom.on('quiz-result', results);
+    await classroom.submitPick('q1', 'apple');
+    push({ type: 'receipt', receipt: receipt(7, 'reinforcement', 'apple', { quiz: { quizId: 'q1', ok: true, correct: true, source: 'application', next: 'advance' } }) });
+    await new Promise((r) => setTimeout(r, 20)); expect(results).toHaveBeenCalledTimes(1);
+    await classroom.completeReinforcement();
+    expect(tracks[0].enabled).toBe(false);
+    provider({ type: 'response.created', response: { id: 'bye', metadata: { kind: 'goodbye' } } });
+    provider({ type: 'output_audio_buffer.started', response_id: 'bye' }); provider({ type: 'response.done', response: { id: 'bye', status: 'completed' } });
+    provider({ type: 'output_audio_buffer.stopped', response_id: 'bye' });
+    await vi.waitFor(() => expect(tracks[0].stop).toHaveBeenCalled());
+    expect(bodies.at(-1)?.action).toBe('end');
+  });
 });
 
-it('identifies cumulative teacher subtitles by response turn without merging later replies', async () => {
-  const classroom = new RealtimeClassroom(foodCourse); await classroom.startLesson('child');
-  const subtitles: Array<{ text: string; messageId?: string }> = [];
-  classroom.on('subtitle', (event) => subtitles.push(event));
-  extra.push(() => stream([{ type: 'transcript', text: '请' }, { type: 'transcript', text: '读 fish。' }, { type: 'done' }]));
-  await classroom.repeatCard('apple');
-  extra.push(() => stream([{ type: 'transcript', text: '请读 dog。' }, { type: 'done' }]));
-  await classroom.repeatCard('milk');
-  expect(subtitles.map((event) => event.text)).toEqual(['请', '请读 fish。', '请读 dog。']);
-  expect(subtitles[0].messageId).toEqual(expect.any(String));
-  expect(subtitles[0].messageId).toBe(subtitles[1].messageId);
-  expect(subtitles[2].messageId).not.toBe(subtitles[0].messageId);
+it('treats back-to-back replies as one output buffer, as the provider reports them', async () => {
+  // Observed on gpt-realtime-2.1: one started (first id) and one stopped (last id) for two overlapping responses.
+  const classroom = new RealtimeClassroom(foodCourse); expect(await classroom.startLesson('child')).toBe(true);
+  let resolved = false; const prompt = classroom.presentQuiz('q1').then(() => { resolved = true; });
+  await vi.waitFor(() => expect(bodies.some((b) => b.action === 'present-quiz')).toBe(true));
+  provider({ type: 'response.created', response: { id: 'feedback', metadata: { kind: 'pick-feedback' } } });
+  provider({ type: 'output_audio_buffer.started', response_id: 'feedback' });
+  provider({ type: 'response.done', response: { id: 'feedback', status: 'completed' } });
+  provider({ type: 'response.created', response: { id: 'p1', metadata: { kind: 'present-quiz', quiz_id: 'q1' } } });
+  await new Promise((r) => setTimeout(r, 20)); expect(resolved).toBe(false); // prompt still generating
+  provider({ type: 'response.done', response: { id: 'p1', status: 'completed' } });
+  await new Promise((r) => setTimeout(r, 20)); expect(resolved).toBe(false); // generated but buffer still playing
+  expect(classroom.getState()).toBe('speaking');
+  provider({ type: 'output_audio_buffer.stopped', response_id: 'p1' });
+  await prompt; expect(resolved).toBe(true);
+  await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
   await classroom.endLesson();
 });

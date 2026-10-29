@@ -157,3 +157,23 @@ describe('ReinforcementFlow', () => {
     await vi.waitFor(() => expect(onAllDone).toHaveBeenCalled());
   });
 });
+
+it('reports the displayed question to a conversation classroom and advances on a model-assessed sentence', async () => {
+  const listeners = new Map<string, Set<Function>>();
+  const emit = (event: string, data: unknown) => listeners.get(event)?.forEach((fn) => fn(data));
+  const controller: any = {
+    interaction: 'conversation', presented: vi.fn(), setPaused: vi.fn(),
+    on(event: string, fn: Function) { if (!listeners.has(event)) listeners.set(event, new Set()); listeners.get(event)!.add(fn); },
+    off(event: string, fn: Function) { listeners.get(event)?.delete(fn); },
+    getState: () => 'awaiting', presentQuiz: vi.fn(async () => {}), startQuizListening: vi.fn(), stopListening: vi.fn(),
+  };
+  const sentence = foodCourse.phases.reinforcement.quizzes.find((quiz) => quiz.type === 'repeat-after-me')!;
+  const course = { ...foodCourse, phases: { ...foodCourse.phases, reinforcement: { quizzes: [sentence, foodCourse.phases.reinforcement.quizzes[0]] } } };
+  render(<ReinforcementFlow course={course} controller={controller} onAllDone={vi.fn()} />);
+  expect(controller.presented).toHaveBeenCalledWith({ kind: 'quiz', id: sentence.id });
+  expect(screen.queryByRole('button', { name: '按住空格说话' })).toBeNull();
+  await waitFor(() => expect(controller.presentQuiz).toHaveBeenCalledWith(sentence.id));
+  emit('quiz-result', { quizId: sentence.id, ok: true, correct: true, source: 'model', next: 'advance' });
+  await waitFor(() => expect(controller.presented).toHaveBeenLastCalledWith({ kind: 'quiz', id: course.phases.reinforcement.quizzes[1].id }));
+  expect(controller.startQuizListening).not.toHaveBeenCalled();
+});

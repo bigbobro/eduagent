@@ -144,3 +144,32 @@ describe('LessonMandalaV2', () => {
     expect(controller.stopListening).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('LessonMandalaV2 in Realtime conversation mode', () => {
+  const conversation = (state: LessonStateName) => ({ ...mockController(state), interaction: 'conversation', presented: vi.fn(), setPaused: vi.fn(async () => {}) });
+  it('has no push-to-talk control and keeps listening while the teacher speaks', () => {
+    const controller = conversation('speaking');
+    render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
+    expect(screen.queryByRole('button', { name: '按住空格说话' })).toBeNull();
+    expect(screen.getByRole('status', { name: '对话状态' }).textContent).toContain('想插话可以直接说');
+    fireEvent.keyDown(document, { code: 'Space' });
+    expect(controller.startListening).not.toHaveBeenCalled();
+  });
+  it('reports each rendered card after commit so speech binds to what the child saw', () => {
+    const controller = conversation('awaiting');
+    render(<LessonMandalaV2 course={foodCourse} controller={controller} initialCardId="apple" />);
+    expect(controller.presented).toHaveBeenLastCalledWith({ kind: 'card', id: 'apple' });
+    act(() => controller.handlers.get('actions')?.([{ tool: 'show_card', params: { card_id: 'milk' } }]));
+    expect(screen.getByText('牛奶')).toBeTruthy();
+    expect(controller.presented).toHaveBeenLastCalledWith({ kind: 'card', id: 'milk' });
+  });
+  it('pauses and resumes the microphone from the dock', () => {
+    const controller = conversation('awaiting');
+    render(<LessonMandalaV2 course={foodCourse} controller={controller} />);
+    fireEvent.click(screen.getByRole('button', { name: '暂停麦克风' }));
+    expect(controller.setPaused).toHaveBeenCalledWith(true);
+    act(() => controller.handlers.get('state')?.('paused'));
+    fireEvent.click(screen.getByRole('button', { name: '继续说话' }));
+    expect(controller.setPaused).toHaveBeenLastCalledWith(false);
+  });
+});

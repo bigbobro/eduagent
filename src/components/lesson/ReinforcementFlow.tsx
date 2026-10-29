@@ -29,6 +29,7 @@ export function ReinforcementFlow({ course, controller, passedQuizIds = [], onAl
   const onAllDoneRef = useRef(onAllDone);
   onAllDoneRef.current = onAllDone;
   useEffect(() => { onQuizChange?.(idx); }, [idx, onQuizChange]);
+  useEffect(() => { if (current) controller.presented?.({ kind: 'quiz', id: current.id }); }, [controller, current]);
   useEffect(() => {
     if (!current && !done.current) {
       done.current = true;

@@ -7,6 +7,7 @@ import type { Classroom, LessonStateName } from '@/lib/voice/classroom';
 import { LessonCard } from './LessonCard';
 import { PushToTalkPill } from '@/components/ui/PushToTalkPill';
 import { talkState } from './talkState';
+import { ConversationDock } from './ConversationDock';
 
 interface LessonMandalaV2Props {
   course: Course;
@@ -60,6 +61,9 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
     () => cards.find((card) => card.id === currentCardId) ?? wordCards[0],
     [cards, currentCardId, wordCards],
   );
+  // Report the card after React committed it, so conversation speech binds to what the child actually saw.
+  useEffect(() => { if (currentCard) controller.presented?.({ kind: 'card', id: currentCard.id }); }, [controller, currentCard]);
+  const conversation = controller.interaction === 'conversation';
   const canAskTeacher = state === 'awaiting';
   const cardState = state === 'listening'
     ? 'recording'
@@ -75,6 +79,8 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
 
   return <section className="p2-stage">
     <LessonCard card={currentCard} state={cardState} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher} />
-    <div className="p2-dock"><PushToTalkPill state={talkState(state)} onPress={() => controller.startListening()} onRelease={() => controller.stopListening()} /></div>
+    <div className="p2-dock">{conversation
+      ? <ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} />
+      : <PushToTalkPill state={talkState(state)} onPress={() => controller.startListening()} onRelease={() => controller.stopListening()} />}</div>
   </section>;
 }

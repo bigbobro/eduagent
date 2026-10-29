@@ -66,7 +66,7 @@
 | `src/lib/llm.ts` | OpenAI 兼容 chat/completions 调用(当前 SiliconFlow DeepSeek),`streamLLM` 异步生成 token delta + final usage;`LLM_*` / 旧 `MIMO_*` 整组 fallback 见 `config.ts` |
 | `src/lib/audio/recorder.ts` | **课堂实例拥有 mic + AudioContext + worklet**，`LessonRecorder.prewarm()` 提前就绪，同课多轮复用，旧课清理不触碰新课资源 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
-| `public/worklets/pcm-recorder.worklet.js` | 按所属 AudioContext 的16kHz（旧）／24kHz（Realtime）Float32 → Int16 量化,200ms 一包,**支持 flush 残余** |
+| `public/worklets/pcm-recorder.worklet.js` | 按所属 AudioContext 的采样率(原有课堂 16kHz)Float32 → Int16 量化,200ms 一包,**支持 flush 残余**;Realtime 自然对话不经 worklet,麦克风轨道直接进 WebRTC |
 | `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,`tone` 是课程色板键,不对应 Tailwind 颜色类 |
 | `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
@@ -763,7 +763,7 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 回应 metadata 关联；语音和模型自述转写分别记录。模拟服务覆盖重复调用、
 错误目标、取消、同会话多轮及不计答题的示范；不会将工具参数重新送旧文字命中算法裁决。
 
-另有独立 WebRTC 连通性脚本，以本地可信服务转发 SDP，长期密钥不进入浏览器。
+另有独立 WebRTC 连通性脚本，以本地可信服务转发 SDP，长期密钥不进入浏览器；`natural-spike.ts` 在接入课堂前实测了 WebRTC＋sideband、语义 VAD、打断截断与工具先行顺序（结论见下文自然对话课堂）。
 两种实验不共享工作负载，因此不可据其直接比较端到端延迟。收到 PCM、RTP
 或模型 response 完成，都不代表实体扬声器播放结束。
 
@@ -776,32 +776,41 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 
 ## 课堂视图的意图接口（2026-10-29）
 
-课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习和带来源的练习结果，发送介绍、重讲、录音、呈现题目及点击答案等意图。入口按开课前选择构造 LegacyClassroom 或 RealtimeClassroom，整堂课模式固定。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
+课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习和带来源的练习结果，发送介绍、重讲、录音、呈现题目及点击答案等意图。`interaction` 区分按住说话（原有）与自然对话（Realtime）；自然对话视图显示对话状态和暂停麦克风按钮，并在渲染后上报 `presented`。入口按开课前选择构造 LegacyClassroom 或 RealtimeClassroom，整堂课模式固定。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
 
 LegacyClassroom 拥有旧重讲提示词、句子 ASR 匹配、候选句、静态题目话术、保存后重试计数及已清词不可重看的过滤。共享组件不读取 asr-final 来判跟读，不提交模型口头表扬为成绩，也不写 raw LLM 指令。选词仍按课程客观答案确定显示；保存及下一题决定来自控制器的 quiz-result。保存失败留在同题、重试不提前累计，旧模式第三次错误仍按原规则前进。已经通过的非连续题目在续课中被跳过；无待做练习时触发完成出口。
 
-## Realtime 实验课堂（2026-10-29）
+## Realtime 自然对话课堂（2026-10-29）
 
-上文豆包 WS 与文本 agent 时序属于原有模式。新模式在 `RealtimeClassroom` 内实现同一 Classroom 接口，使用单一24kHz麦克风采集，HTTP POST `/api/realtime` 上传有界 PCM，SSE 返回音频、字幕、工具执行回执和完成事件。浏览器不拿长期密钥。Next 服务端 `realtime/classroom-session.ts` 拥有一堂课的远端连接、输入目标、串行 turn 和去重账本；`connection.ts` 使用官方 OpenAI WebSocket，不增加浏览器 WS 代理或新 SDK。选择该传输是复用已验证 PCM 播放与本地事务边界的最小方案；WebRTC 仅保留独立连通性实验。
+上文豆包 WS 与文本 agent 时序属于原有模式，原有课堂仍按住说话。Realtime 模式在 `RealtimeClassroom`（`interaction = 'conversation'`）内实现同一 Classroom 接口，开课后自然全双工：常开麦、提供方自动划轮、孩子随时插话。首版的按住说话＋HTTP 整段上传 PCM＋服务端串行 turn 已被替换，不保留为第三种子模式。
 
-直接语音作答先请求同一模型的不发声工具回应，应用以 turnId/metadata 关联真实输入，事务提交参数后把实际结果返回，再请求该模型语音。工具参数包括目标、结果、模型听到的内容、依据、独立掌握判断、retry/review/advance/skip、可选下一卡与阶段。后端仅校验结构、课程成员、当前呈现目标、有效阶段、会话归属与幂等；不再做字面命中或固定次数复核。题目演示、介绍和重讲直接发声，不计作答。选词按课程答案客观判定。未掌握目标显式进入模型指令，避免只列全课内容却漏学目标。
+传输：浏览器 `getUserMedia`（echoCancellation/noiseSuppression/autoGainControl）只取一条麦克风轨道，直接加入 `RTCPeerConnection`，老师语音由远端轨道经 `<audio>` 播放，回声由浏览器 WebRTC AEC 处理，不经 worklet／PcmPlayer。浏览器把 SDP offer 交给 `POST /api/realtime {action:'connect'}`；服务端 `realtime/call.ts` 用官方 unified interface（multipart `sdp`+`session`）调用 `/v1/realtime/calls`，长期密钥不出服务端，再以 Location 中的 `rtc_` call id 打开 sideband `wss://api.openai.com/v1/realtime?call_id=…`。connect 返回一条长期 SSE：首个事件为 SDP answer，之后是事务回执与转发的会话状态事件（speech_started/stopped、response.created/done、转写 delta、output_audio_buffer.started/stopped/cleared）。数据通道 `oai-events` 仅用于暂停时发 `output_audio_buffer.clear`。不引入新 SDK，不用 GPT-Live，模型仍为 `gpt-realtime-2.1`。
 
-应用在收到生成 done、没有待续回应、真实播放器排空后发布本轮画面／阶段／练习结果并解锁。切到新卡后单独示范该卡，再解锁孩子录音；答题反馈不介绍下一目标。没有辅助 ASR 或 OpenAI 输入转写；模型自述字幕带来源，豆包配置与既有 ASR 机制完全保留。首版没有全双工、课中换模式或自动跨服务回退。全零数字 PCM 不送提供方、不写成绩；该检查不等于实际环境静音检测。
+划轮与打断：会话配置 `semantic_vad`（eagerness `low`，给孩子留停顿）、`create_response`、`interrupt_response`，不开输入转写。WebRTC 由服务端掌握播放位置：孩子开口时取消生成中的回应，并截断已生成未播放的音频（生成中、生成完但播放未完两种情况都发 `output_audio_buffer.cleared` + `conversation.item.truncated`），模型上下文只保留实际播出的部分。前端状态由事件推导：awaiting＝麦克风开着且安静，listening＝检测到孩子说话，thinking＝等回应，speaking＝老师在播，paused＝孩子暂停麦克风。提供方把输出音频当作一个缓冲区报告：首尾相接的多个回应只有一次 started（第一个回应 id）和一次 stopped（最后一个回应 id），因此“老师在播”是缓冲区级布尔值，缓冲区排空即视为所有已生成完的回应都已播完。
 
-`realtime/teaching.ts` 经既有 SQL helper 事务写 interaction、word_performance、lesson summary 与 course_progress，提交后才替换内存。correct累计尝试和正确，close/wrong只累计尝试，off_topic/silence不累计；model mastered写实际卡片完成状态，不编造cardCorrectCount或park字段；skip保留未完成。quiz correct写passedQuizIds。反馈后续写回原交互，不重奖。同轮同目标仅第一份评估生效；保存成功而反馈失败，显式重试创建新的远端会话只补反馈。断点沿用旧序列化结构，两模式计数不互相伪造；星级仍基于真实已提交尝试比例。
+服务端 `realtime/conversation.ts`（NaturalConversation）拥有工具执行和应用发起的回应：
+- 输入绑定：浏览器在 React 提交后上报 `presented`（卡片或题目）。sideband 收到 `speech_started` 时，把该输入 item 绑定到此刻已呈现的目标，而不是服务端此后的当前卡。`record_assessment` 只能用于由该输入触发的 VAD 回应或其工具续答，目标必须等于绑定目标；同一输入只认第一份评估，重复调用返回原回执。应用发起的回应（开场、重讲、题目示范、点击反馈、告别）没有孩子输入，不能评估。
+- 工具只在 `response.done` 状态 completed 时执行；被打断（cancelled）的回应中的工具一律丢弃，不迟到改屏幕。已完成回应被打断时提供方会以 cancelled 再报一次同一 id，按 id 去重，用量只记一次。
+- 工具：`show_card`（讲解／复习／按孩子要求切卡，不计尝试）、`record_assessment`（真实作答的评估与 retry/review/advance/skip、可选下一卡／进入练习）、`start_practice`。问问题、要求慢一点／再讲、闲聊、沉默不调用评估。提示词要求工具调用是回应的第一个输出、前面不说任何开场白，收到结果后直接反馈；违反时记录 `speech before tool` 安全日志（不含内容），并用 `conversation.item.delete` 把该开场白从上下文移除，避免模型模仿。实测旧措辞下模型一旦说过“我先听一下你的发音”就会每轮照做（一次运行 11/11），加入明确的无开场白规则后两次各 13 个评估回应均为 0。未采用每轮强制先工具后语音的两段编排，因为它会让包括闲聊在内的每轮多出约 0.6–0.8 秒；成绩仍只在事务回执后生效。连续三次纯工具续答后，下一次续答禁用工具，防止无进展循环。
+- 应用回应串行化：有回应进行中、孩子正在说话或暂停时不发 `response.create`；孩子开口会丢弃排队中的续答／反馈（题目示范和告别保留），VAD 回应自行接话。抢不到会话（`conversation_already_has_active_response`）的应用请求重新排队。课堂达到 done（工具或应用操作）时只排一次告别，排在工具续答之后。
+- 每次提交后用 `session.update` 刷新指令中的阶段、屏幕、剩余目标、已掌握与已过题。
+
+回执带 `revision`，浏览器按 revision 单调应用（选词结果既在 HTTP 响应也在 SSE 中出现，只生效一次）。选词由应用按课程答案判定后，把结果交给模型简短反馈；跟读句子由模型评估。题目示范在对应 metadata（`kind=present-quiz`、`quiz_id`）的回应播完（stopped/cleared，或无音频完成）后才解锁选项，最长 30 秒兜底。重讲按钮只在安静时可用；暂停会禁用麦克风轨道、清空未播音频并取消进行中的回应，恢复后继续。课堂完成后禁用麦克风，等告别播完（最长 20 秒）再结束通话，页面停在完成页。
+
+`realtime/teaching.ts` 经既有 SQL helper 事务写 interaction、word_performance、lesson summary 与 course_progress，提交后才替换内存。correct累计尝试和正确，close/wrong只累计尝试，off_topic/silence不累计；model mastered写实际卡片完成状态，不编造cardCorrectCount或park字段；skip保留未完成。quiz correct写passedQuizIds。词卡评估要求阶段为 interactive 且是课程卡，目标与输入的对应由 NaturalConversation 保证（可能落后于刚提交的切卡）。工具续答的转写写回该输入的交互记录，不重奖。断点沿用旧序列化结构，两模式计数不互相伪造；星级仍基于真实已提交尝试比例。
 
 `SessionStore.save` 同时使同孩子同课程旧会话失效并终止其连接，进程内注册表在 Next 路由间共享。新旧模式旧提交／迟到end均不可覆盖新断点。恢复阶段为 reinforcement/done 且所有题已过而词未完时，回 interactive剩余词；进入reinforcement没有待做题时直接done。phase变更也事务落断点。done为本堂结束，课程completed仍必须全部word已掌握且quiz全过。
 
-v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真实Realtime usage存token_usage.realtime，含模型、音频／文本／缓存明细和完整性标志；每次response.create之前持久标记pending，防止进程中断后把缺失usage当成完整费用；旧LLM/TTS/ASR字段不冒记新服务用量。缺usage不按零价格显示。记录和报告标明模式及模型评估，token价格估算与账户抵扣分开。报告的Realtime掌握来自模型掌握记录，不回退旧correct>=2清卡算法。
+v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真实Realtime usage存token_usage.realtime，含模型、音频／文本／缓存明细和完整性标志。自然对话中回应由 VAD 自动创建，因此在 sideband 收到 `response.created` 时持久标记 pending，`response.done`（按 id 首次）写入 usage；通话结束时仍有未完成回应、或提供方异常断开，均标记不完整，不按零价格显示。记录和报告标明模式及模型评估，token价格估算与账户抵扣分开。
 
-`/api/realtime` 严格校验loopback Origin和孩子／会话归属；body即使无Content-Length也限制2MB，PCM限0.1–30秒。提供方握手10秒、每轮45秒、输出音频60秒、事件队列4096；浏览器网络／播放各65秒期限。远端会话最多500回应，空闲120秒失效并释放连接。所有退出先取消run，再清理录音／播放器和远端；麦克风延迟启动只可清理自身资源。错误提供同模式重试或已保存断点重新开课，不调用另一引擎。
+生命周期：退出先释放本地资源（关数据通道、`pc.close()`、停麦克风轨道、断开 audio），再发小型 keepalive `end`，最后取消 SSE。服务端 end／SSE 取消／请求 abort 都会关闭 sideband 并调用 `POST /v1/realtime/calls/{id}/hangup`；仅关 sideband 不会结束 WebRTC 媒体。实测浏览器单独关 peer 也会在约 2.6 秒内结束提供方通话，此时 hangup 返回 404（已结束）。提供方断开、sideband 出错或空闲 10 分钟：标记用量不完整、向浏览器发错误、使两个注册表失效；前端释放麦克风并提示从已保存进度重新进入课堂。迟到的提供方事件在失效后不再处理。
 
-配置：旧模式isConfigured保留；Realtime只看OPENAI_API_KEY。入门门槛任一模式就绪即可，开课时分别检查实际模式。App配置写入独立openaiApiKey/realtimeModel，空值或打码保留密钥，重启加载；模式偏好localStorage不触发重启。设置连接测试建立真实会话并session.update，不生成回应。日志仅记录动作、标识和安全错误码，不记音频、凭据或完整提供方错误正文。
+`/api/realtime` 严格校验loopback Origin和孩子／会话归属；请求体限 100KB（SDP ≤ 64KB），同一课堂只允许一次 connect。提供方 calls 请求 15 秒、sideband 握手 10 秒、hangup 10 秒。`VOICE_MOCK=true` 时 `transport='mock'`：不建 WebRTC，`realtime/mock.ts` 以与真实 sideband 相同的事件形状驱动同一 NaturalConversation，并由 `mock-speech` 动作（仅 mock 可用）模拟孩子说话；其固定判对只用于联调，不是模型质量证据。
 
-自动化入口：`realtime-lesson-smoke.ts`（显式live/mock、有界整课、隔离临时DB读回、完成标记断言）；`realtime-browser-smoke.ts`（实际fake-media录音和WebAudio、整课或真实服务最小链路、轨道释放，可在Electron开发壳运行）。合成成人音频与fake media不替代儿童真实发音或物理麦克风／扬声器体验验收。独立协议实验不等于上述课堂集成证据。
+配置：旧模式isConfigured保留；Realtime只看OPENAI_API_KEY。入门门槛任一模式就绪即可，开课时分别检查实际模式。App配置写入独立openaiApiKey/realtimeModel，空值或打码保留密钥，重启加载；模式偏好localStorage不触发重启。设置连接测试（`connection.ts`）建立真实会话并session.update，不生成回应。日志仅记录动作、标识和安全错误码，不记音频、凭据、转写或完整提供方错误正文。
 
-审查后的边界补充：音频上传使用普通fetch POST，只有小型end请求使用keepalive（Chrome对较大keepalive body会直接拒绝）。取消SSE或请求abort通过expire同时清理两个全局注册表；正常end仍写最终日志。所有quiz异步回调检查所属run。反馈失败时发布已提交进度但保持旧卡，重试反馈后才切新卡并完成其示范。skip与mastered=true的矛盾参数在执行前拒绝；提供方完成却无音频时按失败恢复，不当作老师已播放。
+自动化入口：`realtime-browser-smoke.ts`。`--mock --full` 在真实 Chrome 页面（或 `--electron-dev` 开发壳）跑整课：按请求切卡、逐词作答、选词、跟读、完成、通话结束与单轨道释放。`--live` 用真实 Realtime：麦克风轨道替换为 `MediaStreamTrackGenerator`，按需写入合成语音 PCM，验证老师说话时插话切卡且被打断卡不计尝试、真实作答保存、"慢一点"不计尝试、打断长回复；`--live --full --resume-short --db <临时库>` 先用 `realtime-seed-checkpoint.ts` 写入只剩两词和两题的断点，再跑真实短整课到 completed。自动化 Chrome 加 `--disable-audio-output`（部分主机的真实输出设备会让 AudioContext 时钟停走）。合成成人音频与 fake media 不替代儿童真实发音、实体回声或扬声器体验验收。
 
 损坏断点在Realtime start同样返回409 INVALID_COURSE_PROGRESS，创建会话之前退出并保留原记录；前端显示数据读取错误。已有完整usage但没有该模型费率时显示暂无估价，不冒充用量缺失。
 
-Realtime老师字幕事件携带当前应用turnId作为messageId。转写delta在控制器内累计，同一messageId在SubtitleLog原气泡更新；不同回复保留独立气泡。没有messageId的旧模式事件行为不变。字幕更新不代表额外模型请求或学习交互。
+Realtime老师字幕以提供方 response id 作为messageId，转写delta在控制器内累计，同一回应在SubtitleLog原气泡更新；被打断的回应在原气泡末尾加“…”。孩子侧只显示评估回执中的模型自述（标“模型听到”），未评估的话不出字幕。没有messageId的旧模式事件行为不变。

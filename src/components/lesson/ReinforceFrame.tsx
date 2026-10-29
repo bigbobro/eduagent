@@ -7,6 +7,7 @@ import { LessonCard } from './LessonCard';
 import { PushToTalkPill } from '@/components/ui/PushToTalkPill';
 import { talkState } from './talkState';
 import { useStaticPromptSpeech } from './useStaticPromptSpeech';
+import { ConversationDock } from './ConversationDock';
 
 type RepeatAfterMeQuiz = Extract<Quiz, { type: 'repeat-after-me' }>;
 
@@ -46,6 +47,10 @@ export function ReinforceFrame({ quiz, course, controller, disabled = false }: R
     setListening(false);
     controller.stopListening();
   };
+  if (controller.interaction === 'conversation') return <section className="p2-stage">
+    {card && <LessonCard card={{ ...card, english: quiz.targetText }} state={state === 'listening' ? 'recording' : heardSentence ? 'correct' : 'listening'} />}
+    <div className="p2-dock"><ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} /></div>
+  </section>;
   return <section className="p2-stage">
     {card && <LessonCard card={{ ...card, english: quiz.targetText }} state={listening ? 'recording' : heardSentence ? 'correct' : 'listening'} />}
     <div className="p2-dock"><PushToTalkPill state={canHold ? listening ? 'listening' : talkState(state) : state === 'awaiting' ? 'preparing' : talkState(state)} onPress={start} onRelease={stop} /></div>

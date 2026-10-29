@@ -162,3 +162,23 @@ incorrect-target passes, missing assessments, server-audio hash mismatches and
 nonzero inputs classified as silence. Cost is calculated only with complete
 supported usage and the documented GPT-Realtime-2.1 rates; otherwise it is null.
 It is a token-price estimate, not account billing or pronunciation certification.
+
+## Natural conversation spike (2026-10-29)
+
+`natural-spike.ts` checks the transport chosen for the natural classroom before it was wired in:
+browser WebRTC media with a server-side sideband for tools, `semantic_vad` with
+`create_response` and `interrupt_response`. The child is synthetic speech written into a
+`MediaStreamTrackGenerator` track; tools act on an in-memory card list only.
+
+```sh
+pnpm exec tsx scripts/realtime-prototype/natural-spike.ts --live --clips /tmp/natural-spike/clips --out /tmp/natural-spike/run
+pnpm exec tsx scripts/realtime-prototype/natural-spike.ts --live --peer-close --out /tmp/natural-spike/peer-close
+```
+
+Observed on `gpt-realtime-2.1` (two runs, eagerness `auto` and `low`): interruptions during generation and
+after generation-but-during-playback both produced `output_audio_buffer.cleared` plus
+`conversation.item.truncated` within milliseconds of `speech_started`; six of six tool responses were
+tool-only before speech; a request for another card produced `show_card`, a "slower" request produced no
+assessment. A completed response that is later interrupted is reported again as `cancelled` with the same
+id. Closing only the browser peer ends the call (sideband closed by the provider about 2.6 s later);
+`POST /v1/realtime/calls/{id}/hangup` ends it from the server. Adult synthetic speech only.

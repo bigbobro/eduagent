@@ -1,81 +1,82 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { RealtimeConnection } from './connection';
-const servers: WebSocketServer[] = [];
-const connections: RealtimeConnection[] = [];
+import { openAiCallFactory } from './call';
+const servers: Array<WebSocketServer | Server> = [];
 afterEach(async () => {
-  connections.splice(0).forEach((c) => c.close());
-  await Promise.all(servers.splice(0).map((server) => { server.clients.forEach((client) => client.terminate()); return new Promise<void>((resolve) => server.close(() => resolve())); }));
-});
-const usage = { input_tokens: 10, output_tokens: 10, input_token_details: { text_tokens: 10, audio_tokens: 0, cached_tokens: 0 }, output_token_details: { text_tokens: 10, audio_tokens: 0 } };
-async function fixture(change?: (socket: WebSocket, event: Record<string, any>) => boolean) {
-  const server = new WebSocketServer({ port: 0 }); servers.push(server); await once(server, 'listening');
-  let receipt = false;
-  server.on('connection', (socket) => {
-    const send = (data: object) => socket.send(JSON.stringify(data));
-    send({ type: 'session.created' });
-    socket.on('message', (raw) => {
-      const event = JSON.parse(raw.toString());
-      if (change?.(socket, event)) return;
-      if (event.type === 'session.update') send({ type: 'session.updated' });
-      if (event.type === 'input_audio_buffer.commit') send({ type: 'input_audio_buffer.committed', item_id: 'input-1' });
-      if (event.type === 'conversation.item.create') receipt = JSON.parse(event.item.output).ok;
-      if (event.type === 'response.create') {
-        const assess = event.response.output_modalities[0] === 'text';
-        const response = { id: assess ? 'assessment' : 'speech', status: 'completed', metadata: event.response.metadata, usage,
-          output: assess ? [{ type: 'function_call', name: 'record_assessment', call_id: 'call-1', arguments: '{"target_id":"apple"}' }] : [] };
-        send({ type: 'response.created', response });
-        if (!assess) {
-          expect(receipt).toBe(true);
-          send({ type: 'response.output_audio.delta', response_id: response.id, delta: Buffer.alloc(4800).toString('base64') });
-          send({ type: 'response.output_audio_transcript.delta', response_id: response.id, delta: '读得不错。' });
-        }
-        send({ type: 'response.done', response });
-      }
-    });
-  });
-  const address = server.address() as { port: number };
-  const lifetime = new AbortController();
-  const connection = new RealtimeConnection('test-key', 'test-model', lifetime.signal, `ws://127.0.0.1:${address.port}`); connections.push(connection);
-  return { connection, lifetime };
-}
-describe('official Realtime protocol adapter', () => {
-  it('executes and acknowledges the tool before requesting any speech, with correlated usage', async () => {
-    const { connection } = await fixture(); const events: string[] = [];
-    await connection.turn({ turnId: 'turn-1', instructions: 'test', pcm: Buffer.alloc(4800), signal: new AbortController().signal,
-      assess: (args) => { expect(args).toEqual({ target_id: 'apple' }); events.push('saved'); return { ok: true }; },
-      audio: () => events.push('audio'), transcript: () => events.push('transcript'), usage: (value) => { expect(value).toEqual(usage); events.push('usage'); } });
-    expect(events).toEqual(['usage', 'saved', 'audio', 'transcript', 'usage']);
-  });
-  it('does not execute a response belonging to another input turn', async () => {
-    const { connection } = await fixture((socket, event) => {
-      if (event.type !== 'response.create') return false;
-      socket.send(JSON.stringify({ type: 'response.created', response: { id: 'bad', metadata: { turnId: 'other' } } })); return true;
-    });
-    const usages: unknown[] = [];
-    await expect(connection.turn({ turnId: 'turn-1', instructions: 'test', signal: new AbortController().signal,
-      assess: () => { throw new Error('must not execute'); }, audio: () => {}, transcript: () => {}, usage: (u) => usages.push(u) })).rejects.toThrow('PROVIDER_TURN_MISMATCH');
-    expect(usages).toEqual([null]);
-  });
-  it('cancels a pending provider response, releases the connection and marks usage incomplete', async () => {
-    const abort = new AbortController();
-    const { connection } = await fixture((_socket, event) => { if (event.type === 'response.create') { abort.abort(); return true; } return false; });
-    const usages: unknown[] = [];
-    await expect(connection.turn({ turnId: 'turn-1', instructions: 'test', signal: abort.signal,
-      audio: () => {}, transcript: () => {}, usage: (u) => usages.push(u) })).rejects.toThrow();
-    expect(usages).toEqual([null]);
-  });
+  await Promise.all(servers.splice(0).map((server) => {
+    if (server instanceof WebSocketServer) server.clients.forEach((client) => client.terminate());
+    else server.closeAllConnections();
+    return new Promise<void>((resolve) => server.close(() => resolve()));
+  }));
 });
 
-it('fails a completed audio response with no audio instead of unlocking a silent teacher', async () => {
-  const { connection } = await fixture((socket, event) => {
-    if (event.type !== 'response.create' || event.response.output_modalities[0] !== 'audio') return false;
-    const response = { id: 'empty-speech', status: 'completed', metadata: event.response.metadata, usage, output: [] };
-    socket.send(JSON.stringify({ type: 'response.created', response }));
-    socket.send(JSON.stringify({ type: 'response.done', response })); return true;
+it('settings probe configures a real session without requesting a response', async () => {
+  const server = new WebSocketServer({ port: 0 }); servers.push(server); await once(server, 'listening');
+  const seen: string[] = [];
+  server.on('connection', (socket) => {
+    socket.send(JSON.stringify({ type: 'session.created' }));
+    socket.on('message', (raw) => { const event = JSON.parse(raw.toString()); seen.push(event.type); if (event.type === 'session.update') socket.send(JSON.stringify({ type: 'session.updated' })); });
   });
-  await expect(connection.turn({ turnId: 'turn-1', instructions: 'test', signal: new AbortController().signal,
-    assess: () => ({ ok: true }), audio: () => { throw new Error('no audio expected'); }, transcript: () => {}, usage: () => {} })).rejects.toThrow('PROVIDER_MISSING_AUDIO');
+  const connection = new RealtimeConnection('test-key', 'model', new AbortController().signal, `ws://127.0.0.1:${(server.address() as { port: number }).port}`);
+  await connection.probe(AbortSignal.timeout(2000)); connection.close();
+  expect(seen).toEqual(['session.update']);
+});
+
+async function provider() {
+  const calls: Array<{ url: string; auth?: string; body: string }> = [];
+  const http = createServer(async (req, res) => {
+    let body = ''; for await (const chunk of req) body += String(chunk);
+    calls.push({ url: req.url ?? '', auth: req.headers.authorization, body });
+    if (req.url === '/v1/realtime/calls') { res.writeHead(201, { Location: '/v1/realtime/calls/rtc_test123', 'Content-Type': 'application/sdp' }); res.end('v=0 answer'); return; }
+    res.writeHead(200); res.end();
+  });
+  servers.push(http); http.listen(0, '127.0.0.1'); await once(http, 'listening');
+  const sideband = new WebSocketServer({ port: 0 }); servers.push(sideband); await once(sideband, 'listening');
+  const sockets: Array<{ socket: WebSocket; url: string; auth?: string; received: object[] }> = [];
+  sideband.on('connection', (socket, req) => {
+    const entry = { socket, url: req.url ?? '', auth: req.headers.authorization, received: [] as object[] };
+    sockets.push(entry); socket.on('message', (raw) => entry.received.push(JSON.parse(raw.toString())));
+  });
+  const factory = openAiCallFactory('server-key', `http://127.0.0.1:${(http.address() as { port: number }).port}`, `ws://127.0.0.1:${(sideband.address() as { port: number }).port}`);
+  return { calls, sockets, factory };
+}
+
+describe('WebRTC unified call with server sideband', () => {
+  it('posts the offer with server-side session, attaches the sideband to the call and hangs up on close', async () => {
+    const { calls, sockets, factory } = await provider();
+    const events: string[] = []; const closes: string[] = [];
+    const { answer, call } = await factory({ sdp: 'v=0 offer', session: { type: 'realtime', instructions: 'teach' }, signal: new AbortController().signal,
+      onEvent: (event) => events.push(event.type), onClose: (code) => closes.push(code) });
+    expect(answer).toBe('v=0 answer');
+    expect(calls[0].auth).toBe('Bearer server-key');
+    expect(calls[0].body).toContain('name="sdp"'); expect(calls[0].body).toContain('v=0 offer'); expect(calls[0].body).toContain('"instructions":"teach"');
+    call.send({ type: 'session.update' }); // queued until the sideband is open
+    await expect.poll(() => sockets.length).toBe(1);
+    expect(sockets[0].url).toBe('/v1/realtime?call_id=rtc_test123'); expect(sockets[0].auth).toBe('Bearer server-key');
+    await expect.poll(() => sockets[0].received).toEqual([{ type: 'session.update' }]);
+    sockets[0].socket.send(JSON.stringify({ type: 'input_audio_buffer.speech_started', item_id: 'i1' }));
+    await expect.poll(() => events).toEqual(['input_audio_buffer.speech_started']);
+    call.close(); call.close();
+    // Closing the sideband alone would leave WebRTC media running; the call itself is hung up once.
+    await expect.poll(() => calls.filter((c) => c.url === '/v1/realtime/calls/rtc_test123/hangup').length).toBe(1);
+    expect(closes).toEqual([]);
+  });
+  it('reports a provider-side sideband loss and still hangs up the call', async () => {
+    const { calls, sockets, factory } = await provider();
+    const closes: string[] = [];
+    await factory({ sdp: 'v=0 offer', session: {}, signal: new AbortController().signal, onEvent: () => {}, onClose: (code) => closes.push(code) });
+    await expect.poll(() => sockets.length).toBe(1);
+    sockets[0].socket.close();
+    await expect.poll(() => closes).toEqual(['PROVIDER_DISCONNECTED']);
+    await expect.poll(() => calls.some((c) => c.url.endsWith('/hangup'))).toBe(true);
+  });
+  it('maps rejected calls to settings errors without opening a sideband', async () => {
+    const http = createServer((_req, res) => { res.writeHead(401); res.end('{}'); }); servers.push(http); http.listen(0, '127.0.0.1'); await once(http, 'listening');
+    const factory = openAiCallFactory('bad-key', `http://127.0.0.1:${(http.address() as { port: number }).port}`, 'ws://127.0.0.1:1');
+    await expect(factory({ sdp: 'v=0', session: {}, signal: new AbortController().signal, onEvent: () => {}, onClose: () => {} })).rejects.toThrow('REALTIME_AUTH_FAILED');
+  });
 });

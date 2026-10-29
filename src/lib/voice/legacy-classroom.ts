@@ -9,6 +9,7 @@ import { buildPickWordPromptText, buildRepeatAfterMePrompt, buildRepeatAfterMeSc
 
 /** Adapts the existing pipeline and owns its historical teaching policies. */
 export class LegacyClassroom implements Classroom {
+  readonly interaction = 'push-to-talk' as const;
   private phased: PhasedLessonController;
   private listeners = new Map<keyof ClassroomEvents, Set<(data: never) => void>>();
   private cleared = new Set<string>();

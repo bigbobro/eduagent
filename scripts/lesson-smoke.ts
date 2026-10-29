@@ -246,7 +246,8 @@ async function runPushToTalkSmoke(): Promise<InteractionResult[]> {
     browser = await chromium.launch({
       executablePath: CHROME_PATH,
       headless: true,
-      args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+      // A timer-driven fake audio sink: some hosts' real output device never advances automated AudioContext clocks.
+      args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--disable-audio-output'],
     });
     const context = await browser.newContext({ permissions: ['microphone'] });
     const page = await context.newPage();

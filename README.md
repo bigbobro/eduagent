@@ -41,18 +41,20 @@ Records: practiced words, grouped by course.
 源码版本可在开课前选择模式，整堂课固定，不会在阶段间切换：
 
 - **原有课堂（默认）**：豆包 ASR → 已有文本教学模型与规则 → 豆包 TTS，原配置保留。
-- **Realtime 实验课堂**：直接语音 → OpenAI Realtime 的理解和评估 → 应用保存／执行 → 同一模型语音反馈。只需 OpenAI，未启用额外输入转写；字幕的「模型听到」是模型自述。
+- **Realtime 自然对话课堂**：开课后麦克风常开，直接说话，老师自动接话，老师说话时也可以随时插话（例如“猫那个再讲一下”会切到 cat 卡讲解）。语音经 WebRTC 直达 OpenAI Realtime，由同一模型理解、评估和回应；应用在服务端执行切卡和保存，并按画面上实际显示的卡判定作答。只需 OpenAI，未启用额外输入转写；字幕的「模型听到」是模型自述。
 
 桌面设置中新增 Realtime 分区，凭据单独保存、打码并可测试真实会话连接。开发模式在 `.env.local` 配置 `OPENAI_API_KEY`，可选 `OPENAI_REALTIME_MODEL=gpt-realtime-2.1` 后重启。模式偏好保存在浏览器本地，选择模式不重启服务。
 
-两个模式都保持按住说话，老师发声时不能录音。退出后重新选择模式可续上同一孩子、同一课程的已保存进度。跳过不算掌握；没有学完的目标会在续课时保留。记录里的星级仍按已提交正确次数／尝试次数计算，Realtime 的判断不是专业发音评分。用量显示 token 价格估算，credits 抵扣和现金费用以服务商账单为准。
+原有课堂保持按住说话。Realtime 课堂没有按键，界面显示“正在听／听你说／麻吉在说话”等状态，可随时暂停麦克风；问问题、要求慢一点或再讲一遍不算答错。退出后重新选择模式可续上同一孩子、同一课程的已保存进度。跳过不算掌握；没有学完的目标会在续课时保留。记录里的星级仍按已提交正确次数／尝试次数计算，Realtime 的判断不是专业发音评分。用量显示 token 价格估算，credits 抵扣和现金费用以服务商账单为准。
 
 离线回归使用 `VOICE_MOCK=true`；真实付费验证须显式运行：
 
 ```sh
-# Against your own isolated localhost test server and temporary database
-pnpm exec tsx scripts/realtime-lesson-smoke.ts --live --full --base http://localhost:3018 --database /tmp/eduagent-realtime-live.sqlite
+# Against your own isolated localhost test server (VOICE_MOCK=true, temporary DATABASE_PATH)
 pnpm exec tsx scripts/realtime-browser-smoke.ts --mock --full --base http://localhost:3018
+# Real Realtime, server started with VOICE_MOCK=false and a temporary DATABASE_PATH
+pnpm exec tsx scripts/realtime-browser-smoke.ts --live --base http://localhost:3019
+pnpm exec tsx scripts/realtime-browser-smoke.ts --live --full --resume-short --db /tmp/eduagent-live.db --base http://localhost:3019
 ```
 
 命令会创建测试孩子，只用于你自行启动的隔离测试服务器。独立协议与音频诊断见 [Realtime experiment](docs/realtime-prototype.md)。本节描述源码能力，不表示已发布新的 Mac 安装包。

@@ -1,8 +1,10 @@
 import type { Course, PhaseName } from '@/types/course';
 import type { ToolAction } from '@/types/tools';
 import type { LessonProgressSnapshot, ResumeInfo } from '@/lib/lesson-protocol';
+import type { PresentedTarget } from '@/lib/realtime-protocol';
 
-export type LessonStateName = 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending';
+/** In conversation mode: awaiting = microphone open and quiet, listening = child speech detected, paused = child paused the microphone. */
+export type LessonStateName = 'idle' | 'greeting' | 'awaiting' | 'listening' | 'thinking' | 'speaking' | 'quiz-speaking' | 'ending' | 'paused';
 export interface QuizResult {
   quizId: string;
   ok: boolean;
@@ -28,6 +30,8 @@ export interface ClassroomEvents {
 
 /** Teaching intentions shared by classroom views. Provider prompts and judging stay inside each mode. */
 export interface Classroom {
+  /** push-to-talk: views drive capture with start/stopListening. conversation: the microphone stays open for the whole lesson. */
+  readonly interaction: 'push-to-talk' | 'conversation';
   on<K extends keyof ClassroomEvents>(event: K, listener: (data: ClassroomEvents[K]) => void): void;
   off<K extends keyof ClassroomEvents>(event: K, listener: (data: ClassroomEvents[K]) => void): void;
   getState(): LessonStateName;
@@ -45,6 +49,9 @@ export interface Classroom {
   startQuizListening(quizId: string): Promise<void>;
   submitPick(quizId: string, picked: string): Promise<void>;
   retryQuiz(quizId: string): Promise<void>;
+  /** Conversation mode: what the view actually rendered, reported after commit so speech binds to the visible target. */
+  presented?(target: PresentedTarget): void;
+  setPaused?(paused: boolean): Promise<void>;
 }
 
 export function findQuiz(course: Course, quizId: string) {

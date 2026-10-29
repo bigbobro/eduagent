@@ -170,8 +170,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
         {!started ? <label>课堂模式 <select aria-label="课堂模式" value={mode} onChange={(event) => {
           const next = event.target.value === 'realtime' ? 'realtime' : 'legacy';
           setMode(next); try { localStorage.setItem('eduagent.classroomMode', next); } catch {}
-        }}><option value="legacy">原有课堂 · 豆包语音</option><option value="realtime">Realtime 实验课堂 · OpenAI</option></select></label>
-          : <span>{mode === 'realtime' ? 'Realtime 实验课堂 · OpenAI' : '原有课堂 · 豆包语音'}</span>}
+        }}><option value="legacy">原有课堂 · 豆包语音</option><option value="realtime">Realtime 自然对话课堂 · OpenAI</option></select></label>
+          : <span>{mode === 'realtime' ? 'Realtime 自然对话课堂 · OpenAI（直接说话，可随时插话）' : '原有课堂 · 豆包语音'}</span>}
       </div>
       <div className={`p2-content ${started && phase !== 'intro' && phase !== 'done' ? 'p2-lesson' : ''}`}>
         {transitionRetry && (
