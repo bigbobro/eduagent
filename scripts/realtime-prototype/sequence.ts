@@ -3,6 +3,7 @@ import { config } from 'dotenv';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { runAudioTurn, type AudioInput, type AudioTurnResult } from './session';
+import { applyModelDecision } from './child';
 
 config({ path: '.env.local', quiet: true });
 async function main() {
@@ -22,10 +23,7 @@ async function main() {
   const nextInput = (previous: AudioTurnResult, completedTurns: number): AudioInput | undefined => {
     const assessment = previous.assessments[0];
     if (!assessment) throw new Error('Sequence cannot advance without an assessment');
-    if (assessment.mastered) mastered.add(assessment.card_id);
-    if (assessment.next_action === 'skip') skipped.add(assessment.card_id);
-    const target = assessment.mastered || assessment.next_action === 'advance' || assessment.next_action === 'skip'
-      ? goals.find((g) => !mastered.has(g) && !skipped.has(g)) : assessment.card_id;
+    const target = applyModelDecision({ goals, mastered, skipped }, assessment);
     driver.push({ completedTurns, assessed: assessment.card_id, requested: assessment.next_action, nextTarget: target });
     if (!target) return undefined;
     if (completedTurns >= 5) return undefined; // bounded experiment, report unfinished goals rather than loop forever
