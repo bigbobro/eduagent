@@ -38,7 +38,6 @@ describe('settings store', () => {
     'EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER',
     'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
     'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'DOUBAO_TTS_DEFAULT_SPEAKER',
-    'MIMO_API_KEY',
   ];
   const saved: Record<string, string | undefined> = {};
 
@@ -156,7 +155,6 @@ describe('settings store', () => {
     }));
     process.env.EDUAGENT_APP = '1';
     process.env.EDUAGENT_SETTINGS_PATH = path;
-    process.env.MIMO_API_KEY = 'inherited-from-shell';
     applySettingsToEnv();
     const saved = JSON.parse(readFileSync(path, 'utf8'));
     expect(saved.llmApiKey).toBeUndefined();
@@ -171,7 +169,6 @@ describe('settings store', () => {
     expect(process.env.DOUBAO_API_KEY).toBeUndefined();
     expect(process.env.DOUBAO_APP_ID).toBe(FAKE.doubaoAppId);
     expect(process.env.DOUBAO_ASR_RESOURCE_ID).toBe('volc.seedasr.sauc.duration');
-    expect(process.env.MIMO_API_KEY).toBeUndefined();
   });
 
   it('applySettingsToEnv uses the active channel, not a sibling', () => {

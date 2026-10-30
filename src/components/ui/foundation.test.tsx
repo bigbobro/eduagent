@@ -2,7 +2,6 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Button } from './Button';
-import { GlassPanel } from './GlassPanel';
 import { Tag } from './Tag';
 import { ProgressBar } from './ProgressBar';
 import { Banner } from './Banner';
@@ -12,7 +11,7 @@ import { PushToTalkPill, type PushToTalkState } from './PushToTalkPill';
 describe('foundation', () => {
   it('keeps action labels, disabled behavior, status and progress accessible', () => {
     const click = vi.fn();
-    render(<GlassPanel><Button onClick={click}>开始</Button><Button disabled onClick={click}>保存</Button><Tag tone="mint">已完成</Tag><ProgressBar label="课程进度" value={130} /><Banner action={<Button size="sm">重试</Button>}>连接失败</Banner><Skeleton /><EmptyState title="还没有记录" action={<Button>去上课</Button>}>上课后会出现在这里</EmptyState></GlassPanel>);
+    render(<div><Button onClick={click}>开始</Button><Button disabled onClick={click}>保存</Button><Tag tone="mint">已完成</Tag><ProgressBar label="课程进度" value={130} /><Banner action={<Button size="sm">重试</Button>}>连接失败</Banner><Skeleton /><EmptyState title="还没有记录" action={<Button>去上课</Button>}>上课后会出现在这里</EmptyState></div>);
     fireEvent.click(screen.getByRole('button', { name: '开始' }));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(click).toHaveBeenCalledTimes(1);

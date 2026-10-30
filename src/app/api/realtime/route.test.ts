@@ -6,7 +6,7 @@ import { sessionStore } from '@/lib/agent/session-store';
 beforeEach(() => {
   vi.stubEnv('VOICE_MOCK', 'false'); vi.stubEnv('PORT', '3000');
   vi.stubEnv('OPENAI_API_KEY', 'fake-openai-key-for-settings-test');
-  for (const key of ['LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY']) vi.stubEnv(key, '');
+  for (const key of ['LLM_API_KEY', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY']) vi.stubEnv(key, '');
   resetConfig();
 });
 afterEach(() => { realtimeClassrooms.forEach((classroom) => { classroom.session.lifetime.abort(); sessionStore.delete(classroom.session.id); }); realtimeClassrooms.clear(); vi.unstubAllEnvs(); resetConfig(); });

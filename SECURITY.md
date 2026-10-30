@@ -21,9 +21,9 @@ Never commit real provider credentials or local environment files.
 不要提交真实 provider 凭据或本地环境文件。
 
 - Keep `.env.local` local only.
-- Keep `MIMO_API_KEY`, `DOUBAO_APP_ID`, `DOUBAO_ACCESS_KEY`, and related
+- Keep `LLM_API_KEY`, `DOUBAO_APP_ID`, `DOUBAO_ACCESS_KEY`, and related
   provider credentials server-side.
-- Do not create `NEXT_PUBLIC_*` variables for MiMo or Doubao secrets.
+- Do not create `NEXT_PUBLIC_*` variables for LLM or Doubao secrets.
 - Do not paste secrets into source files, docs, issues, logs, commit messages,
   pull request descriptions, screenshots, or lesson reports.
 - If a real key is exposed, rotate it immediately at the provider console before

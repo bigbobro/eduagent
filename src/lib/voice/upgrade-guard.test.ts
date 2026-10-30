@@ -15,7 +15,6 @@ describe('guardUpgrade', () => {
   beforeEach(async () => {
     delete process.env.VOICE_MOCK;
     delete process.env.LLM_API_KEY;
-    delete process.env.MIMO_API_KEY;
     server = createServer();
     server.on('upgrade', (req, socket, head) => {
       if (guardUpgrade(req, socket as Socket, port) !== 'ok') return;

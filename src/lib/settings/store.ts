@@ -42,10 +42,6 @@ const LLM_ENV_NAMES = [
   'LLM_BASE_URL',
   'LLM_MODEL',
   'LLM_PROVIDER',
-  'MIMO_API_KEY',
-  'MIMO_BASE_URL',
-  'MIMO_API_BASE',
-  'MIMO_MODEL',
 ];
 
 export function defaultSettings(): SettingsValues {

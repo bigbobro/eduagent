@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/chat/route';
 
 describe('/api/chat when not configured', () => {
-  const keys = ['VOICE_MOCK', 'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY'];
+  const keys = ['VOICE_MOCK', 'LLM_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY'];
   const saved: Record<string, string | undefined> = {};
   beforeEach(() => { for (const k of keys) { saved[k] = process.env[k]; delete process.env[k]; } });
   afterEach(() => { for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]!; } });

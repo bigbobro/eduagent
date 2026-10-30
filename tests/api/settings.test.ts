@@ -51,7 +51,7 @@ function post(handler: typeof POST, body: unknown, origin: string | null = ORIGI
 describe('/api/settings', () => {
   let dir: string;
   let settingsPath: string;
-  const envKeys = ['EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'PORT', 'VOICE_MOCK', 'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY', 'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID'];
+  const envKeys = ['EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'PORT', 'VOICE_MOCK', 'LLM_API_KEY', 'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY', 'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID'];
   const saved: Record<string, string | undefined> = {};
 
   beforeEach(() => {

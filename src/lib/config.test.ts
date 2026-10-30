@@ -3,25 +3,21 @@ import { getConfig, isConfigured, resetConfig } from './config';
 
 // Minimum env for getConfig() to pass validation (everything else has defaults).
 const REQUIRED: Record<string, string> = {
-  MIMO_API_KEY: 'legacy-key',
+  LLM_API_KEY: 'test-key',
   DOUBAO_APP_ID: 'app',
   DOUBAO_ACCESS_KEY: 'access',
   DOUBAO_ASR_RESOURCE_ID: 'asr',
   DOUBAO_TTS_RESOURCE_ID: 'tts',
 };
 
-describe('config: LLM credential group resolution', () => {
+describe('config: LLM credential resolution', () => {
   const KEYS = [
     ...Object.keys(REQUIRED),
-    'LLM_API_KEY',
     'LLM_BASE_URL',
     'DOUBAO_AUTH_MODE',
     'DOUBAO_API_KEY',
     'LLM_MODEL',
     'LLM_PROVIDER',
-    'MIMO_BASE_URL',
-    'MIMO_API_BASE',
-    'MIMO_MODEL',
   ];
   const saved: Record<string, string | undefined> = {};
 
@@ -71,41 +67,11 @@ describe('config: LLM credential group resolution', () => {
     expect(c.llmBaseUrl).toBe('https://api.siliconflow.cn/v1');
     expect(c.llmModel).toBe('deepseek-ai/DeepSeek-V3.2');
   });
-
-  it('falls back to the whole MIMO_* group when LLM_API_KEY is empty (no cross-group mixing)', () => {
-    process.env.LLM_API_KEY = '';
-    process.env.LLM_BASE_URL = 'https://provider.test/v1'; // must be ignored: group fallback is atomic
-    process.env.MIMO_BASE_URL = 'https://legacy.test/v1';
-    process.env.MIMO_MODEL = 'legacy-model';
-    resetConfig();
-    const c = getConfig();
-    expect(c.llmApiKey).toBe('legacy-key');
-    expect(c.llmBaseUrl).toBe('https://legacy.test/v1');
-    expect(c.llmModel).toBe('legacy-model');
-  });
-
-  it('accepts MIMO_API_BASE as a backward-compat alias in the legacy group', () => {
-    process.env.MIMO_API_BASE = 'https://alias.test/v1';
-    resetConfig();
-    expect(getConfig().llmBaseUrl).toBe('https://alias.test/v1');
-  });
-
-  it('prefers MIMO_BASE_URL over the MIMO_API_BASE alias in the legacy group', () => {
-    process.env.MIMO_BASE_URL = 'https://primary.test/v1';
-    process.env.MIMO_API_BASE = 'https://alias.test/v1';
-    resetConfig();
-    expect(getConfig().llmBaseUrl).toBe('https://primary.test/v1');
-  });
-
-  it('legacy group falls back to the MiMo default host when no base var is set', () => {
-    resetConfig();
-    expect(getConfig().llmBaseUrl).toBe('https://token-plan-cn.xiaomimimo.com/v1');
-  });
 });
 
 describe('config: 未配置 / 已配置 / mock 三种状态', () => {
   const KEYS = [
-    'LLM_API_KEY', 'MIMO_API_KEY', 'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
+    'LLM_API_KEY', 'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
     'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'VOICE_MOCK',
   ];
   const saved: Record<string, string | undefined> = {};
