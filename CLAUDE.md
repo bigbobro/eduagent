@@ -4,7 +4,10 @@
 
 ## 项目是什么
 
-儿童英语教学 Agent,多模态:豆包流式 ASR / TTS + OpenAI 兼容 LLM 大脑(当前 SiliconFlow DeepSeek-V3.2,之前为 DeepSeek-V4-Flash、小米 MiMo)+ 浏览器画布交互。
+儿童英语教学 Agent,交付形态是 Mac Electron 桌面 App(开发时用浏览器访问本地 server)。两种课堂模式:
+
+- **原有课堂(按住说话)**:豆包流式 ASR / TTS + OpenAI 兼容 LLM。LLM 在 App 里按设置页的渠道(SiliconFlow / 火山方舟 / DeepSeek / 自定义)取,开发时读 `.env.local` 的 `LLM_*`。
+- **Realtime 课堂(自然对话)**:OpenAI `gpt-realtime-2.1`,浏览器经 WebRTC 常开麦,服务端 sideband 执行教学工具。见 architecture.md §16–§18。
 
 - **主入口**:`README.md`(项目介绍 + 怎么跑)
 - **当前架构事实文档**:`docs/architecture.md`(living doc,master 上系统的现状)
@@ -23,6 +26,7 @@
 - 改了 `LessonController` 状态机(新增/移除状态、转移条件)
 - 改了关键算法(SpeechExtractor 状态机、PCM 节奏、AudioContext 生命周期)
 - 改了性能上的关键决策(prewarm、buffer、timeout 阈值)
+- 改了 Realtime 课堂的会话配置、工具、状态同步或通话生命周期(`src/lib/realtime/**`、`src/lib/voice/realtime-classroom.ts`、`src/app/api/realtime/**`)
 
 ### 不能只改代码
 
@@ -54,9 +58,9 @@
 ## 关键约束(继承自 spec)
 
 - **密钥不出服务端。** 任何 `NEXT_PUBLIC_*` 前缀的豆包/LLM 密钥都是 PR review 一票否决。
-- **Push-to-talk 单一交互。** 不做撤回、不区分长短按。当前版本不支持打断(老师说话时空格忽略)。
+- **原有课堂 push-to-talk 单一交互。** 不做撤回、不区分长短按,不支持打断(老师说话时空格忽略)。Realtime 课堂是常开麦自然对话,支持插话打断,不加按键。
 - **TTS 长连复用 / ASR 按轮建连。** 详见 architecture.md。
-- **VOICE_MOCK=true** 跳过豆包/LLM,本地无网络可跑全链路(为了 CI 与离线开发)。
+- **VOICE_MOCK=true** 跳过豆包/LLM/Realtime,本地无网络可跑全链路(为了 CI 与离线开发)。
 
 ## 课程内容生成规则
 
@@ -67,7 +71,7 @@
 **任何文档(README、spec、plan、CLAUDE.md、architecture.md、TODO、benchmarks、git commit message、PR description)中,严禁出现真实凭据值。**
 
 包括但不限于:
-- `LLM_API_KEY`(SiliconFlow `sk-...` 开头)、旧的 `MIMO_API_KEY`(`tp-...` 开头)、`DOUBAO_ACCESS_KEY`、`DOUBAO_APP_ID`
+- `LLM_API_KEY`(各渠道的 key,如 SiliconFlow `sk-...`)、`OPENAI_API_KEY`、`DOUBAO_API_KEY`、`DOUBAO_ACCESS_KEY`、`DOUBAO_APP_ID`;已作废的旧 `MIMO_API_KEY`(`tp-...` 开头)同样不能写
 - 数据库连接串里的密码段
 - OAuth client secret、JWT signing key
 
@@ -136,6 +140,8 @@ pnpm run dev           # tsx watch server.ts(自定义 server,支持 WS upgrade)
 - `src/lib/agent/**`(normalize / memory / session / prompt / orchestrator / assessment)
 - `src/lib/voice/**`(lesson-controller / phased-lesson-controller / asr-proxy / tts-proxy / doubao-codec / speech-extractor)
 - `src/app/api/chat/route.ts`
+
+Realtime 课堂代码(`src/lib/realtime/**`、`src/lib/voice/realtime-classroom.ts`、`src/app/api/realtime/**`)改完必须跑 mock 整课:在隔离的 `VOICE_MOCK=true` server(临时 `DATABASE_PATH`)上执行 `pnpm exec tsx scripts/realtime-browser-smoke.ts --mock --full --base http://localhost:<port>`,通过才交付。`--live` 会花真实 API 费用,只在用户同意时跑。
 
 **例外**(小修不强制,可手动触发):
 - UI / 课程数据 / 文档 / dev panel / log 日志改动

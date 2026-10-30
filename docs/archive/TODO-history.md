@@ -1,0 +1,224 @@
+# TODO 历史快照(2026-10-30 归档)
+
+> 2026-10-30 整理时把当时的 `docs/TODO.md` 原样搬到这里,内容未改写。其中的状态、行号和优先级停留在各自记录的日期,不代表现状。现行待办见 [`docs/TODO.md`](../TODO.md)。
+
+---
+
+# EduAgent TODO
+
+> 2026-05-30 更新版(**以下状态已过时,保留作历史快照**)。05-26 已补 Prompt input quantification 和 Eval v1;05-27/28 已完成 Prompt Slimming v1;05-28 已把 `pnpm lint` 配成非交互式质量门。下一步不再凭感觉排工程项,先跑真实课 + Eval,再决定继续压 prompt/延迟、上 Hybrid、还是补 session/autonomy。
+> 历史完成项参考 `docs/architecture.md` §9「文件演进历史」,本文件不复述。
+
+## 下一步:真实课 + Eval 决策(2026-05-30 状态,已过时)
+
+> 下列检查清单与决策树是 2026-05-30 时点的记录,之后 session persistence(2026-07-20)、CI 门禁、模型切换等都已落地,不要按它排当前优先级。现行进度见下方 backlog 与「已完成记录」。
+
+最新代码已通过自动 smoke / prompt slimming / Eval 数据门,但还需要再跑 1 节真实课确认人工路径:
+- 课后跑 `pnpm tsx scripts/lesson-report-data.ts <session-id>`,先看 `eval.sessionHealth` 和 `eval.agentBehavior`,再看 `eval.teachingLoop` / `eval.costContext`
+- 继续确认 Space / 按钮 push-to-talk、切卡 speech/show_card、reinforcement 点击解锁、TTS 有声这些 05-23 交互没有回归
+- 重点观察真实体验:老师话术是否自然、首音频延迟是否仍明显、孩子静默时是否冷场、内容是否开始重复
+- 记录 avg input / largest prompt bucket,验证 Prompt Slimming v1 在真实课里是否足够
+
+结果决定:
+- 如果 Eval 先报 session/agent 行为风险 → 先修行为正确性,不要先优化成本
+- 如果只剩 token / 延迟偏高 → 启动 Prompt Slimming v2 或模型/首句延迟优化
+- 如果老师话术质量仍是主要瓶颈 → 进入 Hybrid 预渲染重构
+- 如果 session resume / 进度选择是主要痛点 → 启动 SQLite session persistence
+- 如果孩子静默冷场是主要痛点 → 启动 idle / proactive policy
+
+---
+
+## 项目体检 backlog(2026-06-15 全量多 agent review)
+
+> 一次 10 维度 + 对抗验证的全量 review,确认 50 条(12×P1 / 23×P2 / 15×P3),剔除 3 条误报。
+> **§1 闭环可靠性簇已完成**(见下方「已完成记录」2026-06-15)。其余按性价比排序如下,
+> 每项带 `file:line` + effort,下一次开任务可直接挑一条 brainstorm。基线当时:typecheck/lint
+> clean,294 测试,40 门课。**单用户本地阶段**:多数 P2/P3 不需架构重构,按痛点挑。
+
+### P1 候选(高性价比,建议优先)
+
+> **✅ 全部完成(2026-06-16)** —— ① 配置 + ② WS Origin 合并见 commit `aa3f443`;③ 首音频占位音见下方完成记录。下列保留作背景。
+
+1. ✅ **MiMo base-URL 配置陷阱 + DATABASE_PATH 双默认** — [config.ts:48](../src/lib/config.ts#L48) · low
+   - `config.ts:48` 读 `MIMO_API_BASE`,但 `.env.example`/`.env.local`/`init.ts`/两个测试全用 `MIMO_BASE_URL` → **env override 被静默忽略**,永远走 config.ts:11 硬编码默认。
+   - 两处域名拼写不一致:config 默认 `xiaomim**om**o.com` vs env `xiaomim**im**o.com`。运行时用的是 config 默认且能跑 → 那个才是对的。**陷阱:只改变量名让它读 `MIMO_BASE_URL` 会切到 `.env` 的另一个拼写,可能把好的跑挂——必须同时统一域名。**
+   - 先确认哪个域名真能解析 → config 读 `MIMO_BASE_URL`(`MIMO_API_BASE` 留 alias)+ 三处域名统一 + 启动日志打 resolved URL。顺带修 `DATABASE_PATH` `./data` vs `./db` 双默认。
+
+2. ✅ **WS upgrade 无 Origin 校验 + ws 补丁** — [server.ts:36](../server.ts#L36) · low
+   - WebSocket 不受同源策略约束:dev server 跑着时任何打开的网页都能连 `ws://localhost:3000/api/voice/{asr,tts}` 用服务端豆包凭据烧额度。~5 行 Origin 白名单。
+   - 顺带 `pnpm update ws`(8.20.0→8.20.1,内存泄露 CVE,在语音数据路径)。可选:ASR/TTS query 参数加长度上限。
+
+3. ✅ **首音频延迟**(THE 核心指标) — [session.ts:113](../src/lib/agent/session.ts#L113) · 低成本占位音已停用
+   - thinking 占位音 filler(option 3)已停用:实测会在 ASR/LLM/TTS 正常运行时插入「嗯,让老师看看哦~」,听感像系统没检测到孩子发音。
+   - 未做:句子流式提前喂 TTS(高风险,park);ASR `end_window_size` 经核实对 finish-driven 流程是 no-op,未改(见 voice-benchmarks.md)。
+   - **真正减首音频延迟**的下一步仍是「换更快 LLM 模型 / prompt 首句策略 / Hybrid 预渲染」——见远期 backlog。
+
+### P2(稳健性 / 数据正确性 / 工程化)
+
+4. ✅ **关闭页面课堂不结算**(2026-06-25) — [session.ts:47](../src/lib/agent/session.ts#L47) · low — `finishLessonLog` 只在 `action:'end'` 触发,关 tab/刷新/崩溃 → `end_time` 永远 NULL、时长统计为 0。**已修**:新增 `touchLessonLog()`,在 `commitTurn`(消息轮)+ `recordQuizAnswer`(quiz 轮)每轮增量写 `end_time`+`interaction_count`,纯服务端兜住崩溃/断网。**刻意砍掉 sendBeacon**——增量 UPDATE 后 end_time 已正确,sendBeacon 只多挽回"最后一轮到关页"的几十秒空档却引入浏览器卸载脆弱性,不值。+3 单测(queries.test.ts),330 测过,smoke 12/12。
+5. ✅ **测试盲区补强**(2026-06-25) — asr-proxy `bridge()` 时序测试本轮 overnight 已做(`asr-proxy.test.ts`);本次补齐剩余:`tts-client.test.ts`(重连退避序列 500/1000/2000、重试上限、成功后 reset、session-lost)+ `llm.test.ts`(caller signal abort 预先/飞行中、非 ok 响应抛 sanitized 错误且不泄露 body)。+8 单测。timeout 路径因 `AbortSignal.timeout` 与 fake timer 交互脆弱,未测(诚实标注)。
+6. ✅ **CI workflow**(2026-07-20) — [.github/workflows/ci.yml](../.github/workflows/ci.yml) · low — push / PR 触发 `VOICE_MOCK=true` 门禁:`pnpm typecheck` → `lint` → `test` → `build`,任一失败即红。`typecheck` script 跑两个 tsconfig(`tsconfig.json` + `tsconfig.server.json`),覆盖默认被排除的 `server.ts`(负向用例实证:注入类型错 exit 2)。**前置修了 flaky**:`src/lib/db/index.ts` 原先在模块加载期把 `DATABASE_PATH` 读进顶层 const,vitest 并发下 `fresh-db-init` 偶挂;改为 `getDb()` 调用时解析路径、路径变则 close+reopen,并导出 `closeDb()` 供测试隔离(生产语义不变,仍是进程内单连接)。`pnpm test` ×5 全绿(65 文件 / 386 用例)。
+7. **logger 迁移收尾 + 降噪** — [logger.ts](../src/lib/logger.ts) · medium — 结构化 logger 只有 `server.ts` 和 `src/lib/llm.ts` 两个调用方;**`memory.ts` 的 `normalizeAssistantActions` 每轮无条件 `console.log('[normalize] snapshot', ...)` 打诊断快照**(原记的 `memory.ts:202` 行号已漂移,按内容定位),违反"验收后删打点"。二选一并 gate 热路径日志。
+8. **chat route 加固 + DB 生命周期** · low — 拆分:
+   - ✅ **输入校验已做**:[route.ts](../src/app/api/chat/route.ts) 用 `lessonRequestSchema.safeParse` 校验 body(非法输入 400,commit `fa73c7f`)。
+   - ✅ **DB 账本分叉已收敛**(2026-07-03):`commitTurn` 每轮把 R-C 的 `cardCorrectCount` / `cardProgress` 同步进 `word_performance.rc_*`(`upsertWordRcState`),报告读 rc 优先。
+   - ⬜ **仍开**:无 graceful shutdown(`server.ts` 没有 SIGTERM/SIGINT handler,WAL 不 checkpoint);in-memory session 无淘汰。
+9. **Next.js 15 升级** · **🅿️ park(2026-07-20)** — [package.json:22](../package.json#L22) · medium — 14.2.35 是 14.x 冻结末端,5 个 high CVE(含 WS-upgrade SSRF,命中自定义 server)只在 15.x 修。**2026-07-20 评估:单用户纯本地不公开,CVE 无外部可达面,收益低 → park;恢复条件=对外发布/多用户。** 届时当独立任务做(custom server + framer-motion transpile)。
+10. ✅ **文档漂移**(2026-06-25,部分) — 课程数已修:README(中英两处)+ architecture.md(:354/:546 当前态)改成"以 `index.ts`(`allCourses`)为准"的防漂写法,不再写死数字;历史 changelog 条目按"只读快照"未动。**logger.ts "已删但活着" 留给 #7**(logger 迁移收尾时一并把它纳入模块表),本任务不越界。
+11. ✅ **前端交互打磨**(2026-06-25) — ① Quiz 双击双答:`QuizPickWordFrame` 加 `answeredRef` 同步守卫,每题 `onAnswer` 至多一次;② `ReinforceFrame` 用 ref 持有最新 `onAnswer`/`targetWords`,asr-final 监听器 effect 只依赖 `[controller]`,不再每渲染重挂;③ push-to-talk 按钮加 `aria-pressed`。locked 卡片已是原生 `<button disabled>`(本就不可聚焦),无需改。
+
+### ⭐ 儿童产品专项(critic 补,10 维度系统性漏掉——因为"用户是孩子")
+
+> 纯工程视角看不到。单用户本地阶段多为 P2,但作为**风险类别**价值最高。
+
+- ⭐ **Agent 护栏机制(LLM 输出 + 行为)** · **优先级提升(2026-06-25 用户定为重点)· design-first 复杂任务** — 比"内容安全过滤"更大:安全只是其中一格。完整护栏至少三层 ——(1)**内容安全**:[orchestrator.ts](../src/lib/agent/orchestrator.ts) 把 MiMo `speech` 逐字流给 TTS 直达孩子,目前零审核;(2)**交互逻辑/控制权**:孩子说"跳过这个词""我想学别的"时,Agent 该不该听他的(准许 vs 不准许的策略),现状已无任何'跳过当前词'通道(dev `debugSkipCurrentWord` 已于 2026-06-30 移除),只有 R2 字面两次命中才切卡,没有面向孩子、被策略管控的"请求"通道;(3)**行为准则**:不只约束 LLM 说什么,还约束 Agent 接下来做什么(切卡/推进/改节奏)。**核心交付是先把"机制长什么样"设计清楚(prd + design),再动代码**——决策点:事前(prompt rules)管什么 vs 事后(`src/lib/agent/guards/` pipeline)拦什么;孩子意图请求走哪条路、按什么策略准许;准则怎么写得下、可回归。启动时先写 PRD + design。
+- **孩子语音转写永久明文留存** · P2 · **🅿️ park(2026-07-20)** — [session.ts:189](../src/lib/agent/session.ts#L189) 每轮写 ASR 原文进 SQLite,全仓库无删除/TTL/清理。加保留策略 + "清除历史"入口。(park 理由同下:纯本地无外部读取路径。)
+- **本地档案与直接进入学习记录** · ✅ 2026-10-24 Phase 2 已完成 — 档案只用于隔离学习进度，无登录或角色区分；学习记录直接进入，原家长门禁随本阶段删除，不再作为鉴权待办。
+- **其它** · P3 — 无 CSP/Permissions-Policy;麦克风权限被拒无面向孩子 UI([recorder.ts:58](../src/lib/audio/recorder.ts#L58) 只 console.warn);SQLite 无备份/损坏恢复;错误只进 console 无遥测(=总得手动贴日志的根因);~~无 `.nvmrc`/engines(better-sqlite3 跨 Node 版本会崩)~~ ✅ 2026-07-20 已加 `.nvmrc`(23)+ `engines.node`(`>=23 <24`)+ `packageManager`(pnpm@10.33.2),与本地一致、CI 读同一份;2026-10-18 本地、`.nvmrc`、`engines`、CI 统一升到 Node 26(23 已于 2025-06 EOL),`better-sqlite3` 升到带 Node 26 预编译包的 12.11.1,`@types/node` 跟到 ^26;`/api/chat` 无 rate-limit。
+
+### P3 / 维护性(顺手做,单用户阶段低优先)
+
+手写 emitter ×4、`safeParse` ×2、`markWordCorrect/Incorrect` 重复、`resetConfig` 仅测试在用(`config.test.ts`,不是死代码)、assistant-history-as-prose、`PcmPlayer.dispose` 不 await stop、死 `cancelSession`/无 barge-in、`buildPromptInput` 每轮算两次、未文档化的 `NEXT_PUBLIC_DOUBAO_TTS_DEFAULT_SPEAKER`。只在为高优项改到那个文件时顺手清。
+
+---
+
+## 当前 backlog
+
+### Realtime 自然对话课堂 · 真人验收(2026-10-29)
+
+源码已实现并通过自动化与合成语音真实服务验证(见 architecture.md「Realtime 自然对话课堂」、voice-benchmarks.md)。仍需真人课确认:
+- 孩子真实发音、停顿习惯下 `semantic_vad` eagerness `low` 是否抢话或等太久;不合适再按证据调。
+- 实体扬声器外放时浏览器 AEC 是否会让老师自己的声音触发打断(自动化没有物理回声)。
+- 观察服务端 `speech before tool` 日志,确认工具先行在真实课里仍成立。
+- 成本(2026-10-30 已做缓存友好改动,未做付费对比):读该课 `lesson_logs.token_usage.realtime`,按输入文本/音频、缓存命中、输出文本/音频拆分费用,算每分钟成本与缓存命中率;同时确认状态改为 `[app] State` 消息后,模型仍按当前屏幕和剩余目标教学。若一节课接近上下文窗口,再按数据决定是否设 `token_limits.post_instructions`。
+- 未打包:Mac 安装包仍是旧版本,发布前需单独打包与验收。
+
+### Mac 桌面版后续(2026-10-24)
+
+- **Windows 版**：后续单独验证打包、权限、签名和安装流程，目前只交付 Mac arm64。
+- **自动更新**：当前由家长手动下载覆盖安装，更新服务和校验机制未实现。
+- **课程包独立下载**：当前课程和图片随 App 发布，后续再评估按需下载与版本管理。
+- **设置页申请指引 URL 待核实**：核实火山引擎豆包语音、SiliconFlow 当前控制台入口和开通步骤，再补真实截图。
+- **Intel 版：按需再做**。用户决定当前只提供 Apple 芯片 arm64；将来在 x64 环境重新 next build，验证 SWC/esbuild 依赖、打包 App 冒烟和 Intel Mac 安装流程。
+- **真机安装与截图**：另一台 Mac 下载后验证 Gatekeeper 放行、首次麦克风授权、真实 Key 上课，以及覆盖安装后的数据和授权保留。README 已标注真实截图待补位置，自动化截图不替代系统弹窗证据。
+
+### 1. Prompt / latency optimization v2 — 真实 Eval 继续指向成本/延迟时再启动
+
+*2026-05-23/25 真实报告曾触发 highAvgInput:约 2300-2935 input tokens / round。05-26 已做 input breakdown,05-27/28 已完成 Prompt Slimming v1。现在不要再凭旧 TODO 直接继续压 prompt,先等下一节真实课 Eval 证明它仍是主瓶颈。*
+
+**2026-05-24 已完成**:state_update 删除 4 个废字段（current_card_id / phase / words_learned / generated_content），仅保留 current_word + attempt_assessment。LLM output token 成本下降，input token 不变。
+
+**2026-05-26 已完成**:Prompt input quantification 已持久化到 `interaction_logs.model_calls.llm.inputBreakdown`,报告可拆 static rules / phase rules / course definition / lesson state / summary constraints / history / separators。
+
+**2026-05-27/28 已完成**:Prompt Slimming v1 把代表 fixture total chars 从 5065 降到 3527（-30.4%）,static_rules 从 2481 降到 1206（-51.4%）,course_definition 从 1260 降到 997（-20.9%）。后续 smoke 11/11 通过,Eval 未报 speech_card_alignment / premature_closing / token_data_integrity。
+
+如果真实 Eval 仍指向成本/延迟,候选动作:
+- 对真实课 largest bucket 做二次定位:static_rules、course_definition、lesson_state、history 哪个重新变大就压哪个
+- 只在有数据证明必要时继续缩 course_definition / lesson_state;不能牺牲 `asrAliases`、`drillParts`、current/next card 控制和 closing 安全
+- 如果首音频仍主要卡在 MiMo first-token 或 TTS 合成,优先评估更快模型 / prompt 首句策略 / TTS 占位或缓存,不要只盯 input token
+
+### 2. Hybrid 预渲染话术架构 — LLM 退化为决策器 *(park,等实测决策)*
+
+*2026-05-05 设计讨论产物。原触发条件是"用户基数 > 1 或 课程数 > 10"。2026-05-23 起,`show_card` / speech 错位已用出口一致性修复,Hybrid 不因这类同步 bug 启动;触发条件收窄为"真实回归仍证明老师话术质量、成本或延迟是主要瓶颈"。*
+
+**核心思路**:
+- 当前所有 teacher utterance 都是 LLM 实时生成 + 豆包 TTS 实时合成 → 教学一致性差、token 高、话术循环 / 提前结课等"过度灵活"副作用
+- 改造方向:整段话术 build-time 预渲染为本地 .opus,LLM 退化成"决策器"输出纯结构化 JSON,从预制池里 pick `audio_id` 播放
+- 关键架构变更:LLM 工作范围从"创作 teacher 话术"压缩到"分类 + 路由",TTS runtime 调用归零
+
+**预制资源池估算**:
+- per-card 5-7 段(初次介绍 / 复习 / 接近 hint / 完全错 hint / 收尾)
+- 共享池 30 段(鼓励 / 过渡 / 失败 / 跳过 / out-of-scope)
+- 量级:常规课 16 卡 ≈ 100 段 + 共享 30 段,体积 3-5MB/课
+
+**LLM 决策器 schema(纯 JSON)**:
+```json
+{ "asr_assessment": "correct" | "close" | "wrong" | "off_topic",
+  "next": { "audio_id": "...", "card_id"?: "..." } }
+```
+
+**启动时待决的边界**:
+- LLM JSON-only,还是允许 `reasoning` 字段
+- off_topic 走预制池,还是降级到 LLM + 实时 TTS
+- 错音诊断分 3 档还是 5 档(决定 hint 池规模与作课成本)
+- 课程作者写课成本:每卡 5-7 段台词,需要工具/模板支持
+
+### ~~3. Actions / TTS 时序与 speech/show_card 出口一致性~~ — **已完成(2026-05-22/23)**
+
+bd78d967 + 8bb58baa 实测报告确认 actions/TTS 时序是 UX 杀手,`pendingActions` 机制已落地。d26e730b 后续暴露服务端返回合同内部不一致;05-23 已补 `show_card` 与 teacher speech 出口一致性,并在 smoke 中覆盖 pointer hold、Space hold、speech/card consistency。
+
+---
+
+## 战略方向待决:Agentness vs Content 平衡 *(2026-05-25 讨论登记)*
+
+> 触发:课程已扩到 ~30 门常规课,小朋友进入每日上课实测阶段。需要用真实使用反馈决定下一阶段重心是**继续加课**还是**补 agentness 缺口**。本节不直接转 task,作为后续 backlog 排序的判据。
+
+### 项目在 agent 思想上的现状对照
+
+**强对齐(已经在按 agent 范式做)**:
+- 完整 perceive-think-act 闭环:ASR → MiMo LLM 决策 → TTS + `show_card` 改画面(action 影响 environment,而非只回字)
+- 多模态 grounding:画面是推理的一部分而非渲染产物,老师话术与 `show_card` 出口一致性已是硬约束
+- `src/lib/agent/` 分层(normalize / memory / session / prompt / orchestrator / assessment)是按 agent 拆的,不是套壳
+- LessonController 三阶段状态机 = 显式 high-level plan skeleton + LLM 局部决策的 hybrid 范式
+
+**弱项(挂着 agent 但实际偏 scripted multimodal app)**:
+1. **Autonomy 弱** — 每轮都靠 push-to-talk 触发,孩子静默时 agent 不会主动推进;无 idle / proactive policy
+2. **Planning 浅** — 课程内容是预制 `Course` 对象,不是 agent 根据学生水平动态生成的教学路径
+3. **跨 session 长记忆未闭环** — memory 模块存在,但孩子的学习轨迹(反复错的词 / 已掌握的词)是否真影响下一节课的选课与重点,目前未证实
+4. **Self-correction 局限于局部** — micro 级(ASR / LLM 输出格式)有降级,macro 级("整节课节奏不对要重设计")没有
+
+### 实测决策路径(用每日真实上课信号反推方向)
+
+接下来每日上课的观察重点(分别对应不同迭代方向):
+
+- 如果**主要痛点是内容枯燥 / 词汇不足 / 重复感** → 继续加课、加多样性(content-driven)
+- 如果**主要痛点是孩子静默后冷场、不会自己进下一步** → 补 autonomy(idle policy / proactive prompt),autonomy 项升 backlog
+- 如果**主要痛点是同一难度反复教 / 不会自动跳过已掌握 / 不会重点回访薄弱点** → 补长期记忆 + 动态选课,把"兴趣 / 困惑记忆"和 session persistence 升 backlog
+- 如果**主要痛点是 LLM 话术质量 / 成本 / 延迟** → 启动 Hybrid 预渲染(已 park 项),agentness 反而退一步换稳定性
+- 如果**没有强痛点,只是内容深度不够** → 继续 content-driven,本节不动
+
+### 自我提醒
+
+- "单用户阶段优先内容驱动"的 feedback 仍生效(见 user memory `feedback_content_over_architecture_at_single_user.md`)。本节不是要立刻补 agentness,而是**让真实反馈来决定**,避免凭直觉重构。
+- 任何"补 agentness"的迭代,启动前必须能指出"哪条实测信号触发了它",不接受纯架构动机。
+
+---
+
+## 远期 backlog
+
+1. ✅ **Session persistence / resume**(2026-07-20 完成) — 真人课信号触发(课上一半退出、下次从头)。实现:`course_progress` 断点表(每门课独立、**不过期**)+ `/api/chat` start 从有效断点恢复(`X-Resume-Info`)+ 前端中途起播 + 老师"欢迎回来" + reinforcement 跳过已过 quiz;首页 `HomeStudy` 进度可见(上课次数 / 完成度% / "继续"角标)。运行态 session 仍 in-memory(server 重启丢的只是"当前活动 session",断点已落库、重进即恢复)。详见 architecture.md §3.1b + §10(2026-07-20)。
+2. **课程产出自动化** — 课程作者ing SOP 已在本地 agent 工作流中稳定,10 门课沿用同一模板没出问题;公开仓库先不提交 agent 过程文件,等用户扩展课程节奏 / 引入第二位作课者时再决定是否产品化。
+3. **兴趣 / 困惑记忆** — 在词汇表现之外识别 confusion / engagement,等真实报告证明有价值再做。
+4. **长期语音 UX** — VAD 自动停止 / 连续对话 / WebSocket 退避重连 / 开场白 TTS 预加载。
+
+---
+
+## 已完成记录(粗粒度,详见 architecture.md §9)
+
+- 2026-05-01 — 初版语音管线 + living doc 制度建立
+- 2026-05-02 — 课后报告生成器
+- 2026-05-05 — 画布 v2(WordCardCanvas + `show_card` 协议统一)
+- 2026-05-05 — timeNumbers 实测报告 + ASR hot_words 真实回归基线(协议层 hot_words 不救命,字典 fallback 已撤)
+- 2026-05-10 — 教学循环 v1.1(cardProgress / clearedCardIds / LLM attempt_assessment / history 12 条)
+- 2026-05-14 — 前端重构 Bunny 小院子(后被 CC UI 取代)
+- 2026-05-15 — lesson-structure-refactor:三阶段课程结构 + food 示范课 + PhasedLessonController;旧 LessonView fallback 删除
+- 2026-05-20 — CC 手绘绘本风 UI 接入,前端切换到麻吉魔法学院,`theme` 改 `tone`
+- 2026-05-21 — 课程 registry 扩到 10 门常规课程,合同收紧为 12 word + 4 sentence cards
+- 2026-05-22 — **Teacher Agent UX P0 四项修复(R1-R4)**:actions/TTS 时序、ASR 字面 verify、normalize 放宽(允许跳卡)、closing guard 始终注入 + 服务端 speech 扫描替换
+- 2026-05-23 — **Lesson voice regression stabilization + 轻量诊断闭环**:push-to-talk ASR 建连/关闭竞态、pointer/Space hold、speech/show_card 出口一致性、dev 强切 reinforcement 解锁、smoke UI 跟读与 speech/card 一致性断言;原"日志整理"长期项关闭
+- 2026-05-24 — **代码库清扫 A+B+C**:删 6 项死代码(logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage / getNextWordCardId);mockStreamLLM 修正为合法 show_card shape;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content)
+  > **补注(2026-10-18)**:`logger.ts` 当时确实删了(`c366627`),2026-06-13 在 `7c82cbc`(system-wide architecture optimization)重新加回;现在被 `server.ts` 与 `src/lib/llm.ts` import,是活代码。原始记录保留如上。
+- 2026-05-24 — **Guard pipeline 重构(D)**:`src/lib/agent/guards/` 拆出 closing / premature-closing / normalize / speech-card-align pipeline,`streamUserInput` 收窄,行为不变
+- 2026-05-25 — **R-C canonical matching + explicit ASR aliases**:修复 `ice cream` / `icecream` 类 ASR 命中问题,课程可显式声明 `asrAliases`
+- 2026-05-26 — **Prompt input quantification + Eval v1**:LLM prompt bucket 持久化,lesson-report 输出 session health / cost-context / teaching-loop / agent behavior / next-iteration signals
+- 2026-05-27/28 — **Prompt Slimming v1**:代表 fixture input chars -30.4%,static_rules -51.4%,course_definition 小幅压缩并通过 smoke / Eval 风险门
+- 2026-05-28 — **ESLint gate**:`pnpm lint` 改为非交互式可通过,lint 配置整理从远期 backlog 关闭
+- 2026-06-16 — **P1 ③ 首音频占位音 filler**:进 thinking 本地播预渲染同音色「嗯,让老师看看哦~」(`scripts/gen-filler.ts` 生成 `public/audio/thinking-filler.pcm`),不起 TTS session、仅 LLM 回合放。遮蔽体感不减真实延迟;ASR end_window 核实为 no-op 未改。+3 单测(304 过),smoke 13/13。
+- 2026-06-21 — **停用 thinking 占位音 filler**:实测会在 ASR/LLM/TTS 正常运行时误导性插入「让老师看看哦」,`LessonController` 不再 fetch/enqueue `thinking-filler.pcm`;首音频延迟继续等待更快 LLM / prompt 首句策略 / Hybrid 预渲染。
+- 2026-06-16 — **P1 ①② 配置 + WS 安全**(commit `aa3f443`):config 改读 `MIMO_BASE_URL`(+MIMO_API_BASE alias)、修死域名默认(实测 xiaomimimo 通/xiaomimomo 死)、删死代码 databasePath;server.ts 加 `isAllowedWsOrigin` 拒跨站 WS 劫持、ws 升 ^8.21.0。+7 单测,live LLM 端到端验证。
+- 2026-06-21 — **课堂循环 bug 簇 + filler 停用 + skip-word 面板**(2 commit):请老师再说误推卡(rawAsrText/userText 分离)、reinforcement 热词回退整课词表、knight 同音词 asrAliases。详见 architecture.md changelog。
+- 2026-06-21 — **同音词内容 pass**(`scripts/asr-word-scan.ts` TTS→ASR 全量探针,480 词):17 词标准发音被 ASR 听错,补 16 个 `asrAliases`(gray→grey / aunt→ant / star→store ×3 / harp→hop / sink→sing / skating→gating / toolbox→true box / ladder→letter / canvas→candice / speaker→speak / fork→fool / kneepads→neepads / suitcase→seatcase / yoyo→悠悠;knight 已先修)。bee 复测 HIT 3/3 稳定,不加。CLAUDE.md 加造课 checklist。**待办已部分消化(2026-06-30 重跑)**:`leg`(asr="Leg.")、`stamp`(asr="Stamp.")标准发音已确认被正确识别,无需 alias;`spell`/`palette` 仍是"探针拿不到 final"的词特异性超时(8s waiting-next-packet,无 ASR 输出 → 无误识文本可补 alias),属探针工装 / ASR 包等待窗口问题而非 alias 缺口。后续若要消化:改 `scripts/asr-word-scan.ts` 给 TTS 片尾补静音再喂 ASR,或留真人课验证孩子发这两个词的识别。
+- 2026-06-15 — **§1 闭环可靠性簇**(全量 review 第一项):修 6 bug + id-7 —— recorderLock 错误路径泄漏、speech-finish 兜底定时器丢 pendingActions、SpeechExtractor 跨 chunk 丢 speech、consumeSSE 无 try/finally、LLM 卡死双层超时(server 15s / client 20s watchdog)、controller error 首次有 UI 横幅、malformed 输出友好重试。+10 单测(294 过),smoke 13/13,architecture.md 同步。余下 review 项见上方「项目体检 backlog」
+- 2026-06-30 — **移除 dev 调试面板(切词 + 切阶段)**:删 `DevPhasePanel` + `PhasedLessonController.forceTransition` + `LessonController.debugSkipCurrentWord` 全链(UI / controller / route / session)及随之孤儿化的 `getTotalAttempts`/`resolveWordCardId`/`WordCard` import;真实 intro→interactive→reinforcement 切换路径(`performTransition` → `phase-transition` action → `setSessionPhase`)保留。删/改 4 个测试文件(`debug-skip-word.test.ts` 整删),残留引用扫描为零,333 单测过,tsc/lint clean,smoke 过。详见 architecture.md changelog。
+- 2026-07-03 — **[待办·未排期] client"没听清重讲"0.8s 内重复触发**:真人课 session `1b096ae7` n=44/45,同一 volleyball 重介绍在 13:36:24.320 / 13:36:25.098 触发两次,产生两条 interaction 与两次 LLM/TTS 调用。危害小(孩子多听一遍),用户拍板暂不排期;下次真人课若复现再升级。排查入口:client 重讲触发链路(phased-lesson-controller / LessonView 的"没听清"路径)。
+- 2026-07-04 — **[跟踪] 句子热词注入(a49efe2)实战验证未完成**:2026-07-04 真人课 quiz 只进行到 q3,q5-q8 repeat-after-me 未触达;下节真人课确认句子跟读识别率(对照 2026-07-03 n=58/59 "I'll play Thomas." 型误识)。

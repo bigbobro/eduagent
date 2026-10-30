@@ -4,9 +4,11 @@
 > 本文不复述历史实施计划,只描述"现在长什么样"。
 > 跟读"答对"的分层产品规则:ASR 字面命中只做基础推进信号,真正的发音质量评估需要原始 audio + reference text,当前还未接入专门 pronunciation scoring 服务。
 
-最近重大同步:**豆包语音支持新版 API Key(2026-10-25)** — `doubaoAuthMode` 为 `apikey` 时 ASR/TTS 只送 `X-Api-Key`;`legacy` 仍是 ASR `X-Api-App-Key`、TTS `X-Api-App-Id`,外加 `X-Api-Access-Key`。资源 ID 与连接头不变。新装默认新版;旧文件里已有 App ID 或 Access Key 且没有 mode 时迁成旧版。未设置 `DOUBAO_AUTH_MODE` 时,有 API Key 视为新版,否则有 App ID 或 Access Key 视为旧版。上次重大同步:**AI 老师改为多渠道(2026-10-25)** — settings.json 用 `llmChannels` + `activeLlmChannelId`;启动时把当前渠道映射到 `LLM_*` 和 `LLM_PROVIDER`。旧的顶层 `llmApiKey` / `llmBaseUrl` / `llmModel` 在 App 启动时迁成一条渠道并写回。火山方舟(`volc-ark`)的 chat 请求体附带 `thinking: { type: 'disabled' }`,其余渠道不附加。详见「配置来源」。上次重大同步:**LLM 超时处理改为首 token 对冲(2026-10-25)** — `src/lib/llm.ts` 把单一 20s 总超时拆成三段:4s 内无首个 token 就并行发同样的请求,取先出字的、取消另一个(hedged request);出字后 10s 无新 chunk 判卡住;30s 总上限。client `CHAT_WATCHDOG_MS` 25s → 35s,保持大于服务端上限。依据与前后对比见 `docs/voice-benchmarks.md` 2026-10-25 节。上次重大同步:**P2 数据一致性三批修复(2026-09-22)** — 单次课堂计数与课程累计上下文分离；同步事务提交后发布内存；断点读取统一校验并保留损坏原文；HTTP/SSE/续课契约由纯共享模块定义（见文末 P2 章节）。上次重大同步:**P1 课堂可靠性两批修复(2026-09-22)** — 操作成功需要明确确认，失败保留重试入口（§3.1a）；浏览器 run 统一取消请求、流和回调，录音资源归课堂持有，服务端会话结束先取消再移除并阻止迟到提交（§3.3）。不改教学规则、续课格式或数据库 schema。上次重大同步:**CI 门禁 + db 单例路径泄漏修复(2026-07-20)** — 新增 `.github/workflows/ci.yml`:push / 任意 PR 触发,`VOICE_MOCK=true` 下依次跑 `pnpm typecheck` / `lint` / `test` / `build`,任一失败即红;`typecheck` 是新增 script,串跑 `tsconfig.json` + `tsconfig.server.json` 两个 config,收住被默认排除的 `server.ts`。Node 经 `.nvmrc`(23)+ `engines.node`(`>=23 <24`)+ `packageManager`(pnpm@10.33.2)钉死,保证 `better-sqlite3` 原生模块在 CI 与本地同一 ABI 下构建。**前置必须修的 flaky**:`src/lib/db/index.ts` 此前在模块加载期把 `process.env.DATABASE_PATH` 读进顶层 `DB_PATH` const,而 `db` 是进程级单例——vitest 多测试文件共享 worker 与全局 `process.env` 时,单例可能已指向真实默认 DB(实测 2403 行 `lesson_logs`),`tests/api/fresh-db-init.test.ts` 断言"全 0/空"因而间歇性挂。修法是把路径解析移进 `getDb()` 调用时,路径变则 close+reopen,并导出 `closeDb()` 让测试在切临时 DB 前后显式释放(**刻意不用** `test.retry` / `it.skip` / 关并发这类掩盖手段——那只降低概率不消除竞态)。生产语义不变:运行期 `DATABASE_PATH` 恒定,`getDb()` 仍返回进程内同一连接。`fresh-db-init` 用例的 20s timeout 是给并发争用留的余量(单跑 ~250ms),非重试。**首次真跑 Actions 又暴露三个"只在全新环境才炸"的问题,一并修掉**——本地绿而 CI 红,恰恰是这道门禁存在的意义:(1)**pnpm 10 默认拦截依赖安装脚本**(`Ignored build scripts: better-sqlite3, esbuild, unrs-resolver`),原生模块 `better_sqlite3.node` 在 CI 上压根没生成,59 个测试报 `Could not locate the bindings file`;本地能跑只是因为 `node_modules` 里早有产物。修法:`package.json` 加 `pnpm.onlyBuiltDependencies: ["better-sqlite3"]` 显式放行(esbuild / unrs-resolver 走可选平台包,无需构建脚本,保持被拦)。(2)**`db/` 目录不在 git**,fresh checkout 无此目录,而 better-sqlite3 只创建文件不创建父目录 → `Cannot open database because the directory does not exist`;`getDb()` 开库前补 `mkdirSync(recursive:true)`,同时覆盖生产环境首次运行/换机器场景。(3)**测试套一直在偷偷依赖开发者本地那个已建表的真实 DB**:`session-phase` / `closing-guard` / `repeat-no-skip` / `session-malformed` / `session-reinforcement-bypass` / `phase-transition` 等文件直接 `createSession` 却从不跑 migration,空库上报 `SqliteError: no such table: lesson_logs`。修法采用规划期 design.md 的**方案 a**:`vitest.setup.ts`(setupFiles,**每个测试文件执行一次**)给每个文件 mkdtemp 一个独立 DB 并 `initDatabase()`,`afterAll` 清理——从此没有任何测试能碰到 `./db/eduagent.db`。实证:干净 git worktree(模拟 fresh checkout)`rm -rf db` 后连跑 5 次 388/388 全绿,且跑完仓库根目录仍无 `db/` 目录。`tests/api/fresh-db-init.test.ts` 同时按路由拆成三例(`it.each`),**每例只 import 自己那条路由、面对自己的空库**——此前三条路由共用一个临时 DB 一起 import,谁先跑谁把 migration 跑了、替其余两条兜底,单独摘掉任一条的 `ensureDatabaseInitialized()` 都测不出来。变异实证:分别摘掉 progress / stats / sessions 任一条,均精确红对应那一例(拆分前:三条全摘才红)。验证:`pnpm test` ×5 连续全绿(66 文件 / 388 用例)、`typecheck` 正向 exit 0 / 负向注入类型错 exit 2、`lint` clean、`build` 9 页通过。上次重大同步:**2026-07-04 课后报告四项小修**(基于真人课 session `6f6e7bec` 的诊断,见 `docs/lesson-reports/2026-07-04-6f6e7bec.md`)——(R1)**非优雅结束丢 lesson 级用量汇总**:`token_usage` 此前只由优雅结束的 `finishLessonLog`(`action:'end'`)写入,client 未发 `end`(关标签页/崩溃)时永远是 `{}`,报告假报 0 req/0 in/0 out + ASR/TTS "not tracked"。修法:`touchLessonLog`(`src/lib/db/queries.ts`)新增 `tokenUsage` 参数,`session.ts` 的 `commitTurn` / `recordQuizAnswer` 每轮都传 `session.tokenUsage`,与 `end_time` 同步落库;`finishLessonLog` 保留终值语义不变。但 `token_usage` 非空不再能当"优雅结束"的判据(现在每轮都非空)——新增 schema **v3**:`lesson_logs.ended_gracefully INTEGER DEFAULT 0`,只由 `finishLessonLog` 置 1(ALTER 前查 PRAGMA 幂等,同 v2 约定);`scripts/lesson-report-data.ts` 的 `sessionHealth` 增 `endedGracefully` 字段(读该列,不影响既有 `issues`/`status` 判定,`asr/ttsUsageNotTracked` 假警报本身会随 token_usage 每轮落库自然消失);`.claude/commands/lesson-report.md` 模板新增"非优雅结束"警示行(不再用裸 `end_time` 判断)。手动验证:`VOICE_MOCK=true` 起两轮不发 `end`,直接查 sqlite 确认 `token_usage` 非空且 `ended_gracefully=0`。(R2)**reinforcement phase-opening 轮不再强制注入词卡 `show_card`**:`normalizeAssistantActions`(memory.ts)新增 `opts.skipForceShowCard`,guard 包装层(`guards/normalize-actions.ts`)在 `ctx.phaseOpening === true && ctx.currentPhase === 'reinforcement'` 时置该 opts——reinforcement 开场白由 quiz 组件接管画面,强制词卡纯属噪音,此前被报告的 mismatch 检测器按词卡口径误判 critical(n=41: 话术说 soccer,画面被钉 jumping)。**严格限定 reinforcement**:interactive 的 phase-opening(如首卡强制 show_card)零回归,`flow-correctness.test.ts` 补 n=41(reinforcement,actions 应为空)+ interactive 对照两个场景。(R3)**同卡重读的 praise 改写加确认语**:`buildCardPrompt`(`guards/speech-card-align.ts`)新增 `reread` 选项,praise 语气且未换卡(`!movedToDifferentCard`,即 `memory.currentCardId === forceCardId`)时用"做得好,老师听到啦!再读一遍:X!"取代原"我们看这张卡…"完整介绍模板——原模板在 hit1 命中后仍用,孩子听感是"没被听到"(n=38→39"你没读到Badminton?"真实案例)。换卡(`movedToDifferentCard`,真正引入新卡)与 neutral 分支模板不变。(R4)**reinforcement 开场后挤入的语音轮不再走 LLM**:`streamUserInput`(session.ts)入口新增判定——`currentPhase==='reinforcement' && !phaseOpening && rawAsrText 非空 && 非系统/quiz 标记文本` 时跳过 LLM,直接回固定短语"我们来玩游戏吧!"(新 helper `respondWithoutLLM`,只计 ASR/TTS 用量、不计 LLM、不写入 message 历史)。根因:reinforcement 阶段的 quiz 组件跟读用 `routeToChat:false`,但转场窗口挤入的一次杂散语音仍可能带 `routeToChat:true` 落到 `/api/chat`,LLM 无 reinforcement 教学职责却又生成一版语义重复的开场白(n=42)。回归测试确认 `[quiz:`/`(切换到` 标记文本与 phaseOpening 转场轮不受影响(仍调用 LLM),quiz-answer 交互本就不经过 `streamUserInput`。四项均有单测(`flow-correctness.test.ts` / `normalize-actions.test.ts` / `speech-card-align.test.ts` / 新增 `session-reinforcement-bypass.test.ts` / `queries.test.ts` / `schema.test.ts` / `lesson-report-data.test.ts`),381 单测全绿,tsc clean,smoke:lesson 13/13(animals 课,含 R3 新卡模板未受影响的实证:step 9 fish 新卡仍用完整介绍模板)。上次重大同步:**R-C 权威账本落库 + 报告语义修复(2026-07-04)** — 修复 2026-07-03 真人课暴露的 `clearRate=0` 假报警(12 词运行时全部真实过关,报告判 0 过关):根因是两本账语义漂移——`word_performance.attempts/correct` 只记 LLM attempt_assessment 判定事件,而决定课堂推进的 R-C `cardCorrectCount`(raw R2 命中 ×2 即 cleared)从不落库,报告拿账本一的数字套账本二的 `>=2` 规则。方案 A(用户拍板):schema **v2** 给 `word_performance` 增 `rc_correct` / `rc_cleared` 两列(NULL = 未追踪;ALTER 前查 PRAGMA 保持迁移幂等,老库安全);`session.ts` `commitTurn` commit 前快照 `cardCorrectCount`/`cardProgress`/`cardAttemptStreak`,commit 后对有变化的词当轮 `upsertWordRcState`(键 = card.english 对齐 word_performance.word;只写 rc_* 两列,与 LLM 判定账本互不改写;含首个 wrong 的 streak 变化,保证"已尝试即已追踪")。`lesson-report-data.ts`:改 `SELECT *` 兼容老库缺列;cleared 判定 **rc 优先**(rc_cleared 非 NULL 即权威,含 rc=0 否决 LLM 宽松误判的 correct>=2),legacy 回退旧语义;新增 `teachingLoop.clearRateSource`(rc / legacy_llm_correct / mixed / none,按**尝试过的词**判定)+ `clear_rate_source_legacy` info 信号显式降级;`agentBehavior.guardActivity` 聚合 `interaction_logs.model_calls.guards`(rcRejected/rcSuppressed 计数 + speechRewrite 分型)+ `guard_activity` 信号——补上"守卫改写发生在落库前、存量 ai_response 恒为改写后文本、speechCardMismatch 检测器对真实错位恒 0"的观测盲区。E2E 实证:smoke 新课 rc 真实落库(cat/dog/bird rc_correct=2/rc_cleared=1 而 LLM 账本 correct 仍=1,报告正确判过关,source=rc);2026-07-03 真人课老数据回退 legacy 语义 + 显式降级信号,不再无声假报警。364 单测全绿(新增 schema v2 幂等 / rc 优先 / rc=0 权威否决 / legacy 回退 / guards 聚合五类),tsc clean,smoke 11/11 + UI 2/2。上次重大同步:**流程正确性修复:词全清收尾 + 守卫补漏 + 单词级逃生阀(2026-07-03)** — 基于 sports 真人课(session `1b096ae7`)三处课堂事故的修复(证据链与拍板决策见 `docs/lesson-reports/2026-07-03-1b096ae7.decisions.md`)。(F1) **词全清终态(all-cleared)**:`normalizeAssistantActions` 在"没有下一个候选词"(全部 cleared 或 parked-after-retry)时置 `meta.allWordsCleared`,`forceCardId` 停在最后一张卡不跳变,越界 show_card(如 `sentence_soccer`)静默 suppress 计数、不再刷 reject 告警;`speechCardAlign` 对全清轮做确定性收尾——过关轮话术若泄漏教句子(sentence 卡英文 / "学一个短句"句式)改写为收尾庆祝模板,转场落地前挤入的学生轮固定改写为简短衔接语(按孩子对错选 praise/neutral),不再回到已过关词的教学模板(n=49/50 复读机根因)。(F2) **守卫补漏**:in-progress 模式话术提到任何其它词卡即视为越界改写(不再要求"未提当前词",堵 n=31 "先停一下 skating,换 volleyball"泄漏);`(课堂开始)` / `(切换到 X 阶段)` 系统轮经 `opts.phaseOpening` 标记豁免改写(n=51 reinforcement 开场白误伤);`buildCardPrompt` 加 tone 参数,孩子答错时中性开头("没关系…"),不再无条件"做得好!"。(F3) **单词级逃生阀**:同卡连续 5 次失败(`PARK_STREAK_THRESHOLD`,置 Infinity 可关)→ park(`parkedCardIds` + needs_review)推进下一词;fresh 队列走完回头给 parked 词一轮 retry(`parkRetryCardIds`,进入 retry 时 streak 清零给新尝试窗口);retry 再失败视为完成进入终态。`progress_snapshot` 新增服务端计算的 `allWordsDone`(cleared + parked-after-retry),client `maybeArmTransition` 以其为准,parked 词不阻塞 interactive→reinforcement。(R6) 观测:R-C reject/suppress 与守卫改写类型经 GuardContext 计数,持久化到 `interaction_logs.model_calls.guards`,修复本次 eval `speechCardMismatchCount=0` 盲区(报告聚合语义另立任务)。回归:`src/lib/agent/flow-correctness.test.ts` 用 sports 真实课程数据覆盖 n=31/49/50/51 四场景 + 逃生阀 4 场景 + sentence 卡不劫持 currentCardId 红线;353 单测过,tsc clean。上次重大同步:**LLM 供应商切换 MiMo → OpenAI 兼容端点 + 命名泛化(2026-07-02)** — LLM 调用方换成 SiliconFlow(`deepseek-ai/DeepSeek-V4-Pro`),协议不变(本就是 OpenAI 格式 chat/completions + SSE + `response_format: json_object`)。`src/lib/mimo/llm.ts` 移到 `src/lib/llm.ts`,config 字段 `mimoApiKey/mimoApiBase/mimoModel` → `llmApiKey/llmBaseUrl/llmModel`,env 改名 `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`。回退兼容是**整组 fallback**:`LLM_API_KEY` 非空用 `LLM_*` 三元组,否则整组回退 `MIMO_*`(含更早的 `MIMO_API_BASE` alias),不逐变量混拼,避免"新 base + 旧 key"错配;清空 `LLM_API_KEY` 即一键回退 MiMo。`init.ts` 启动校验同步改为"两组 key 有一即可"。随切换真实 smoke 暴露并修复两项:(1) **trailing sentence 卡劫持 currentCardId**——commit 取最后一张 show_card 不分卡类型,DeepSeek 惯于附带 `sentence_<word>` 例句卡(MiMo 从不),currentCardId 变 sentence 卡后 `applyAttemptAssessment` 因 kind!=='word' 永久跳过 R2 计数,孩子答对不推进;修法 `getLastWordShowCardId`(word 卡才能当教学目标,sentence 卡仅展示),`normalize-actions` 复用同一 helper,附回归单测,smoke 校验放行 `sentence_<word>` 收尾展示。(2) **LLM 双层超时 15s/20s → 20s/25s**——DeepSeek 正常轮 5-15s(首 token 中位 ~3.5s,慢在生成段),15s 上限会误杀 ~1/10 正常轮。性能基线表(first-token ~4s 等)是 MiMo 时代实测,待重测。同日模型改为 `deepseek-ai/DeepSeek-V4-Flash`(兼容点同样全过,真实 smoke 11/11;整轮中位 ~5.4s 比 Pro ~7.3s 快,尾部仍可 ~14s,超时保持 20s/25s)。上次重大同步:**移除 dev 调试面板(切词 / 切阶段)(2026-06-30)** — 删除仅 `NODE_ENV=development` 显示的 `DevPhasePanel`(快速切词 + 强制切阶段)及其全部后端机制:`PhasedLessonController.forceTransition`、`LessonController.debugSkipCurrentWord`、`/api/chat?action=debug-skip-word`、`session.ts` 的 `debugSkipCurrentWord`/`DebugSkipWordResult` 及随之孤儿化的 `getTotalAttempts`/`resolveWordCardId`/`WordCard` import。真实 intro→interactive→reinforcement 切换路径(`onV2State`/`onV2Progress` → `performTransition` → `/api/chat?action=phase-transition` → `setSessionPhase`)完全不受影响,`phase-transition` route 分支、`setSessionPhase`、`session-phase.test.ts` 全部保留。删/改 4 个测试文件(`debug-skip-word.test.ts` 整删,lesson-controller / PhasedLessonView / phased-lesson-controller 各去一例),残留引用扫描为零,333 单测过,tsc/lint clean,smoke 通过。上次重大同步:**课堂循环 bug 簇 + filler 停用 + skip-word 调试面板(2026-06-21)** — (1) "请老师再说"误推卡:`streamUserInput` 把喂 LLM 的 `userText` 与孩子真实说的 `rawAsrText` 分离,R2 字面计数只看 `rawAsrText`,`start`/`phase-transition`/repeat 这些系统轮传 `''` 不计(根因:repeat 指令文本含当前词被当成孩子命中);(2) reinforcement 跟读热词:`startListening({routeToChat:false})` 清掉冻结的词卡上下文(`magic` 课冻在 `princess`),热词 fallback 全课词表;(3) `knight`/`night` 同音词:给 `magic` 课 `knight` 加 `asrAliases:["night","夜晚"]`,ASR 真实输出被接受为命中(确定性修法,热词偏置只是补充);(4) 停用 thinking 占位音 filler(实测会误导成没听到孩子),`LessonController` 不再 fetch/enqueue `thinking-filler.pcm`;(5) 新增 dev `skip word` 调试面板(`/api/chat?action=debug-skip-word`,仅改 session-local 进度)。新增回归:repeat-no-skip / reinforcement-context / knight-alias / debug-skip-word;312 单测过,smoke 11/11+2/2 UI。上次重大同步:**课堂闭环可靠性修复 §1(2026-06-15)** — 修复 6 个会静默冻死/错位/哑火课堂的 bug + id-7:(1) `startListening` 三条错误早返回(startRecorder throw / asr.open reject / 启动中被取消)现在都释放 `recorderLock`,ASR 连接失败后再按空格不再永久失效;(2) `armSpeechFinishFallback` 兜底定时器现在也 flush `pendingActions`(抽出 `flushPendingActions()` 供 session-finished / error / session-lost / 兜底四处复用),TTS finish 帧丢失时画面不再与老师语音错位;(3) `SpeechExtractor.finalize()` 在 `JSON.parse(buffer)` 成功时优先返回解析出的 `speech`,修复"非-speech 值被 SSE chunk 边界切断导致整轮老师哑火"(流式 delta 当前未被消费,仅 finalize 结果入链);(6) `consumeSSE` 包 try/finally,流出错时释放 reader lock 且不误跑 afterDone;(4) LLM 卡死防护:`mimo/llm.ts` fetch 加 15s 总超时(`AbortSignal.timeout` + 客户端 signal 经 `AbortSignal.any` 合并,一个 signal 同时覆盖连接卡死与流中卡死),`LessonController` 加 20s `chatWatchdog` 后备(首个 SSE 事件清除 + state guard 防长正常语音误触发),SSE `error` 事件现在从 thinking/speaking 自救回 awaiting;(5) controller `error` 事件首次有 UI 订阅 —— `PhasedLessonView` 订阅 `v2.on('error')` 渲染绘本风、4s 自动消失的提示横幅,覆盖全部四个阶段;(id-7) `finalize` 的 `malformed` 标志现在被消费:解析失败且无可恢复 speech 时 `streamUserInput` yield `error` 让客户端友好重试,不再静默成空轮。新增 10 个单测(lesson-controller 7 / speech-extractor 2 / session-malformed 2),smoke:lesson 13/13 过。上次重大同步:**SessionStore + SQLite migrations(2026-05-30)** — 活动课堂 session 现在通过 `SessionStore` 边界读写,当前实现仍是进程内 `InMemorySessionStore`,但 `session.ts` 不再直接拥有 module-level Map;SQLite 初始化改为 `schema_migrations` + versioned migration runner,现有三张表作为 v1 `initial_lesson_schema` 幂等创建。上次重大同步:**Reliability P0/P1 修复(2026-05-30)** — 只读聚合 API(`/api/progress` / `/api/stats` / `/api/sessions`)现在会初始化 SQLite schema,不再依赖 `/api/chat` 先创建表;TTS proxy 会在 Doubao `ConnectionStarted` 前按顺序缓存 `session-start` / `text-chunk` / `session-finish` / `session-cancel`,避免本地 WS 已 open 但 upstream 未 ready 时丢开场白;`LessonController.startLesson()` / `PhasedLessonController.startLesson()` 返回启动是否成功,`PhasedLessonView` 失败时回到可重试的未开始界面。上次重大同步:**Guard pipeline 重构(2026-05-24)** — 把 `streamUserInput` 里的 4 段内联 guard 逻辑拆成 `src/lib/agent/guards/` 下的独立模块(GuardContext / GuardFn / runPipeline + closingGuard / prematureClosingGuard / normalizeActions / speechCardAlign);`streamUserInput` 从 169 行压缩到 60 行;每个 guard 有独立单测;行为不变。上次重大同步:**代码库清扫 + prompt schema 瘦身(2026-05-24)** — 删除死代码 6 项(logger.ts 整文件、callLLM 非流式函数、incrementSilentTurns、silentTurns 字段、GenerateState、addAssistantMessage 内联进 commitAssistantStreamResult、getNextWordCardId);LLM 输出 schema 瘦身:state_update 删除 `current_card_id` / `phase` / `words_learned` / `generated_content` 4 个废字段,仅保留 `current_word` + `attempt_assessment`;mockStreamLLM 修正为合法 ToolAction shape;phase 不再由 LLM 控制(由 PhasedLessonController 规则切换)。上次重大同步:**R-C 服务端 2-hit 切卡规则 + speech/show_card 对齐(2026-05-23)** — 词卡 cleared 触发器从 "1 次 LLM 判 correct + R2 verify" 改为 **"raw ASR 字面命中目标 token 累计 2 次"**,由服务器权威判定,LLM 的 result 仅影响 streak/needs_review。未通过 2 次前服务端强制 `show_card → currentCard`;第 2 次命中那一轮服务端自动推到 `nextCard`。由于实测出现"UI 已切 bird/fish,老师还让读 dog/bird",`streamUserInput()` 现在先缓存 LLM speech,跑完 closing/premature guard 与 `normalizeAssistantActions()`,必要时把 speech 改写为当前 `show_card` 对应卡片后再发 `speech-delta` 给 TTS。上次大改:premature-closing guard + R2 cleared-card un-clear bug(2026-05-23)。再上次:R-A celebration-turn stay(2026-05-23,已被 R-C 取代)。再上次:reinforcement quiz 静态 TTS 引导(2026-05-22)。再上次:Teacher Agent state sync 三项修复(R5-R7,2026-05-22)。再上次:Teacher Agent UX 四项 P0 修复(R1-R4,2026-05-22 早些时候)。具体 commit 参考 `git log --oneline docs/architecture.md`。
+**变更历史**:2026-10-30 之前每次重大同步的说明、MiMo 时代性能基线和文件演进历史已原样移到 [`docs/archive/architecture-history.md`](archive/architecture-history.md)。本文只写现状,不再在这里追加同步记录;变化过程看 git log。
 
 **当前运行范围**:本项目支持本地 Mac Electron 桌面版和桌面浏览器开发模式(访问本地 server)。暂不支持 iPadOS app、移动端 Web、或面向公网发布后的移动兼容。
+
+**导航**:两种课堂模式共用前端、数据和桌面外壳。原有按住说话课堂(豆包 ASR/TTS + LLM)见 §1–§4c;Realtime 自然对话课堂见 §16–§18。前端 §12,数据一致性 §13,配置来源 §14,桌面版 §15。
 
 ---
 
@@ -20,8 +22,8 @@
 │  + Recorder/        │         │  (按轮建连 + buffer)  │         └─────────────────┘
 │    HoldToTalk       │         │                      │                          
 │                     │         │ Chat / SSE           │── HTTP ▶│ LLM(OpenAI兼容) │
-│ LessonController    │◀── SSE ─│  /api/chat           │  stream │  SiliconFlow    │
-│                     │         │                      │         │  DS-V4-Flash    │
+│ LessonController    │◀── SSE ─│  /api/chat           │  stream │  渠道见 §14     │
+│                     │         │                      │         │                 │
 │  (浏览器调度状态机)  │         │  (SpeechExtractor)   │         └─────────────────┘
 │                     │         │                      │                          
 │ PcmPlayer           │         │ TTS proxy            │         │ 豆包流式 TTS     │
@@ -33,20 +35,18 @@
                                  word_performance / course_progress / learners)
 ```
 
+上图是原有按住说话课堂的管线。Realtime 模式不经过豆包代理和 `/api/chat`:浏览器麦克风轨道经 WebRTC 直连 OpenAI,服务端通过 sideband 执行教学工具并写同一套 SQLite,见 §18。
+
 **为什么自定义 Next.js server**:Next.js App Router 不支持 WebSocket `upgrade` 事件。`server.ts` 接管 HTTP server,把 `/api/voice/asr` 与 `/api/voice/tts` 的 upgrade 请求转给对应 proxy 模块,其它请求让 Next.js 处理。upgrade 前先按 `isAllowedWsOrigin`(loopback + 配置端口白名单,`src/lib/voice/ws-origin.ts`)校验 `Origin`,拒绝跨站 WS 劫持(CSWSH,会盗用服务端豆包凭据);缺失 `Origin` 的非浏览器客户端放行。
 
 ---
-
-> 2026-10 spike:SQLite 驱动由 `better-sqlite3` 换成 Node 内置 `node:sqlite`,统一经 `src/lib/db/sqlite.ts` 封装(保留 `prepare/exec/pragma/transaction/close`,嵌套 transaction 用 SAVEPOINT)。无原生模块,`pnpm.onlyBuiltDependencies` 已移除。上文历史条目中的 better-sqlite3 描述以此为准。
-
-> 2026-10 桌面版 spike(`desktop/`,未合并):Electron main 用 `utilityProcess` 拉起打包后的 server(`EDUAGENT_APP=1`、`EDUAGENT_SETTINGS_PATH=<userData>/settings.json`、`HOST=127.0.0.1`、`DATABASE_PATH=<userData>/eduagent.db`、优先端口 38417,占用时改用空闲端口),等端口就绪再开窗口。`EDUAGENT_APP=1` 时 `server.ts` 不读 `.env.local`,Next 配置取自 `.next/required-server-files.json`(经 `__NEXT_PRIVATE_STANDALONE_CONFIG`),`HOST` 缺省仍监听所有网卡(开发行为不变)。server 打包:`EDUAGENT_STANDALONE=1 next build`(`output: 'standalone'`)+ esbuild 打 `server.ts` + 手动补 `public/`、`.next/static`,见 `desktop/scripts/stage.mjs`。
 
 ## 2. 模块清单与职责
 
 | 文件 | 职责(一句话) |
 |------|--------------|
 | `server.ts` | 自定义 Next.js server,WebSocket upgrade 路由分发 |
-| `src/lib/init.ts` | 数据库初始化(`ensureInitialized` / `ensureDatabaseInitialized`)。不再校验 env:凭据缺省由 `config.ts` 的 `isConfigured()` 判定,见文末「配置来源与未配置状态」 |
+| `src/lib/init.ts` | 数据库初始化(`ensureInitialized` / `ensureDatabaseInitialized`)。不再校验 env:凭据缺省由 `config.ts` 的 `isConfigured()` 判定,见 §14「配置来源与未配置状态」 |
 | `src/lib/voice/doubao-codec.ts` | 豆包二进制协议编解码,ASR/TTS 共用 |
 | `src/lib/voice/asr-proxy.ts` | server 端 ASR 代理,**握手期 PCM buffer + finish 缓存 + 按 currentCardId/nextCardId 注入 hot_words(无 cardId 时 fallback 全课词)** |
 | `src/lib/voice/tts-proxy.ts` | server 端 TTS 代理,**长连复用**(StartConnection 一次,session 多次),ConnectionStarted 前缓存 session 控制帧 |
@@ -59,20 +59,17 @@
 | `src/lib/agent/session-store.ts` | 活动课堂 session 的存取边界;运行态 session 仍是进程内 `InMemorySessionStore`(退出即焚)。**跨会话续课(2026-07-20)不替换这里**——而是把"每门课的进度断点"落 `course_progress` 表,进课时 `createSessionFromSnapshot` 重建 memory(见 `course-progress.ts` / §3.1b) |
 | `src/lib/agent/session.ts` | LLM 一轮对话骨架:通过 `SessionStore` 查找 session + addUserMessage → streamLLM 消费 → finalize + sanitize → **runPipeline(guards)** → yield SSE → commitTurn;`commitTurn`/`recordQuizAnswer` 每轮 `upsertCourseProgress` 落断点,`createSessionFromSnapshot` 从断点重建会话 |
 | `src/lib/agent/course-progress.ts` | **会话持久化(2026-07-20)**:LessonMemory 进度子集 ↔ `course_progress` 快照序列化(排除 messages/interestSignals);`isCourseComplete`(全 word cleared + 全 quiz passed)、`isResumableProgress`(排除 completed 与空 intro 断点)、`resolveResumeCardId` |
-| `src/lib/agent/guards/` | **Guard pipeline**(见下方 §Agent Guard Pipeline) |
+| `src/lib/agent/guards/` | **Guard pipeline**(见 §4c) |
 | `src/lib/agent/speech-extractor.ts` | **流式 JSON 中提取 `speech` 字段值,状态机解析,边收边吐 delta;导出 `sanitizeSpeech` 剥离 `xxx_yyy` 这种 card_id token,防止 TTS 把 `_` 读成"下划线 / underscore"** |
 | `src/lib/agent/memory.ts` | 课堂记忆:词汇命中、兴趣信号、turn 历史、当前词精确尝试判定 |
 | `src/lib/agent/prompt.ts` | 课堂 system prompt 拼装,包含已学词总结与连续失败切策略约束 |
-| `src/lib/llm.ts` | OpenAI 兼容 chat/completions 调用(当前 SiliconFlow DeepSeek),`streamLLM` 异步生成 token delta + final usage;`LLM_*` / 旧 `MIMO_*` 整组 fallback 见 `config.ts` |
+| `src/lib/llm.ts` | OpenAI 兼容 chat/completions 调用(当前渠道见 §14),`streamLLM` 异步生成 token delta + final usage;只读 `LLM_*`,见 `config.ts` |
 | `src/lib/audio/recorder.ts` | **课堂实例拥有 mic + AudioContext + worklet**，`LessonRecorder.prewarm()` 提前就绪，同课多轮复用，旧课清理不触碰新课资源 |
 | `src/lib/audio/pcm-player.ts` | 浏览器 24kHz PCM 队列播放,`stop()` 立即静音 |
 | `public/worklets/pcm-recorder.worklet.js` | 按所属 AudioContext 的采样率(原有课堂 16kHz)Float32 → Int16 量化,200ms 一包,**支持 flush 残余**;Realtime 自然对话不经 worklet,麦克风轨道直接进 WebRTC |
 | `src/data/courses/*.ts` | 可见课程数据:常规课为 12 word cards + 4 sentence cards,`tone` 是课程色板键,不对应 Tailwind 颜色类 |
 | `src/data/courses/index.ts` | 新标准课程 registry,导出 `allCourses` / `getCourseById`;首页、API、lesson route 共用 |
 | `src/lib/voice/phased-lesson-controller.ts` | 外层 phase 状态机,包装 `LessonController` 音频管线并规则驱动 phase 切换 |
-| `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
-| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill,ErrorBoundary}.tsx` | G 基础组件、六状态按住说话条和根错误页 |
-| `src/components/home/{CourseHome,LearnerPicker}.tsx` | 课程列表/详情图片墙与孩子选择 |
 | `src/components/lesson/PhasedLessonView.tsx` | 顶层 lesson UI,按 currentPhase 切 Intro / Mandala / Reinforce / Done |
 | `src/components/lesson/IntroFrame.tsx` | 主题导入:麻吉 + 锁定 chip 网格,不再依赖 scene.svg |
 | `src/components/lesson/LessonMandalaV2.tsx` | 逐词跟读,保留 `LessonController` ASR/TTS 管线 |
@@ -81,11 +78,12 @@
 | `src/components/lesson/ReinforceFrame.tsx` | quiz:静态 TTS 播 targetText,播完前锁 repeat-after-me 录音 |
 | `src/components/lesson/ReinforcementFlow.tsx` | 强化巩固流程编排,串联 pick-word / repeat-after-me quizzes,错答时播静态 retry hint |
 | `src/components/lesson/DoneCelebrateFrame.tsx` | G 下课页:逐词掌握、最近课次时长、建议下一课,课堂内与独立路由共用 |
-| `src/components/records/RecordsPage.tsx` | 按当前孩子展示 91 天正方形热力图、课程进度浮层、课次与待练词 |
 | `src/hooks/useSpacebar.ts` | 文档级空格 push-to-talk(过滤 `e.repeat` 与输入框) |
+| `src/lib/db/sqlite.ts` | SQLite 驱动由 `better-sqlite3` 换成 Node 内置 `node:sqlite`,统一经 `src/lib/db/sqlite.ts` 封装(保留 `prepare/exec/pragma/transaction/close`,嵌套 transaction 用 SAVEPOINT)。无原生模块,`pnpm.onlyBuiltDependencies` 已移除。 |
 | `src/lib/db/index.ts` | SQLite 连接持有者。`getDb()` **每次调用时**解析 `DATABASE_PATH`(相对 `process.cwd()`),路径与已开连接不同则 close 旧的重开——正常运行路径恒定,行为仍是进程内单连接;开库前 `mkdirSync(dirname, {recursive:true})`(better-sqlite3 只建文件不建目录,而 `db/` 不在 git 里,fresh checkout 没有该目录);导出 `closeDb()` 供测试在切临时 DB 前后显式释放,堵住"模块加载期捕获路径"导致的跨测试文件泄漏 |
 | `src/lib/db/learners.ts` | 孩子档案 CRUD 与单事务连带删除 |
 | `src/lib/db/schema.ts` + `queries.ts` | `schema.ts`:SQLite migration runner / 表结构 / `schema_migrations` 版本记录(v6 加课堂模式标识，v5 按孩子隔离，断点表主键为 `(learner_id, course_id)`);`queries.ts`:全部业务 SQL 的单一边界——写入 + 断点读写(`upsert`/`getCourseProgress`)+ 报表只读(`getLessonTimings` / `getRecentLessons` / `getLessonWordPerfCount` / `getWordPerformanceByCourse` / **`getLessonCountByCourse` / `getAllCourseProgress`**),调用方注入 `db` 只做 JS 聚合,自己不写 SQL |
+| 前端组件(shell / ui / home / settings / records / lesson 视图) | 见 §12「关键模块」 |
 
 ---
 
@@ -217,7 +215,6 @@ ASR 上下文按实例传入并复制集合，不再通过模块全局 setter �
 服务端 `Session.lifetime` 持有取消能力。`endSession` 先 abort，公开 lookup 隐藏已关闭课堂；事务保存结束日志/断点成功后从 SessionStore 移除，失败则仅保留供 end 重试。`streamUserInput` 合并请求和 session 信号传给 LLM，在发布事件和实际提交前检查会话对象仍存活；生成器暂停在 actions yield 后也要再检查。普通 LLM 与固定回复两条路径都覆盖。取消流后 orchestrator 不再 enqueue/close；mock provider 也遵守 signal。
 
 这些边界阻止 end 返回后的旧 turn 写入；P2 的同步事务同时保护本轮多表提交与内存发布。结束 HTTP 未送达或进程崩溃不在此保证内；客户端本地释放不依赖服务端响应成功。
-
 
 ---
 
@@ -398,32 +395,17 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 ---
 
-## 7. 性能基线(历史:MiMo 时代)
+## 7. 性能基线
 
-> **本节表格是 MiMo 时代的历史基线,不是当前系统的性能。** 当前 LLM 为
-> SiliconFlow DeepSeek-V3.2(2026-10-24 起默认,此前为 DeepSeek-V4-Flash),现役数字以 `docs/voice-benchmarks.md` 为准(其中 2026-07 的数字测于 V4-Flash,V3.2 未重测);
-> 下面只保留作对比与回溯用,不要拿它当验收标准。
-
-详见 `docs/voice-benchmarks.md`(2026-05-01 18 轮人工实测,14 轮成功)。
-
-| 指标 | 目标 | 实测中位 | 状态 |
-|------|------|---------|------|
-| 用户松手 → ASR final | < 500ms | 594ms | 接近(prewarm + buffer 之后,主要余下豆包识别本身) |
-| ASR final → LLM 第一句 token | < 1s | 3976ms | **超目标**(MiMo first-token 慢,前端无法优化) |
-| LLM 第一句 token → TTS 首 PCM 包 | < 500ms | ~2200ms | **超目标**(SSE 解析 + TTS 合成 + 网络) |
-| **首音频总延迟** | **< 2s** | **6212ms** | **超目标**,主要被 LLM 拖累 |
-| round-trip(用户松手到 AI 说完) | < 3s | 8860ms | 含 AI 实际说话时长,非纯首响指标 |
-
-**主要瓶颈**:MiMo first-token 4 秒。前端再快也只能省几百 ms。可选优化:换更快模型 / prompt 强制最先吐 speech / 思考期播一句"嗯..."占位。
-
-**注**:上表为 MiMo 时代实测基线;2026-07-02 起 LLM 已切换为 SiliconFlow DeepSeek-V4-Flash,服务端延迟见 `docs/voice-benchmarks.md` 新基线,浏览器全链路待真人课重测。
+现役延迟与成本数字以 [`docs/voice-benchmarks.md`](voice-benchmarks.md) 为准。原 MiMo 时代基线表已移到 [`docs/archive/architecture-history.md`](archive/architecture-history.md),只作回溯。
 
 ---
 
 ## 8. 已知不足(指向 TODO.md 详情)
 
+> 本节针对原有按住说话课堂;Realtime 课堂的待验证项见 `docs/TODO.md`。
+
 - **课程 Session resume**:活动 session 仍是进程内 `InMemorySessionStore`,server 重启 / 刷新 / 断网后客户端旧 sessionId 依然失效,`/api/chat?action=message` 收 404 时只提示"课程已过期,回首页重新进入"(跨重启的活动 session 接管未做)。**但课堂进度自 2026-07-20 起已持久化并支持续课**:每轮 upsert `course_progress` 断点,`action=start` 从有效断点 `createSessionFromSnapshot` 恢复(`X-Resume-Info`),重进课程即回到上次阶段,见 §3.1b。
-- ~~**actions 与 TTS 时序**~~ — **已修复(R1)**:`pendingActions` 缓冲机制,`show_card` emit 推迟到 `tts.session-finished`
 - **LLM first-token 延迟**:首音频延迟主要瓶颈,前端无法优化(MiMo 时代实测 4 秒;现 SiliconFlow DeepSeek-V4-Flash,短 prompt 探针首 token 中位 ~2.7s,真实课堂整步中位 ~5.4s、尾部 ~14s)
 - **ASR 识别质量**:已补 targetWords hotwords;字典化 fallback 纠正已撤销(见 §「真实回归基线」)。当前由教学循环 v1.1 的 LLM `attempt_assessment` 基于 raw ASR + currentCardId + drillParts 做课堂内容错判定,真实儿童语音效果等下一节课实测
 - **Token 消耗偏高**:LLM message history 已裁到最近 12 条(约 6 轮),仍未做摘要压缩
@@ -505,36 +487,9 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ---
 
-## 10. 文件演进历史(粗粒度)
+## 10. 文件演进历史
 
-- 2026-09-22 — P1 第二批：统一浏览器 run 取消和迟到事件检查；录音资源及 ASR context 按课堂实例持有；连接关闭结清待启动 Promise；服务端结束会话取消在途 turn，发布与提交前校验存活性。
-- 2026-09-22 — P1 第一批：课堂操作明确确认成功，转场区分阶段接受与开场语音完成，quiz 保存失败可重试且不推进；SSE reader 取消后 orchestrator 不再写已关闭的流。
-
-- 2026-05-01 — 初版语音管线实施 + sync 文档(README/TODO/benchmarks)
-- 2026-05-01 — **E2E 验收期间多处集成 bug 修复**(架构定型的关键改动)
-- 2026-05-01 — 删 [bench] 打点 + TODO 增补
-- 2026-05-01 — 新增 architecture.md + CLAUDE.md(本 living doc 制度建立)
-- 2026-05-01 — git history redact secrets + CLAUDE.md 加凭据规则
-- 2026-05-05 — **画布 v2:WordCardCanvas 替换 ImageCanvas** — 协议从 show/focus/annotate 统一为 `show_card`;课程数据从 `images[]` 迁移到 `cards[]`(`kind: 'word'|'sentence'`);画布层从图叠层改为图+中英文独立 DOM;删除 ShowTool/FocusTool/AnnotateTool 组件
-- 2026-05-10 — **教学循环 v1.1:课堂内进度引擎 + drillParts** — 每张 card 必填 `drillParts`;服务端用 `show_card` 同步 currentCardId;LLM 输出 `attempt_assessment`;memory 维护 `cardProgress` / `clearedCardIds`;history 裁到最近 12 条
-- 2026-05-14 — **前端重构 Bunny 的小院子** — 5 空间 5 页面;Bunny 升级为 pose × mood 全身组件;新增 SceneFrame + LetterCard + WordBook + BloomButton + StickerWord + 储物间 / 阁楼;新增 /api/{progress,sessions,stats};详见 §12
-- 2026-05-15 — **三阶段 lesson structure refactor** — 新增 food 三阶段课程、ImageGen PNG 单卡资产 + 结构化 `scene.svg`;新增 phase-aware prompt / SSE progress_snapshot / `phase-transition` / `quiz-answer`;新增 `PhasedLessonController` + Intro / Interactive / Reinforce / Quiz 组件;删除旧课程数据与旧 `LessonView` fallback;`Course.phases` 收紧为必填
-- 2026-05-20 — **CC 手绘绘本风 UI 接入** — 前端替换为麻吉魔法学院;新增 magic 原子 / PictureCard / HomeStudy / IntroFrame / LessonMandalaV2 / ReinforcementFlow / JournalPage / ParentsPage;`theme` 改 `tone`;删除 scene.svg 与旧 UI 组件。
-- 2026-05-21 — **课程 registry 扩展** — 可见课程扩到 10 门;常规课合同收紧为 12 word cards + 4 sentence cards;repeat-after-me 绑定 sentence cards;课程资产只为 word cards 生成 Codex 内置 `image_gen` PNG,sentence cards 复用目标词图片。
-- 2026-05-22 — **Teacher Agent UX P0 四项修复** — R1:actions/TTS 时序(pendingActions 缓冲);R2:ASR 字面 verify(LLM correct + raw ASR 双重确认才 cleared);R3:normalize 放宽(word card 接受任意 untouched/attempted);R4:closing guard 始终注入 + 服务端 speech 扫描替换。
-- 2026-05-22 — **Teacher Agent state sync 三项修复**(从 05-22 实测课报告) — R5:show_card 严格白名单 `{currentCard, nextCard}`(R3 收紧,防 LLM 回跳已通过卡);R6:closing guard 加 `currentWord` 白名单(防教学中误触发整句替换);R7:correct 后服务端自动 push `show_card: nextCard`(防 LLM 命中后不推进)。（旧 `getNextWordCardId` helper 已在 2026-05-24 清扫时删除,其功能被 R-C 的 `findFirstUncleared` 内联替代）
-- 2026-05-22 — **reinforcement quiz 静态 TTS 引导** — 新增 `LessonController.speakStatic` 与 `quiz-speaking` state;pick-word 播 prompt + correct English,repetition 播 targetText;播完前锁 UI,错答播 retry hint;reinforcement phase-change 等过渡 TTS 完成后再显示 quiz。
-
-- 2026-05-24 — **代码库清扫(A+B+C)** — 删 logger.ts / callLLM / incrementSilentTurns / silentTurns / GenerateState / addAssistantMessage(内联) / getNextWordCardId;prompt state_update 删 4 废字段(current_card_id / phase / words_learned / generated_content),仅保留 current_word + attempt_assessment;mockStreamLLM 修正为合法 ToolAction。
-- 2026-05-24 — **Guard pipeline 重构(D)** — 新增 `src/lib/agent/guards/`(index / closing-guard / premature-closing-guard / normalize-actions / speech-card-align + 各自 *.test.ts);`streamUserInput` 从 169 行压缩到 60 行;行为不变;每个 guard 有独立单测;`docs/architecture.md` 新增 §4c。
-- 2026-05-25 — **R-C canonical matching + explicit ASR aliases** — R-C 计数前对 target 与 raw ASR lower-case,保留 ASCII 字母/数字和 CJK 字符并删除分隔符,修复 treats 课程 `ice cream` ASR 输出无法命中 `icecream` 卡片 id、导致无法推进到 `lollipop` 的问题;新增 `WordCard.asrAliases` 支持课程显式声明 `pie` 可由 ASR 输出 `派` 命中,但不默认把所有中文释义算作英文通过。
-- 2026-05-26 — **Prompt input quantification** — `/api/chat` 每轮 LLM 调用前通过 `buildPromptInput()` 生成同一份 system prompt 与 inputBreakdown,按 static rules / phase rules / course definition / lesson state / summary constraints / history / separators 记录字符数,并在拿到 MiMo `prompt_tokens` 后按字符占比估算各 bucket token;`interaction_logs.model_calls.llm.inputBreakdown` 持久化该诊断,`lesson-report-data.ts` 聚合 trackedTurns、平均字符、最大 bucket 和估算 token share,用于决定下一轮 prompt slimming 先压哪里。
-- 2026-05-26 — **Eval v1 lesson quality scorecard** — `lesson-report-data.ts` 在原有 session/tokens/interactions 基础上输出 `eval` 结构化评分卡:session health、cost/context、teaching-loop outcomes、agent behavior risks、next-iteration signals。所有指标从 `lesson_logs`、`interaction_logs`、课程词卡定义和 `word_performance` 确定性计算,不引入 LLM-as-judge,用于把课后报告里的人工判断沉淀成可回归、可比较的数据。
-- 2026-07-05 — **repeat-after-me 降难度 + final-clear 矛盾话术拦截** — fruits 真人课(session `893ed393`)暴露 q7 `I see the grape.` 被 `See the.` 过宽判 correct,以及最后词 clear 当轮 n=28 仍说"还有几张水果卡片没看"。修法:repeat-after-me 初次静态 TTS 改为"完整句 → 慢速拆分 → 完整句",判分要求目标词/核心内容词出现并覆盖足够句子内容;`speechCardAlign` all-cleared just-cleared 分支新增终态矛盾话术检测,命中"还有...没看/继续学下一个"等续课句时改写为 `ALL_CLEARED_CELEBRATION`。
-- 2026-10-24 — **本地多孩子档案** — migration v5 将课次和课程断点按孩子隔离；首页选择孩子，设置页管理档案，学习记录直接进入；旧库迁移到默认「宝贝」。
-- 2026-07-20 — **会话持久化与断点续课**(真人课信号触发:课上一半退出下次从头) — 新增 `course_progress` 表(migration v4,PK=course_id,每门课一条断点)+ `course-progress.ts`(进度序列化 / `isCourseComplete` / `isResumableProgress` / `resolveResumeCardId`);`/api/chat` start 从有效断点 `createSessionFromSnapshot` 恢复(响应头 `X-Resume-Info`,新课字节不变),每轮 upsert 断点,quiz 答对累积 `passedQuizIds`;完成 = 全 word cleared + 全 quiz passed,**不过期**;前端从断点阶段起播 + 老师"欢迎回来" + reinforcement 跳过已过 quiz(§3.1b);首页 `HomeStudy` 每门课展示上课次数 + 完成度% + "继续"角标(`/api/progress` 扩展 `timesStarted`/`progressPercent`/`hasResume`/`completed`,`getLessonCountByCourse` + `getAllCourseProgress` 聚合)。次数 = 每次进课(含续课)计一次。同批「工程安全债」评估为单用户纯本地无外部攻击面、收益低,整批 park(见 TODO.md)。
-
-> 不再 hardcode SHA — 因 git history 经过 redact 重写,SHA 不稳定。具体 commit 用 `git log --oneline` 现查。
+原粗粒度文件演进历史已移到 [`docs/archive/architecture-history.md`](archive/architecture-history.md)。之后的演进看 `git log --oneline -- <path>`。
 
 ---
 
@@ -576,7 +531,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | 文件 | 职责 |
 |------|------|
 | `src/components/shell/*` / `src/app/(main)/layout.tsx` | 常驻主导航与孩子切换；内容 template 单独动画 |
-| `src/components/ui/{Button,GlassPanel,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill,ErrorBoundary}.tsx` | G 基础组件、六状态按住说话条和根错误页 |
+| `src/components/ui/{Button,Tag,ProgressBar,Banner,Skeleton,EmptyState,PushToTalkPill,ErrorBoundary}.tsx` | G 基础组件、六状态按住说话条和根错误页 |
 | `src/components/home/{CourseHome,LearnerPicker,HomeWordCard}.tsx` | 分组课程列表、详情图片墙、可复用单词卡、孩子选择和读取状态 |
 | `src/components/settings/{VoiceSettingsPanel,useSettingsDraft,MicSection,LearnersSection,AboutSection}` | 设置四分区、凭据草稿、连接测试和保存后的退出码 75 |
 | `src/components/onboarding/OnboardingScreen.tsx` / `src/lib/onboarding-entry.ts` | 三步首次引导和首页进入条件 |
@@ -637,78 +592,11 @@ masteryStarsFromRatio(correct, attempts):
 
 `prefers-reduced-motion: reduce` 时,全局动画/过渡降级为 0.01ms,并显式关闭 `.magic-sparkle` 闪烁动画。
 
-## P2 数据一致性：单次课堂统计（2026-09-22）
-
-`Session.lessonInteractionCount` 只计算当前 lesson 已写入的互动，创建或续课时均从 0 开始，普通 turn、quiz 与强化阶段固定回复统一递增；touch/finish lesson 汇总只取本次值。`LessonMemory.totalInteractions` 继续保存课程累计教学上下文并进入断点，不替代单次日志计数。历史日志不自动回填或重算。
-
-### 原子提交（P2，2026-09-22）
-
-普通 turn 的用户消息、教学状态和 token 用量先在草稿中计算，quiz 与固定回复使用同一 `commitSessionUpdate` 入口。同步 SQLite transaction 包含词表现、互动、lesson 汇总及断点；事务成功后才发布 live memory/计数/用量。事务不跨任何 await。LLM 等待期间或预览 yield 期间若有另一笔提交/阶段接受，revision 检查拒绝旧草稿，客户端可重试。
-
-speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:true}` 只在落盘后发送；失败为 SSE error / HTTP 500。正常教学规则和播放顺序不变。创建先写 lesson log 再发布 session；结束立即取消，事务保存 finish/断点成功后删除。结束落盘失败时课堂保持关闭，仅允许再次 end 尝试保存，不重新开放教学。多次请求的 exactly-once 去重不在本次范围。
-
-### 快照与协议入口（P2，2026-09-22）
-
-`db/progress-snapshot.ts` 用当前格式校验 snapshot、两种不同的 phase、集合成员、非负整数、时间与 completed 标记。`getCourseProgress` 缺行返回 undefined，坏行抛 `InvalidCourseProgressError`；chat start 在创建 lesson/session 前返回 409 / INVALID_COURSE_PROGRESS。页面说明原记录已保留，并恢复启动入口。重复读取、失败启动不覆盖或删除坏行。批量聚合逐行诊断并跳过坏行，正常课程仍可显示；日志只包含 courseId/字段路径，不输出原始快照。
-
-当前完整无版本快照继续兼容；后来新增的卡片仍 backfill，已移除/未知 card 和 quiz ID 保留，在首页派生比例时按当前课程识别项统计。缺整个必需集合不能用默认空数组掩盖。没有格式迁移、历史重算或自动修复。原聚合测试中仅含两个字段的简化 fixture 已补成完整合法快照，它们不代表旧持久化格式。
-
-纯共享 `lib/lesson-protocol.ts` 定义并解析 HTTP request/ack、ResumeInfo、LessonProgressSnapshot 与 StreamUserEvent，服务端编码和浏览器消费复用同一判别联合。跨网络输入在入口校验；非法 done JSON 不算成功，resume phase 不再由任意 string 强转。合法事件 JSON 字段与事件名保持，allWordsDone 和 actions 的 state_update 允许既有可选字段。内部教学函数不重复解析外部 schema。
-
-## 配置来源与未配置状态(桌面版 Phase 1)
-
-**配置来源**
-- Web 开发模式(无 `EDUAGENT_APP`):`server.ts` 读 `.env.local`,行为不变。
-- App 模式(`EDUAGENT_APP=1`):Electron main 只传 `EDUAGENT_SETTINGS_PATH=<userData>/settings.json`,不注入任何 key。`server.ts` 在 `getConfig()` 之前调用 `applySettingsToEnv()`(`src/lib/settings/store.ts`):先清掉继承来的同名 env 与旧 `MIMO_*`。LLM 只取 `activeLlmChannelId` 指向的那条渠道,非空时写入 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`,并始终写入 `LLM_PROVIDER`(`siliconflow` | `volc-ark` | `deepseek` | `custom`)。语音字段映射到 `DOUBAO_AUTH_MODE`、`DOUBAO_API_KEY`(非空才写)、`DOUBAO_APP_ID`、`DOUBAO_ACCESS_KEY`、`DOUBAO_ASR_RESOURCE_ID`、`DOUBAO_TTS_RESOURCE_ID`、`DOUBAO_TTS_DEFAULT_SPEAKER`。没有 `doubaoAuthMode` 且 App ID 或 Access Key 非空的文件会迁成 `legacy` 并写回;两者都空则内存里用 `apikey`,不因此新建文件。`asr-proxy` / `tts-proxy` / `config.ts` 继续只读 `process.env`。文件不存在时内存里用默认渠道(SiliconFlow、`deepseek-ai/DeepSeek-V3.2`)和默认资源 ID(`volc.seedasr.sauc.duration`、`seed-tts-2.0`),不新建文件。磁盘上只有旧的顶层三字段、没有 `llmChannels` 数组时,按地址主机名推断类型(`siliconflow.cn` / `volces.com` / `deepseek.com`,其余 `custom`),迁成 id 为 `legacy-llm` 的一条渠道并原子写回;写失败仍用迁好的值启动。`config.ts` 读 `LLM_PROVIDER`,缺失或未知值当作 `custom`,这样 Web 的 `.env.local` 不设该变量也能启动。`llm.ts` 的超时与对冲不变(4s 首个 `delta.content`、10s 卡住、30s 总上限);只有 `volc-ark` 在请求体加 `thinking: { type: 'disabled' }`。
-- 豆包 WS 端点由 `src/lib/voice/doubao-endpoints.ts` 提供,env `DOUBAO_ASR_WS_URL` / `DOUBAO_TTS_WS_URL` 可覆盖(仅测试用,指向本地 fake server)。`config.ts` 里原先过期的 v2 默认地址已改成与 proxy 一致的 v3 端点。
-
-**未配置状态**
-- `config.ts` 的 `isConfigured()` 直接读 `process.env`:`VOICE_MOCK=true` 视为已配置;否则要求 LLM key(`LLM_API_KEY` 或旧 `MIMO_API_KEY`)、两个 Resource ID,以及当前鉴权方式的凭据。`apikey` 要 `DOUBAO_API_KEY`;`legacy` 要 `DOUBAO_APP_ID` 和 `DOUBAO_ACCESS_KEY`。`DOUBAO_AUTH_MODE` 只认这两个值,缺省或其它值时按「有 API Key → 新版,否则有 App ID 或 Access Key → 旧版,都没有 → 新版」推断,这样已有 `.env.local` 不用改也能上课。`getConfig()` 缺凭据不再抛错,server 照常启动。
-- 未配置时 `POST /api/chat` 返回 HTTP 503 + `{ code: 'NOT_CONFIGURED' }`;语音 WS upgrade 在 `guardUpgrade()`(`voice/upgrade-guard.ts`,先验 Origin 再验配置)里直接回 HTTP 503 并关闭 socket。前端:首页加载时 `GET /api/settings` 发现未配置且没有跳过,进入 `/onboarding` 第 1 步;设置读取失败时首页照常打开。`LessonController.start` 收到 NOT_CONFIGURED 仍跳 `/settings`。
-
-**Settings API**(`src/app/api/settings/`)
-- `GET /api/settings` -> `{ mode: 'app'|'web', configured, mock, values }`。`values.llmChannels[].apiKey`、`doubaoApiKey`、`doubaoAppId`、`doubaoAccessKey` 打码(末 4 位,长度 ≤8 只给 `••••`),其余原样。Web 模式没有 key 时展示一条 SiliconFlow 预设渠道(id `env-llm`);有 `LLM_API_KEY` 时渠道名取 `LLM_PROVIDER` 对应的类型名。豆包鉴权方式与 Web env 用同一套推断。
-- `POST /api/settings`:仅 App 模式(web 模式 403 `WEB_MODE_READONLY`)。zod 校验渠道列表(1–20 条、id 唯一、当前 id 必须在列表里)。每条渠道的 `apiKey` 按渠道 id 合并:提交打码值或空串保留该 id 已保存的 key,新 id 不继承别的渠道的 key。`doubaoApiKey` 与旧版 App ID / Access Key 同样:打码或空串保留原值。同目录临时文件(0600)写完 rename,再 chmod 0600。返回 200 后 400ms 以**退出码 75** 退出。日志只记当前渠道的 provider 和 `doubaoAuth`,不记 key。
-- `POST /api/settings/test`:`scope` 为 `channel` 时只测 `channelId` 那一条(不必是当前渠道),请求体带该渠道的 provider 附加参数,成功原因形如「正常 · 首字 1.2s · 整轮 3.4s」(首字只认 `delta.content` 或一次性 JSON 的 `message.content`);`scope` 为 `voice` 只测豆包 TTS/ASR,请求头按提交的 `doubaoAuthMode` 走同一套鉴权构造(新版只有 `X-Api-Key`,旧版 ASR/TTS 头名不同);`scope` 缺省或 `all` 测当前渠道加语音。打码字段回退已保存值,空的地址/模型用该类型预设补齐。LLM 失败额外返回稳定 `code`,与课堂共用 `classifyLlmFailure` 的中文原因并附 HTTP 状态,例如「余额不足:请到模型服务商控制台充值后再试(HTTP 402)」。豆包原因与错误码保持原契约;不回显、不记录 key。
-- **CSRF**:两个 POST 都经 `rejectBadOrigin()`,`Origin` 必须是 `http://localhost:<PORT>` 或 `http://127.0.0.1:<PORT>`;**缺失也拒绝**(与 WS 允许缺失的规则不同),返回 403。
-
-**退出码 75 重启约定**:server 保存设置后以 75 退出;`desktop/main.js` 的 utilityProcess `exit` 回调见 75 就用同样的 env 重启子进程,端口就绪后 `loadURL` 重新加载窗口。非 0 且非 75 退出自动恢复一次,再崩溃则显示含日志路径的错误页;恢复期间显示本地重启页,详见下方「桌面版」。`desktop/main.js` 的 `setWindowOpenHandler` / `will-navigate` 把站外 http(s) 链接交给系统浏览器,其余导航一律拦截。
-
-**ws / bufferutil 坑**:`server.ts` 顶部设 `process.env.WS_NO_BUFFER_UTIL ??= '1'`(开发模式下 Next 路由里的 ws 客户端同样会踩,真实 key 实测 `/api/settings/test` 的 ASR 探测报错),打包时 `desktop/scripts/stage.mjs` 的 esbuild 产物开头也设一次(打包后 ws 先于 server 主体求值)。否则打包版里 `ws` 的可选依赖 `bufferutil` 会被 Next 的 require hook 解析到没有 `mask` 的占位模块,ws 发送 >=48 字节的帧(ASR 请求帧/音频帧)时抛 `t.mask is not a function`;Phase 0 的 mock 模式不经过 ws 客户端,所以没暴露。
-
-
-## 桌面版(Electron Phase 3/4)
-
-2026-10-24:Phase 0/1 壳完善为以下生命周期与授权流程;保留既有 standalone + esbuild、自签名、退出码 75 契约。
-
-**进程与端口**:Electron main(`desktop/main.js`)持有窗口和唯一 `utilityProcess` server。打包版优先监听 `127.0.0.1:38417`(`EDUAGENT_PORT` 可覆盖),启动前探测端口,被占用则向系统申请空闲端口并写日志。实际端口通过 `PORT` 注入 server;HTTP Settings CSRF 和语音 WS Origin 白名单均按该值校验,窗口导航、权限和 IPC 校验也只接受实际本地 origin。端口变化会改变 localStorage 的 origin,但 SQLite 和系统麦克风授权不受影响。
-
-**preload 暴露面**:`desktop/preload.js` 在 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` 下暴露 `window.eduagentDesktop` 的五个无参数原生方法及下述只读菜单订阅:`getMicStatus()`、`requestMic()`、`openMicSettings()`、`getAppInfo()`、`openLogsFolder()`。main 验证调用来自当前窗口的主 frame 和本地 origin。版本由 `app.getVersion()` 提供,设置路径、任意 URL、文件系统和原始 IPC 均不传给 renderer。新增只读 `onMenuCommand(callback)` 订阅，返回取消订阅函数，仅允许 `nav:courses / nav:records / nav:settings / learner:new / learner:<id>`；preload 校验枚举与 ID，回调不暴露 IPC event。main 从实际 loopback server 读取孩子档案，以固定代码读取本地选中 ID，加载/导航/聚焦、renderer 档案请求完成与应用菜单打开事件同步孩子菜单，无定时轮询；列表变化重建菜单，只有选择变化时就地更新勾选。
-
-**麦克风授权**:启动仅调用 `getMediaAccessStatus`,不申请授权。首页在配置和只读麦克风检查完成前保持准备状态。未配置且未跳过进入 `/onboarding` 第 1 步;引导里保存会先写 `eduagent:onboarding-resume=2`,退出码 75 后窗口仍先加载 `/`,首页再进入第 2 步。权限为 `not-determined` 且尚未完成或跳过时也进入第 2 步;没有孩子档案且未跳过、档案可读时进入第 3 步。引导是独立全窗口,不挂主工具栏,旧 `/microphone` 已删除。跳过标记只存在当前 origin 的 localStorage。设置页的 `MicSection` 常驻显示「已允许 / 未决定 / 已拒绝」,只有明确点击「允许使用麦克风」才调用 `askForMediaAccess`。已拒绝时,「打开系统设置」经 `shell.openExternal` 打开固定 URL `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`;macOS 修改拒绝状态后可能需要退出重开 App。`restricted` / `unknown` 保守归为已拒绝。
-
-「试录一下」复用 `LessonRecorder` 的 16k AudioContext、AudioWorklet 与 PCM 输出计算 RMS 音量,最多 10 秒,停止或离开页面即 dispose,不保存音频、不连接 ASR。课堂入口 `LessonClient` 仅在权限为 granted 时挂载 `PhasedLessonView`,其他状态显示设置入口,因此不会开始 server session 或预热录音。授权通过后保留 Phase 2 的档案解析,将选定 `learnerId` 传给课堂。回到窗口时重新检查状态。Electron 的 media permission handler 也只对本地 origin、已允许的音频请求放行。Web 无 preload 时使用 `navigator.permissions.query({ name: 'microphone' })` 读取状态,设置页的明确授权按钮才调用 `getUserMedia` 并立即释放 stream;隐藏系统设置和日志文件夹按钮。
-
-**服务重启与退出**:server 保存设置后以 75 退出,main 显示包内 `restarting.html`「正在重启…」,重新启动服务并等待 `/api/settings` 返回 200,再加载首页。首页随后按引导标记决定留在首页或进入 `/onboarding`。非 0 且非 75 退出在本次 App 生命周期内自动重启一次;第二次崩溃、正常意外退出或就绪超过 30 秒,显示错误页与日志位置。旧进程的就绪轮询在新进程接管后取消,避免旧回调覆盖新窗口。退出 App 时先终止 server,等待退出事件,3 秒未退出则强制清理。单实例锁防止重复进程;站外 http(s) 链接用系统浏览器,renderer 导航和 redirect 不能离开本地 origin,保留编辑菜单的复制粘贴快捷键。
-
-**数据与日志**:`app.getPath('userData')`(通常 `~/Library/Application Support/EduAgent/`)下保存 `settings.json`、`eduagent.db` 和 `logs/server.log`;日志启动时超过 5 MiB 轮转为 `server.log.1`,保留一份。关于区块与 App 菜单均可经 `shell.openPath` 打开日志目录。Key 仍由 server 从 settings 文件映射到 env,见上方 Phase 1 节。
-
-**开发与打包**:`pnpm app:dev` 启动本机 `pnpm dev`(优先 3000,占用则改空闲端口),Electron 通过 `EDUAGENT_DEV_URL` 指向该 dev server,不依赖 staged server 或安装包。启动脚本负责清理其 dev 进程组,普通 `pnpm dev` 行为不变。`pnpm app:release`(兼容入口 `pnpm app:pack`)经 `desktop/scripts/release.mjs` 完成 stage → electron-builder dir → 专用钥匙串自签名与 codesign 校验 → dmg。版本从根 `package.json` 注入打包 metadata,文件名为 `EduAgent-<version>-<arch>.dmg`;保留 `EnableNodeCliInspectArguments` fuse 以支持 Playwright。证书步骤见 [mac-signing.md](mac-signing.md)。`pnpm app:e2e` 在临时 userData + VOICE_MOCK 或本地 fake server 下执行;只有 `EDUAGENT_TEST=1` 时 `EDUAGENT_TEST_MIC_STATUS=granted|denied|not-determined` 才覆盖 native 状态,未询问时点允许会在该测试进程内变为 granted。
-
-**App 图片 staging(2026-10-24 Phase 4)**:`stage.mjs` 在构建前确认本机 `cwebp` 可执行,仅把 `public/images/**/*.png` 转成 q82 WebP 放入 `desktop/build/server/public/images-webp/`,不复制这批 PNG 到 staging,不改仓库原图、课程数据或组件。`next.config.mjs` 仅在 `EDUAGENT_STANDALONE=1` 时开启 standalone 和 rewrite:`/images/:path*.png` → `/images-webp/:path*.webp`;普通 dev/build 没有 rewrite。App 的生产配置从 required-server-files 注入,路由从构建 manifest 读取。`SKIP_NEXT_BUILD=1` 只可复用已有 App 构建,stage 会检查 rewrite 存在,防止误用普通 Web 构建。转换统计保存在 `desktop/build/webp-metrics.json`。standalone 复制排除 `.env*`,发布物不带开发配置、用户数据库或签名文件。
-
-`pnpm app:verify-images` 从 `allCourses` 递归收集全部 `imageUrl`,启动真实打包 App,使用原 PNG URL 逐个检查 200、`image/webp`、RIFF/WEBP 文件头和 Chromium 实际解码。JSON 证据位于 `desktop/dist/evidence/webp-verification.json`;`python3 desktop/scripts/compare-webp.py`(需 Pillow)据此每门课抽一张生成左右对比图,保留原生 512px,供画质目检。采用 Next 原生 [rewrite](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites) 与官方 [cwebp](https://developers.google.com/speed/webp/docs/cwebp),没有新增运行时图片处理依赖。
-
-**架构产物**:2026-10-24 用户决定只交付 Apple 芯片 arm64 版,Intel 版按需再做,不生成 universal 包。SQLite 无 ABI 重编译需求,但 Next 构建工具依赖宿主架构的 SWC。Phase 0 曾认为 standalone 会携带该 SWC;本轮实际 staging 未发现 `@next/swc-*` 或 `.node` 二进制,因此不把旧推断当作本轮包内容事实。将来制作 x64 时需要在 x64 环境重新 `next build`,确认 SWC/esbuild 构建依赖可用,再完成 x64 App 冒烟和 Intel Mac 真机验收。当前 release 只接受 arm64 Node,且始终重新构建,不接受 `SKIP_NEXT_BUILD` 跳过。
-
-实现依据:采用 Electron 原生 [systemPreferences](https://www.electronjs.org/docs/latest/api/system-preferences) 和固定方法的 [contextBridge / IPC](https://www.electronjs.org/docs/latest/tutorial/ipc),不新增原生依赖或自制授权协议。真实 TCC 弹窗、系统设置页跳转、覆盖安装后授权保留及实体麦克风音质仍需真机验证。
-
-
 ### UI 重构 P1 基础层（2026-10-25）
 
 P0 临时 ShellSpike、shell-spike 路由与 native 材质开关已由正式 CSS 外壳替代。`src/app/(main)/layout.tsx` 常驻 Toolbar（52px，红绿灯 x16/y19）、SegmentedControl、LearnerSwitcher，路由包含首页、`/records` 与设置，旧 `/journal`、`/parents` 已删除。切 tab 只由组内 template 对内容做 150ms 淡入和 4px 位移，课堂及下课独立全窗口。首页由 P3 替换为列表/详情，记录由 P4 合并重做，设置暂留原表单；首页原右上浮层由工具栏替代；现有麦克风首次引导移至独立 `/microphone` 路由，不挂主工具栏；完整三步引导留 P5。
 
-G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体，英文词汇使用已打包 Fredoka，旧字体文件留待 P6 清理。新组件使用 lucide-react 线性图标。UI primitives 包括 Button、GlassPanel、Tag、ProgressBar、Banner、Skeleton、EmptyState、六状态 PushToTalkPill。全局限制拖选、图片拖动、回弹、网页右键菜单，输入和说明可复制；输入右键保留原生编辑菜单，键盘焦点紫色环，降低透明度时工具栏和玻璃面板使用不透明浅色底。
+G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体，英文词汇使用已打包 Fredoka，旧字体文件留待 P6 清理。新组件使用 lucide-react 线性图标。UI primitives 包括 Button、Tag、ProgressBar、Banner、Skeleton、EmptyState、六状态 PushToTalkPill。全局限制拖选、图片拖动、回弹、网页右键菜单，输入和说明可复制；输入右键保留原生编辑菜单，键盘焦点紫色环，降低透明度时工具栏和玻璃面板使用不透明浅色底。
 
 孩子选择仍存 localStorage；同页切换通过 `eduagent:learner-change` 通知首页/记录/工具栏更新，档案写入成功通过 `eduagent:profiles-change` 更新工具栏。原生菜单支持 ⌘, 与 ⌘1/2/3、孩子切换、新建档案、日志目录、全屏和标准编辑/窗口操作。About 面板由 `app.setAboutPanelOptions` 设置名称/版本/介绍，macOS 图标来自 bundle。
 
@@ -737,8 +625,7 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 原生菜单监听根 Menu 的 menu-will-show：Electron 45 的 Cocoa controller 在应用子菜单打开时向根 model 发事件。与加载/导航/聚焦刷新共用固定本地读取，无新增 IPC。macOS tracking 期间结构重建会延迟到菜单关闭，所以额外观察当前 renderer 的固定 /api/learners 请求完成事件，提前同步同页档案和选择变化；只读 Node fetch 不经过该 session，不产生循环。异步读取失败保留旧菜单供下次恢复。
 
-
-## P4 下课与学习记录（2026-10-25）
+### P4 下课与学习记录（2026-10-25）
 
 `/records` 合并原先的单词本和家长页，主工具栏及原生 nav:records / Cmd+2 指向它。`/journal`、`/parents` 路由和旧组件已移除。学习记录只列 timesStarted > 0 的课程，以最近课次和词级 lastPracticed 降序排列。点课程条打开居中玻璃浮层（Esc、遮罩、关闭按钮可关，焦点进入后回到该行，遮罩下 `.shell-content` 与课程列表不滚动），墙为 6 列，复用首页 `HomeWordCard`（图片、中英、三段掌握、≥2 星打勾、未练淡化）。热力图为包含今天的滚动 91 天（13 列、7 行），格子边长取可用宽高减去间距后的较小值并居中，不随窗口压成扁矩形；使用本地日期，按每日 0 / 1–9 / 10–19 / >=20 分钟四档紫色。只展示现有时长、课次、会说单词、最近课次与 attempts > 0 且 masteryStars <= 1 的待练词，不显示占位准确率、连续天数等指标。
 
@@ -746,13 +633,96 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 下课页不再自动跳转；两列六行逐词表按持久 masteryStars 呈现（3 很好、2 好、1 再练练、0 没练到）。标题与今天学会数量使用 >=2 星，与首页一致；时长取 `/api/sessions?limit=50` 中本课最近课次，无课次时不造时长。建议下一课排除当前课与已学会全部词的课，优先有断点，其次未上过的新课；带最多四张未掌握词图。课堂内继续使用原 handleRestart，独立路由进入本课；现有控制器自动恢复有效断点，不新增强制清除断点行为。独立路由使用主工具栏替代旧 52px 留位，课堂内保留课堂工具栏。数据加载失败显示重试，孩子切换与重试忽略过期请求，不把失败当零值。
 
-## P5 设置与首次引导（2026-10-25）
+### P5 设置与首次引导（2026-10-25）
 
 `/settings` 仍在主外壳内，左侧 232px 分区为「AI 老师与语音」「麦克风」「孩子」「关于」，右侧内容最宽 760px。页内不再放「回首页」和「设置」大标题。凭据表单、打码、空值保留、Web 只读、`POST /api/settings` 与退出码 75 的语义不变。连接测试结果按 AI 老师 / 听写 / 发音 显示「未测试」「正常」或失败原因，不回显 Key。ASR/TTS Resource ID 和音色收在「高级」里。删除孩子仍是页内输入名字确认，不用浏览器 `confirm()`。
 
 `/onboarding` 是主外壳之外的全窗口三步引导，自带 52px 标题栏。第 1 步填写 LLM API Key、服务地址、豆包 App ID 和 Access Key，模型和资源 ID 继续用服务端默认值。引导中的保存会在 POST 之前写 `eduagent:onboarding-resume=2`，失败则清掉；Electron 重启后仍 `loadURL` 到 `/`，首页读到标记后进入第 2 步。第 2 步复用 `MicSection` 的试录和音量条。第 3 步标题是「建第一个孩子档案」。每步都可以「以后再说」。`VOICE_MOCK` 或已配置时第 1 步视为完成。首页在未配置、麦克风尚未询问、或没有孩子档案时分别进入对应步骤；设置读取失败则直接显示首页。旧 `/microphone` 路由已删除。孩子选择器底部不再放「设置」，空档案标题为「还没有孩子档案」。原生菜单「新建孩子档案」仍打开 `/settings#learner-name`。preload 没有新增方法。
 
-## 独立 Realtime 协议实验（2026-10-29）
+---
+
+## 13. 数据一致性:单次课堂统计(P2,2026-09-22)
+
+`Session.lessonInteractionCount` 只计算当前 lesson 已写入的互动，创建或续课时均从 0 开始，普通 turn、quiz 与强化阶段固定回复统一递增；touch/finish lesson 汇总只取本次值。`LessonMemory.totalInteractions` 继续保存课程累计教学上下文并进入断点，不替代单次日志计数。历史日志不自动回填或重算。
+
+### 原子提交（P2，2026-09-22）
+
+普通 turn 的用户消息、教学状态和 token 用量先在草稿中计算，quiz 与固定回复使用同一 `commitSessionUpdate` 入口。同步 SQLite transaction 包含词表现、互动、lesson 汇总及断点；事务成功后才发布 live memory/计数/用量。事务不跨任何 await。LLM 等待期间或预览 yield 期间若有另一笔提交/阶段接受，revision 检查拒绝旧草稿，客户端可重试。
+
+speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:true}` 只在落盘后发送；失败为 SSE error / HTTP 500。正常教学规则和播放顺序不变。创建先写 lesson log 再发布 session；结束立即取消，事务保存 finish/断点成功后删除。结束落盘失败时课堂保持关闭，仅允许再次 end 尝试保存，不重新开放教学。多次请求的 exactly-once 去重不在本次范围。
+
+### 快照与协议入口（P2，2026-09-22）
+
+`db/progress-snapshot.ts` 用当前格式校验 snapshot、两种不同的 phase、集合成员、非负整数、时间与 completed 标记。`getCourseProgress` 缺行返回 undefined，坏行抛 `InvalidCourseProgressError`；chat start 在创建 lesson/session 前返回 409 / INVALID_COURSE_PROGRESS。页面说明原记录已保留，并恢复启动入口。重复读取、失败启动不覆盖或删除坏行。批量聚合逐行诊断并跳过坏行，正常课程仍可显示；日志只包含 courseId/字段路径，不输出原始快照。
+
+当前完整无版本快照继续兼容；后来新增的卡片仍 backfill，已移除/未知 card 和 quiz ID 保留，在首页派生比例时按当前课程识别项统计。缺整个必需集合不能用默认空数组掩盖。没有格式迁移、历史重算或自动修复。原聚合测试中仅含两个字段的简化 fixture 已补成完整合法快照，它们不代表旧持久化格式。
+
+纯共享 `lib/lesson-protocol.ts` 定义并解析 HTTP request/ack、ResumeInfo、LessonProgressSnapshot 与 StreamUserEvent，服务端编码和浏览器消费复用同一判别联合。跨网络输入在入口校验；非法 done JSON 不算成功，resume phase 不再由任意 string 强转。合法事件 JSON 字段与事件名保持，allWordsDone 和 actions 的 state_update 允许既有可选字段。内部教学函数不重复解析外部 schema。
+
+---
+
+## 14. 配置来源与未配置状态
+
+**配置来源**
+- Web 开发模式(无 `EDUAGENT_APP`):`server.ts` 读 `.env.local`,行为不变。
+- App 模式(`EDUAGENT_APP=1`):Electron main 只传 `EDUAGENT_SETTINGS_PATH=<userData>/settings.json`,不注入任何 key。`server.ts` 在 `getConfig()` 之前调用 `applySettingsToEnv()`(`src/lib/settings/store.ts`):先清掉继承来的同名 env(`LLM_*`、`OPENAI_*` 与豆包字段)。LLM 只取 `activeLlmChannelId` 指向的那条渠道,非空时写入 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`,并始终写入 `LLM_PROVIDER`(`siliconflow` | `volc-ark` | `deepseek` | `custom`)。语音字段映射到 `DOUBAO_AUTH_MODE`、`DOUBAO_API_KEY`(非空才写)、`DOUBAO_APP_ID`、`DOUBAO_ACCESS_KEY`、`DOUBAO_ASR_RESOURCE_ID`、`DOUBAO_TTS_RESOURCE_ID`、`DOUBAO_TTS_DEFAULT_SPEAKER`。没有 `doubaoAuthMode` 且 App ID 或 Access Key 非空的文件会迁成 `legacy` 并写回;两者都空则内存里用 `apikey`,不因此新建文件。`asr-proxy` / `tts-proxy` / `config.ts` 继续只读 `process.env`。文件不存在时内存里用默认渠道(SiliconFlow、`deepseek-ai/DeepSeek-V3.2`)和默认资源 ID(`volc.seedasr.sauc.duration`、`seed-tts-2.0`),不新建文件。磁盘上只有旧的顶层三字段、没有 `llmChannels` 数组时,按地址主机名推断类型(`siliconflow.cn` / `volces.com` / `deepseek.com`,其余 `custom`),迁成 id 为 `legacy-llm` 的一条渠道并原子写回;写失败仍用迁好的值启动。`config.ts` 读 `LLM_PROVIDER`,缺失或未知值当作 `custom`,这样 Web 的 `.env.local` 不设该变量也能启动。`llm.ts` 的超时与对冲不变(4s 首个 `delta.content`、10s 卡住、30s 总上限);只有 `volc-ark` 在请求体加 `thinking: { type: 'disabled' }`。
+- 豆包 WS 端点由 `src/lib/voice/doubao-endpoints.ts` 提供,env `DOUBAO_ASR_WS_URL` / `DOUBAO_TTS_WS_URL` 可覆盖(仅测试用,指向本地 fake server)。`config.ts` 里原先过期的 v2 默认地址已改成与 proxy 一致的 v3 端点。
+
+**未配置状态**
+- `config.ts` 的 `isConfigured()` 直接读 `process.env`:`VOICE_MOCK=true` 视为已配置;否则要求 LLM key(`LLM_API_KEY`)、两个 Resource ID,以及当前鉴权方式的凭据。`apikey` 要 `DOUBAO_API_KEY`;`legacy` 要 `DOUBAO_APP_ID` 和 `DOUBAO_ACCESS_KEY`。`DOUBAO_AUTH_MODE` 只认这两个值,缺省或其它值时按「有 API Key → 新版,否则有 App ID 或 Access Key → 旧版,都没有 → 新版」推断,这样已有 `.env.local` 不用改也能上课。`getConfig()` 缺凭据不再抛错,server 照常启动。
+- 未配置时 `POST /api/chat` 返回 HTTP 503 + `{ code: 'NOT_CONFIGURED' }`;语音 WS upgrade 在 `guardUpgrade()`(`voice/upgrade-guard.ts`,先验 Origin 再验配置)里直接回 HTTP 503 并关闭 socket。前端:首页加载时 `GET /api/settings` 发现未配置且没有跳过,进入 `/onboarding` 第 1 步;设置读取失败时首页照常打开。`LessonController.start` 收到 NOT_CONFIGURED 仍跳 `/settings`。
+
+**Settings API**(`src/app/api/settings/`)
+- `GET /api/settings` -> `{ mode: 'app'|'web', configured, mock, values }`。`values.llmChannels[].apiKey`、`doubaoApiKey`、`doubaoAppId`、`doubaoAccessKey` 打码(末 4 位,长度 ≤8 只给 `••••`),其余原样。Web 模式没有 key 时展示一条 SiliconFlow 预设渠道(id `env-llm`);有 `LLM_API_KEY` 时渠道名取 `LLM_PROVIDER` 对应的类型名。豆包鉴权方式与 Web env 用同一套推断。
+- `POST /api/settings`:仅 App 模式(web 模式 403 `WEB_MODE_READONLY`)。zod 校验渠道列表(1–20 条、id 唯一、当前 id 必须在列表里)。每条渠道的 `apiKey` 按渠道 id 合并:提交打码值或空串保留该 id 已保存的 key,新 id 不继承别的渠道的 key。`doubaoApiKey` 与旧版 App ID / Access Key 同样:打码或空串保留原值。同目录临时文件(0600)写完 rename,再 chmod 0600。返回 200 后 400ms 以**退出码 75** 退出。日志只记当前渠道的 provider 和 `doubaoAuth`,不记 key。
+- `POST /api/settings/test`:`scope` 为 `channel` 时只测 `channelId` 那一条(不必是当前渠道),请求体带该渠道的 provider 附加参数,成功原因形如「正常 · 首字 1.2s · 整轮 3.4s」(首字只认 `delta.content` 或一次性 JSON 的 `message.content`);`scope` 为 `voice` 只测豆包 TTS/ASR,请求头按提交的 `doubaoAuthMode` 走同一套鉴权构造(新版只有 `X-Api-Key`,旧版 ASR/TTS 头名不同);`scope` 缺省或 `all` 测当前渠道加语音。打码字段回退已保存值,空的地址/模型用该类型预设补齐。LLM 失败额外返回稳定 `code`,与课堂共用 `classifyLlmFailure` 的中文原因并附 HTTP 状态,例如「余额不足:请到模型服务商控制台充值后再试(HTTP 402)」。豆包原因与错误码保持原契约;不回显、不记录 key。
+- **CSRF**:两个 POST 都经 `rejectBadOrigin()`,`Origin` 必须是 `http://localhost:<PORT>` 或 `http://127.0.0.1:<PORT>`;**缺失也拒绝**(与 WS 允许缺失的规则不同),返回 403。
+
+**退出码 75 重启约定**:server 保存设置后以 75 退出;`desktop/main.js` 的 utilityProcess `exit` 回调见 75 就用同样的 env 重启子进程,端口就绪后 `loadURL` 重新加载窗口。非 0 且非 75 退出自动恢复一次,再崩溃则显示含日志路径的错误页;恢复期间显示本地重启页,详见下方「桌面版」。`desktop/main.js` 的 `setWindowOpenHandler` / `will-navigate` 把站外 http(s) 链接交给系统浏览器,其余导航一律拦截。
+
+**ws / bufferutil 坑**:`server.ts` 顶部设 `process.env.WS_NO_BUFFER_UTIL ??= '1'`(开发模式下 Next 路由里的 ws 客户端同样会踩,真实 key 实测 `/api/settings/test` 的 ASR 探测报错),打包时 `desktop/scripts/stage.mjs` 的 esbuild 产物开头也设一次(打包后 ws 先于 server 主体求值)。否则打包版里 `ws` 的可选依赖 `bufferutil` 会被 Next 的 require hook 解析到没有 `mask` 的占位模块,ws 发送 >=48 字节的帧(ASR 请求帧/音频帧)时抛 `t.mask is not a function`;Phase 0 的 mock 模式不经过 ws 客户端,所以没暴露。
+
+---
+
+## 15. 桌面版(Electron)
+
+2026-10-24:Phase 0/1 壳完善为以下生命周期与授权流程;保留既有 standalone + esbuild、自签名、退出码 75 契约。
+
+**进程与端口**:Electron main(`desktop/main.js`)持有窗口和唯一 `utilityProcess` server。打包版优先监听 `127.0.0.1:38417`(`EDUAGENT_PORT` 可覆盖),启动前探测端口,被占用则向系统申请空闲端口并写日志。实际端口通过 `PORT` 注入 server;HTTP Settings CSRF 和语音 WS Origin 白名单均按该值校验,窗口导航、权限和 IPC 校验也只接受实际本地 origin。端口变化会改变 localStorage 的 origin,但 SQLite 和系统麦克风授权不受影响。
+
+**preload 暴露面**:`desktop/preload.js` 在 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false` 下暴露 `window.eduagentDesktop` 的五个无参数原生方法及下述只读菜单订阅:`getMicStatus()`、`requestMic()`、`openMicSettings()`、`getAppInfo()`、`openLogsFolder()`。main 验证调用来自当前窗口的主 frame 和本地 origin。版本由 `app.getVersion()` 提供,设置路径、任意 URL、文件系统和原始 IPC 均不传给 renderer。新增只读 `onMenuCommand(callback)` 订阅，返回取消订阅函数，仅允许 `nav:courses / nav:records / nav:settings / learner:new / learner:<id>`；preload 校验枚举与 ID，回调不暴露 IPC event。main 从实际 loopback server 读取孩子档案，以固定代码读取本地选中 ID，加载/导航/聚焦、renderer 档案请求完成与应用菜单打开事件同步孩子菜单，无定时轮询；列表变化重建菜单，只有选择变化时就地更新勾选。
+
+**麦克风授权**:启动仅调用 `getMediaAccessStatus`,不申请授权。首页在配置和只读麦克风检查完成前保持准备状态。未配置且未跳过进入 `/onboarding` 第 1 步;引导里保存会先写 `eduagent:onboarding-resume=2`,退出码 75 后窗口仍先加载 `/`,首页再进入第 2 步。权限为 `not-determined` 且尚未完成或跳过时也进入第 2 步;没有孩子档案且未跳过、档案可读时进入第 3 步。引导是独立全窗口,不挂主工具栏,旧 `/microphone` 已删除。跳过标记只存在当前 origin 的 localStorage。设置页的 `MicSection` 常驻显示「已允许 / 未决定 / 已拒绝」,只有明确点击「允许使用麦克风」才调用 `askForMediaAccess`。已拒绝时,「打开系统设置」经 `shell.openExternal` 打开固定 URL `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`;macOS 修改拒绝状态后可能需要退出重开 App。`restricted` / `unknown` 保守归为已拒绝。
+
+「试录一下」复用 `LessonRecorder` 的 16k AudioContext、AudioWorklet 与 PCM 输出计算 RMS 音量,最多 10 秒,停止或离开页面即 dispose,不保存音频、不连接 ASR。课堂入口 `LessonClient` 仅在权限为 granted 时挂载 `PhasedLessonView`,其他状态显示设置入口,因此不会开始 server session 或预热录音。授权通过后保留 Phase 2 的档案解析,将选定 `learnerId` 传给课堂。回到窗口时重新检查状态。Electron 的 media permission handler 也只对本地 origin、已允许的音频请求放行。Web 无 preload 时使用 `navigator.permissions.query({ name: 'microphone' })` 读取状态,设置页的明确授权按钮才调用 `getUserMedia` 并立即释放 stream;隐藏系统设置和日志文件夹按钮。
+
+**服务重启与退出**:server 保存设置后以 75 退出,main 显示包内 `restarting.html`「正在重启…」,重新启动服务并等待 `/api/settings` 返回 200,再加载首页。首页随后按引导标记决定留在首页或进入 `/onboarding`。非 0 且非 75 退出在本次 App 生命周期内自动重启一次;第二次崩溃、正常意外退出或就绪超过 30 秒,显示错误页与日志位置。旧进程的就绪轮询在新进程接管后取消,避免旧回调覆盖新窗口。退出 App 时先终止 server,等待退出事件,3 秒未退出则强制清理。单实例锁防止重复进程;站外 http(s) 链接用系统浏览器,renderer 导航和 redirect 不能离开本地 origin,保留编辑菜单的复制粘贴快捷键。
+
+**数据与日志**:`app.getPath('userData')`(通常 `~/Library/Application Support/EduAgent/`)下保存 `settings.json`、`eduagent.db` 和 `logs/server.log`;日志启动时超过 5 MiB 轮转为 `server.log.1`,保留一份。关于区块与 App 菜单均可经 `shell.openPath` 打开日志目录。Key 仍由 server 从 settings 文件映射到 env,见上方 Phase 1 节。
+
+**开发与打包**:`pnpm app:dev` 启动本机 `pnpm dev`(优先 3000,占用则改空闲端口),Electron 通过 `EDUAGENT_DEV_URL` 指向该 dev server,不依赖 staged server 或安装包。启动脚本负责清理其 dev 进程组,普通 `pnpm dev` 行为不变。`pnpm app:release`(兼容入口 `pnpm app:pack`)经 `desktop/scripts/release.mjs` 完成 stage → electron-builder dir → 专用钥匙串自签名与 codesign 校验 → dmg。版本从根 `package.json` 注入打包 metadata,文件名为 `EduAgent-<version>-<arch>.dmg`;保留 `EnableNodeCliInspectArguments` fuse 以支持 Playwright。证书步骤见 [mac-signing.md](mac-signing.md)。`pnpm app:e2e` 在临时 userData + VOICE_MOCK 或本地 fake server 下执行;只有 `EDUAGENT_TEST=1` 时 `EDUAGENT_TEST_MIC_STATUS=granted|denied|not-determined` 才覆盖 native 状态,未询问时点允许会在该测试进程内变为 granted。
+
+**App 图片 staging(2026-10-24 Phase 4)**:`stage.mjs` 在构建前确认本机 `cwebp` 可执行,仅把 `public/images/**/*.png` 转成 q82 WebP 放入 `desktop/build/server/public/images-webp/`,不复制这批 PNG 到 staging,不改仓库原图、课程数据或组件。`next.config.mjs` 仅在 `EDUAGENT_STANDALONE=1` 时开启 standalone 和 rewrite:`/images/:path*.png` → `/images-webp/:path*.webp`;普通 dev/build 没有 rewrite。App 的生产配置从 required-server-files 注入,路由从构建 manifest 读取。`SKIP_NEXT_BUILD=1` 只可复用已有 App 构建,stage 会检查 rewrite 存在,防止误用普通 Web 构建。转换统计保存在 `desktop/build/webp-metrics.json`。standalone 复制排除 `.env*`,发布物不带开发配置、用户数据库或签名文件。
+
+`pnpm app:verify-images` 从 `allCourses` 递归收集全部 `imageUrl`,启动真实打包 App,使用原 PNG URL 逐个检查 200、`image/webp`、RIFF/WEBP 文件头和 Chromium 实际解码。JSON 证据位于 `desktop/dist/evidence/webp-verification.json`;`python3 desktop/scripts/compare-webp.py`(需 Pillow)据此每门课抽一张生成左右对比图,保留原生 512px,供画质目检。采用 Next 原生 [rewrite](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites) 与官方 [cwebp](https://developers.google.com/speed/webp/docs/cwebp),没有新增运行时图片处理依赖。
+
+**架构产物**:2026-10-24 用户决定只交付 Apple 芯片 arm64 版,Intel 版按需再做,不生成 universal 包。SQLite 无 ABI 重编译需求,但 Next 构建工具依赖宿主架构的 SWC。Phase 0 曾认为 standalone 会携带该 SWC;本轮实际 staging 未发现 `@next/swc-*` 或 `.node` 二进制,因此不把旧推断当作本轮包内容事实。将来制作 x64 时需要在 x64 环境重新 `next build`,确认 SWC/esbuild 构建依赖可用,再完成 x64 App 冒烟和 Intel Mac 真机验收。当前 release 只接受 arm64 Node,且始终重新构建,不接受 `SKIP_NEXT_BUILD` 跳过。
+
+实现依据:采用 Electron 原生 [systemPreferences](https://www.electronjs.org/docs/latest/api/system-preferences) 和固定方法的 [contextBridge / IPC](https://www.electronjs.org/docs/latest/tutorial/ipc),不新增原生依赖或自制授权协议。真实 TCC 弹窗、系统设置页跳转、覆盖安装后授权保留及实体麦克风音质仍需真机验证。
+
+**server 打包与启动**:Electron main 用 `utilityProcess` 拉起打包后的 server(`EDUAGENT_APP=1`、`EDUAGENT_SETTINGS_PATH=<userData>/settings.json`、`HOST=127.0.0.1`、`DATABASE_PATH=<userData>/eduagent.db`、优先端口 38417,占用时改用空闲端口),等端口就绪再开窗口。`EDUAGENT_APP=1` 时 `server.ts` 不读 `.env.local`,Next 配置取自 `.next/required-server-files.json`(经 `__NEXT_PRIVATE_STANDALONE_CONFIG`),`HOST` 缺省仍监听所有网卡(开发行为不变)。server 打包:`EDUAGENT_STANDALONE=1 next build`(`output: 'standalone'`)+ esbuild 打 `server.ts` + 手动补 `public/`、`.next/static`,见 `desktop/scripts/stage.mjs`。
+
+---
+
+## 16. 课堂视图的意图接口(2026-10-29)
+
+课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习和带来源的练习结果，发送介绍、重讲、录音、呈现题目及点击答案等意图。`interaction` 区分按住说话（原有）与自然对话（Realtime）；自然对话视图显示对话状态和暂停麦克风按钮，并在渲染后上报 `presented`。入口按开课前选择构造 LegacyClassroom 或 RealtimeClassroom，整堂课模式固定。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
+
+LegacyClassroom 拥有旧重讲提示词、句子 ASR 匹配、候选句、静态题目话术、保存后重试计数及已清词不可重看的过滤。共享组件不读取 asr-final 来判跟读，不提交模型口头表扬为成绩，也不写 raw LLM 指令。选词仍按课程客观答案确定显示；保存及下一题决定来自控制器的 quiz-result。保存失败留在同题、重试不提前累计，旧模式第三次错误仍按原规则前进。已经通过的非连续题目在续课中被跳过；无待做练习时触发完成出口。
+
+---
+
+## 17. 独立 Realtime 协议实验(2026-10-29)
 
 `scripts/realtime-prototype/` 是独立命令行实验，不是已接入的课堂模式。
 现有课堂仍使用豆包 ASR、文本 LLM、guard 与豆包 TTS。实验只用合成音频及
@@ -774,13 +744,9 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 
 独立实验支持原 PCM 复用、服务端音频哈希核对、分类指令对照及按严格类别／通过率分别汇总。全零 PCM 可显式在调用前忽略，不计评估或 API 用量；这不是房间静音检测。未完成回应保留脱敏状态与已知用量，缺失用量不按零费用计算。这些诊断选项尚未进入生产课堂。
 
-## 课堂视图的意图接口（2026-10-29）
+---
 
-课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习和带来源的练习结果，发送介绍、重讲、录音、呈现题目及点击答案等意图。`interaction` 区分按住说话（原有）与自然对话（Realtime）；自然对话视图显示对话状态和暂停麦克风按钮，并在渲染后上报 `presented`。入口按开课前选择构造 LegacyClassroom 或 RealtimeClassroom，整堂课模式固定。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
-
-LegacyClassroom 拥有旧重讲提示词、句子 ASR 匹配、候选句、静态题目话术、保存后重试计数及已清词不可重看的过滤。共享组件不读取 asr-final 来判跟读，不提交模型口头表扬为成绩，也不写 raw LLM 指令。选词仍按课程客观答案确定显示；保存及下一题决定来自控制器的 quiz-result。保存失败留在同题、重试不提前累计，旧模式第三次错误仍按原规则前进。已经通过的非连续题目在续课中被跳过；无待做练习时触发完成出口。
-
-## Realtime 自然对话课堂（2026-10-29）
+## 18. Realtime 自然对话课堂(2026-10-29)
 
 上文豆包 WS 与文本 agent 时序属于原有模式，原有课堂仍按住说话。Realtime 模式在 `RealtimeClassroom`（`interaction = 'conversation'`）内实现同一 Classroom 接口，开课后自然全双工：常开麦、提供方自动划轮、孩子随时插话。首版的按住说话＋HTTP 整段上传 PCM＋服务端串行 turn 已被替换，不保留为第三种子模式。
 
