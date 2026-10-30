@@ -24,7 +24,11 @@ describe('Realtime classroom call ownership', () => {
     expect(await connect()).toBe('v=0 answer');
     expect(provider.options?.session).toMatchObject({ audio: { input: { turn_detection: { type: 'semantic_vad', create_response: true, interrupt_response: true } } } });
     expect((provider.options?.session as { audio: { input: object } }).audio.input).not.toHaveProperty('transcription');
-    expect(provider.sent.find((e) => e.type === 'session.update')?.session.instructions).toContain('phase interactive');
+    expect(provider.options?.session).toMatchObject({ truncation: { type: 'retention_ratio', retention_ratio: 0.8 } });
+    // Opening state follows the fixed (cacheable) instructions as an [app] message, before the opening request.
+    const items = provider.sent.filter((e) => e.type === 'conversation.item.create' || e.type === 'response.create');
+    expect(items[0]?.item?.content?.[0]?.text).toContain('phase interactive');
+    expect((provider.options?.session as { instructions: string }).instructions).not.toContain('phase interactive');
     expect(events[0]).toMatchObject({ type: 'receipt', receipt: { progress: { currentPhase: 'interactive' } } });
     expect(provider.sent.find((e) => e.type === 'response.create')?.response.metadata.kind).toBe('opening');
     await expect(connect()).rejects.toThrow('CALL_EXISTS');

@@ -44,15 +44,22 @@ export class NaturalConversation {
   private toolStreak = 0;
   private requests = 0;
   private farewell = false;
+  private lastState = '';
   constructor(private session: Session, private port: ConversationPort) {}
 
-  /** Initial session configuration for the provider call. Long-lived credentials never reach this payload. */
+  /**
+   * Initial session configuration for the provider call. Long-lived credentials never reach this payload.
+   * Instructions and tools stay fixed for the whole call so every response can reuse the cached prefix; when the
+   * conversation outgrows the context, truncation drops a large block once instead of a few items every turn.
+   */
   sessionConfig(model: string): object {
     return { type: 'realtime', model, instructions: this.instructions(), tools: this.tools(), tool_choice: 'auto', max_output_tokens: 1200,
+      truncation: { type: 'retention_ratio', retention_ratio: 0.8 },
       audio: { input: { turn_detection: { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true } }, output: { voice: 'marin' } } };
   }
   start(resumed: boolean): void {
-    if (this.session.currentPhase === 'intro') { this.commit(changePhase(this.session, 'interactive')); this.refresh(); }
+    if (this.session.currentPhase === 'intro') this.commit(changePhase(this.session, 'interactive'));
+    this.syncState();
     const card = this.card(this.session.memory.currentCardId);
     const note = this.session.currentPhase === 'interactive'
       ? `[app] ${resumed ? 'The child is back to continue this lesson.' : 'Lesson started.'} Screen shows card ${card?.id} (${card?.english} / ${card?.chinese}). Greet in one short sentence, then teach this card.`
@@ -67,7 +74,7 @@ export class NaturalConversation {
     if (target.kind === 'quiz' && !(phase === 'reinforcement' && this.quiz(target.id))) throw new Error('INVALID_TARGET');
     if (this.presented?.kind === target.kind && this.presented.id === target.id) return;
     this.presented = target;
-    this.refresh();
+    this.syncState();
   }
   presentQuiz(quizId: string): void {
     const quiz = this.quiz(quizId);
@@ -96,7 +103,7 @@ export class NaturalConversation {
   changePhase(to: Session['currentPhase']): TeachingReceipt {
     const receipt = changePhase(this.session, to);
     this.commit(receipt);
-    this.refresh(); this.pump();
+    this.syncState(); this.pump();
     return receipt;
   }
   setPaused(paused: boolean): void {
@@ -127,7 +134,7 @@ export class NaturalConversation {
         if (response && response.transcript.length < 4000) response.transcript += event.delta ?? '';
         break;
       }
-      case 'response.done': this.done(event); break;
+      case 'response.done': this.done(event); this.syncState(); break;
       case 'error': {
         const code = safeCode(event.error?.code);
         log.warn('provider event error', { sessionId: this.session.id, code });
@@ -193,7 +200,7 @@ export class NaturalConversation {
       if (call.call_id) this.port.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result.output) } });
     }
     this.toolStreak++;
-    this.refresh();
+    this.syncState();
     if (!this.childSpeaking) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, feedbackFor, noTools: this.toolStreak >= 3 });
   }
   private execute(name: string, raw: string, input: string | null): { output: object; feedbackFor?: string } {
@@ -260,7 +267,19 @@ export class NaturalConversation {
     this.inflight = { request, timer };
     this.port.send({ type: 'response.create', event_id: request.id, response: { metadata, ...(request.noTools ? { tool_choice: 'none' } : {}) } });
   }
-  private refresh(): void { this.port.send({ type: 'session.update', session: { type: 'realtime', instructions: this.instructions() } }); }
+  /**
+   * Committed lesson state is appended as an [app] message instead of rewriting the instructions: changing the
+   * instructions busts the prompt cache for the whole conversation after them. Written only between responses and
+   * only when it changed; a change during a response is written once that response settles.
+   */
+  private syncState(): void {
+    if (this.active.size) return;
+    const s = this.session; const screen = this.presented ?? (s.currentPhase === 'interactive' ? { kind: 'card', id: s.memory.currentCardId } : null);
+    const text = `[app] State: phase ${s.currentPhase}; screen ${screen ? `${screen.kind} ${screen.id}` : 'loading'}. Remaining word goals (teach each, do not silently drop any): ${JSON.stringify(this.remaining())}. Mastered: ${JSON.stringify(s.memory.clearedCardIds)}. Passed questions: ${JSON.stringify(s.memory.passedQuizIds)}.`;
+    if (text === this.lastState) return;
+    this.lastState = text;
+    this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } });
+  }
   private card(id: string) { return this.session.course.cards.find((card) => card.id === id); }
   private quiz(id: string) { return this.session.course.phases.reinforcement.quizzes.find((quiz) => quiz.id === id); }
   private remaining() { return this.session.course.cards.filter((c) => c.kind === 'word' && !this.session.memory.clearedCardIds.includes(c.id)).map(({ id, english }) => ({ id, english })); }
@@ -283,11 +302,11 @@ export class NaturalConversation {
     ];
   }
   private instructions(): string {
-    const s = this.session; const screen = this.presented ?? (s.currentPhase === 'interactive' ? { kind: 'card', id: s.memory.currentCardId } : null);
+    const s = this.session;
     return `You are 麻吉老师, a warm and patient English tutor for a young Chinese-speaking child in a live voice lesson. Speak simple Chinese with clear English demonstrations. Keep each turn short (one or two short sentences), then stop and listen. The child may talk at any time, including while you speak; answer what they actually said. No professional pronunciation scores.
 The screen shows one course card or practice question at a time; [app] messages and tool results tell you what is on screen and what was actually saved. Teach only this course: ${JSON.stringify(s.course.cards.map(({ id, english, chinese, kind }) => ({ id, english, chinese, kind })))}.
 Tools: show_card to teach, explain or review a card (when the child asks about another card, e.g. "猫那个再讲一下", show that card). record_assessment ONLY when the child actually tried to say the displayed English target: questions, requests (again, slower, another card), chit-chat, Chinese without trying the English, and silence are not attempts; just respond to them. Decide mastery and retry/review/advance/skip yourself from the child's needs; do not drill one word forever. start_practice once all remaining words have been taught. Practice pick-word questions are answered by tapping; the app checks them. For repeat-after-me questions assess the whole sentence; next_card_id and next_phase stay null.
 ORDER RULE: when a tool is needed, the tool call is the very first thing in your response, with no words before it: no preamble, no "let me listen", no "我先听一下/我来看看". Speak only after its result, then give the actual feedback directly. Never claim something was saved, mastered or completed before a result says ok:true; ok:false means nothing changed.
-State: phase ${s.currentPhase}; screen ${screen ? `${screen.kind} ${screen.id}` : 'loading'}. Remaining word goals (teach each, do not silently drop any): ${JSON.stringify(this.remaining())}. Mastered: ${JSON.stringify(s.memory.clearedCardIds)}. Passed questions: ${JSON.stringify(s.memory.passedQuizIds)}.`;
+Lesson state (phase, what is on screen, remaining word goals, mastered words, passed questions) arrives in [app] State messages; the most recent one is current.`;
   }
 }

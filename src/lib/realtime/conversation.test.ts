@@ -28,6 +28,7 @@ const done = (id: string, output: object[] = [], status = 'completed', metadata:
 const assess = (target: string, extra: object = {}) => call('record_assessment', { target_id: target, result: 'correct', heard: target, evidence: 'clear', mastered: true, next_action: 'advance', next_card_id: null, next_phase: null, ...extra });
 const outputs = () => sent.filter((e) => e.type === 'conversation.item.create' && e.item.type === 'function_call_output').map((e) => JSON.parse(e.item.output));
 const creates = () => sent.filter((e) => e.type === 'response.create');
+const states = () => sent.filter((e) => e.type === 'conversation.item.create' && e.item.type === 'message' && e.item.content[0].text.startsWith('[app] State:')).map((e) => e.item.content[0].text as string);
 const attempts = (word: string) => session.memory.wordPerformance.get(word)?.attempts ?? 0;
 
 describe('natural conversation input binding and tool execution', () => {
@@ -118,10 +119,21 @@ describe('natural conversation input binding and tool execution', () => {
     done('r2');
     expect(summarizeRealtimeUsage(session.tokenUsage.realtime).complete).toBe(true);
   });
-  it('lets the model move to practice and refreshes its instructions with committed state', () => {
+  it('lets the model move to practice and appends committed state without touching the cached instructions', () => {
     speech('i1'); created('r1'); done('r1', [call('start_practice', {})]);
     expect(session.currentPhase).toBe('reinforcement');
-    expect(sent.find((e) => e.type === 'session.update')?.session.instructions).toContain('phase reinforcement');
+    expect(states().at(-1)).toContain('phase reinforcement');
+    expect(sent.some((e) => e.type === 'session.update')).toBe(false);
+  });
+  it('writes a screen change during teacher speech once that response settles, and never repeats an unchanged state', () => {
+    created('r1');
+    conversation.setPresented({ kind: 'card', id: 'milk' });
+    expect(states()).toEqual([]);
+    done('r1');
+    expect(states()).toHaveLength(1); expect(states()[0]).toContain('screen card milk');
+    conversation.setPresented({ kind: 'card', id: 'apple' }); conversation.setPresented({ kind: 'card', id: 'milk' });
+    created('r2'); done('r2');
+    expect(states()).toHaveLength(3);
   });
   it('stops chaining tool-only responses after repeated tool calls', () => {
     vi.useFakeTimers();
@@ -138,11 +150,11 @@ it('answers the completing tool result before saying goodbye once', () => {
   changePhase(session, 'reinforcement');
   const sentences = foodCourse.phases.reinforcement.quizzes.filter((q) => q.type === 'repeat-after-me');
   session.memory.passedQuizIds = foodCourse.phases.reinforcement.quizzes.map((q) => q.id).filter((id) => id !== sentences[0].id);
-  conversation.setPresented({ kind: 'quiz', id: sentences[0].id });
+  conversation.setPresented({ kind: 'quiz', id: sentences[0].id }); sent.length = 0;
   speech('i1'); created('r1'); done('r1', [assess(sentences[0].id, { mastered: false })]);
   expect(session.currentPhase).toBe('done');
   const order = sent.filter((e) => ['response.create', 'conversation.item.create'].includes(e.type)).map((e) => e.type === 'response.create' ? e.response.metadata.kind : e.item.type);
-  expect(order).toEqual(['function_call_output', 'followup']);
+  expect(order).toEqual(['function_call_output', 'message', 'followup']); // tool result, committed state, spoken answer
   created('r2', { kind: 'followup', parent: 'r1', request: creates()[0].response.metadata.request }); done('r2');
   expect(creates().map((e) => e.response.metadata.kind)).toEqual(['followup', 'goodbye']);
   conversation.changePhase('done'); // a late client completion after the tool already finished the lesson
