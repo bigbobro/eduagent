@@ -51,6 +51,23 @@ async function main(): Promise<void> {
     deviceScaleFactor: 1,
     permissions: ['microphone'],
   });
+  // Use the first existing learner, or create one, and make it the current profile
+  // so the pages render real content instead of the first-run onboarding gate.
+  const learners = (await (await fetch(`${BASE}/api/learners`)).json()) as { id: string }[];
+  let learnerId = learners[0]?.id;
+  if (!learnerId) {
+    const res = await fetch(`${BASE}/api/learners`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: BASE },
+      body: JSON.stringify({ name: '小明' }),
+    });
+    if (!res.ok) throw new Error(`Cannot create learner: ${res.status}`);
+    learnerId = (await res.json()).id as string;
+  }
+  await context.addInitScript((id) => {
+    localStorage.setItem('eduagent.currentLearnerId', id);
+    localStorage.setItem('eduagent.classroomMode', 'legacy');
+    localStorage.setItem('eduagent:mic-setup-complete', '1');
+  }, learnerId);
   const page = await context.newPage();
 
   const shoot = async (name: string) => {
@@ -67,14 +84,17 @@ async function main(): Promise<void> {
   await settle(page);
   await shoot('02-lesson-preview');
 
-  await page.getByRole('button', { name: /我们开始吧/ }).click();
-  await page.getByRole('button', { name: /按住 Space 跟我读/ }).waitFor({ state: 'visible', timeout: 15000 });
-  await settle(page);
-  await shoot('03-lesson-teaching');
-
-  await page.goto(`${BASE}/journal`);
+  // Records before starting the lesson: starting one logs an empty session that would show up as a 0-minute row.
+  await page.goto(`${BASE}/records`);
   await settle(page);
   await shoot('04-journal');
+
+  await page.goto(`${BASE}/lesson/${COURSE_ID}`);
+  await settle(page);
+  await page.getByRole('button', { name: /我们开始吧/ }).click();
+  await page.getByRole('button', { name: /按住空格说话/ }).waitFor({ state: 'visible', timeout: 15000 });
+  await settle(page);
+  await shoot('03-lesson-teaching');
 
   await browser.close();
   console.log(`[shots] done -> ${OUT_DIR}`);
