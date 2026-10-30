@@ -774,7 +774,7 @@ v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真�
 
 `/api/realtime` 严格校验loopback Origin和孩子／会话归属；请求体限 100KB（SDP ≤ 64KB），同一课堂只允许一次 connect。提供方 calls 请求 15 秒、sideband 握手 10 秒、hangup 10 秒。`VOICE_MOCK=true` 时 `transport='mock'`：不建 WebRTC，`realtime/mock.ts` 以与真实 sideband 相同的事件形状驱动同一 NaturalConversation，并由 `mock-speech` 动作（仅 mock 可用）模拟孩子说话；其固定判对只用于联调，不是模型质量证据。
 
-配置：旧模式isConfigured保留；Realtime只看OPENAI_API_KEY。入门门槛任一模式就绪即可，开课时分别检查实际模式。App配置写入独立openaiApiKey/realtimeModel，空值或打码保留密钥，重启加载；模式偏好localStorage不触发重启。设置连接测试（`connection.ts`）建立真实会话并session.update，不生成回应。日志仅记录动作、标识和安全错误码，不记音频、凭据、转写或完整提供方错误正文。
+配置：旧模式isConfigured保留；Realtime只看OPENAI_API_KEY。入门门槛任一模式就绪即可，开课时分别检查实际模式。App配置写入独立openaiApiKey/realtimeModel，空值或打码保留密钥，重启加载；模式偏好localStorage（`eduagent.classroomMode`）不触发重启；课前页工具栏下方用与主导航同款的分段控件（`role=radiogroup`）选择，开课后只显示当前模式。设置连接测试（`connection.ts`）建立真实会话并session.update，不生成回应。日志仅记录动作、标识和安全错误码，不记音频、凭据、转写或完整提供方错误正文。
 
 自动化入口：`realtime-browser-smoke.ts`。`--mock --full` 在真实 Chrome 页面（或 `--electron-dev` 开发壳）跑整课：按请求切卡、逐词作答、选词、跟读、完成、通话结束与单轨道释放。`--live` 用真实 Realtime：麦克风轨道替换为 `MediaStreamTrackGenerator`，按需写入合成语音 PCM，验证老师说话时插话切卡且被打断卡不计尝试、真实作答保存、"慢一点"不计尝试、打断长回复；`--live --full --resume-short --db <临时库>` 先用 `realtime-seed-checkpoint.ts` 写入只剩两词和两题的断点，再跑真实短整课到 completed。自动化 Chrome 加 `--disable-audio-output`（部分主机的真实输出设备会让 AudioContext 时钟停走）。合成成人音频与 fake media 不替代儿童真实发音、实体回声或扬声器体验验收。
 

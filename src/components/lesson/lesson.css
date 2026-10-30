@@ -7,6 +7,7 @@
 .p2-dots i.p2-complete { background:#2DD4BF; }
 .p2-dots i.p2-current { background:#6842FF; width:28px; }
 .p2-who { display:flex; align-items:center; gap:8px; padding:3px 10px 3px 3px; border-radius:999px; background:rgba(255,255,255,.6); font-size:13px; font-weight:600; -webkit-app-region:no-drag; }
+.p2-mode { display:flex; align-items:center; gap:10px; min-height:44px; padding:6px 24px; font-size:13px; color:var(--ui-secondary); }
 .p2-content { min-height:0; position:relative; }
 .p2-lesson { display:grid; grid-template-columns:minmax(0,1fr) clamp(260px,21vw,304px); }
 .p2-stage { position:relative; display:grid; grid-template-rows:minmax(0,1fr) auto; padding:24px 32px 0; min-height:0; min-width:0; height:100%; }

@@ -152,6 +152,20 @@ describe('PhasedLessonView', () => {
     expect(screen.getByRole('button', { name: /我们开始吧/ })).toBeTruthy();
   });
 
+  it('chooses the classroom mode with a two-option segmented control and remembers it', () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) });
+    render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
+    const group = screen.getByRole('radiogroup', { name: '课堂模式' });
+    const [legacy, realtime] = within(group).getAllByRole('radio');
+    expect(legacy.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(realtime);
+    expect(realtime.getAttribute('aria-checked')).toBe('true');
+    expect(legacy.getAttribute('aria-checked')).toBe('false');
+    expect(values.get('eduagent.classroomMode')).toBe('realtime');
+    vi.unstubAllGlobals();
+  });
+
   it('moves from intro to interactive after the opening greeting finishes', async () => {
     render(<PhasedLessonView learnerId="test-learner" course={foodCourse} />);
 

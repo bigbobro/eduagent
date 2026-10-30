@@ -109,7 +109,7 @@ async function main() {
       if (!desktop || !String(error).includes('ERR_ABORTED')) throw error;
       await page.waitForTimeout(1000); await page.goto(`${base}/lesson/${course.id}?learnerId=${learner.id}`);
     });
-    await page.getByLabel('课堂模式').selectOption('realtime');
+    await page.getByRole('radio', { name: /Realtime/ }).click();
     await page.getByRole('button', { name: '我们开始吧' }).click();
     const dock = page.getByRole('status', { name: '对话状态' });
     await dock.waitFor({ timeout: 60000 });

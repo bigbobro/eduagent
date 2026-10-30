@@ -27,6 +27,10 @@ interface PhasedLessonViewProps {
   onStarted?: () => void;
 }
 
+const CLASSROOM_MODES = [
+  { id: 'legacy', label: '原有课堂 · 豆包语音' },
+  { id: 'realtime', label: 'Realtime 自然对话 · OpenAI' },
+] as const;
 
 export function PhasedLessonView({ course, learnerId, fresh, onStarted }: PhasedLessonViewProps) {
   const router = useRouter();
@@ -166,12 +170,15 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
         <div className="p2-error"><Banner action={llmFailureNeedsSettings(lessonError.code) ? <a href={mode === 'realtime' ? '/settings#realtime' : '/settings'} className="ui-button ui-button-glass ui-button-sm">去设置</a> : mode === 'realtime' && started ? lessonError.code === 'SESSION_EXPIRED' ? <Button size="sm" onClick={handleRestart}>重新进入课堂</Button> : <Button size="sm" onClick={() => { setLessonError(null); void v2Ref.current?.retryLastTurn?.(); }}>重试这一步</Button> : undefined}>{lessonError.message}</Banner></div>
       )}
 
-      <div className="px-6 py-2 text-sm">
-        {!started ? <label>课堂模式 <select aria-label="课堂模式" value={mode} onChange={(event) => {
-          const next = event.target.value === 'realtime' ? 'realtime' : 'legacy';
-          setMode(next); try { localStorage.setItem('eduagent.classroomMode', next); } catch {}
-        }}><option value="legacy">原有课堂 · 豆包语音</option><option value="realtime">Realtime 自然对话课堂 · OpenAI</option></select></label>
-          : <span>{mode === 'realtime' ? 'Realtime 自然对话课堂 · OpenAI（直接说话，可随时插话）' : '原有课堂 · 豆包语音'}</span>}
+      <div className="p2-mode">
+        {!started ? <>
+          <span id="p2-mode-label">课堂模式</span>
+          <div className="shell-segments" role="radiogroup" aria-labelledby="p2-mode-label">
+            {CLASSROOM_MODES.map(({ id, label }) => <button key={id} type="button" role="radio" aria-checked={mode === id} onClick={() => {
+              setMode(id); try { localStorage.setItem('eduagent.classroomMode', id); } catch {}
+            }}>{label}</button>)}
+          </div>
+        </> : <span>{mode === 'realtime' ? 'Realtime 自然对话课堂 · OpenAI（直接说话，可随时插话）' : '原有课堂 · 豆包语音'}</span>}
       </div>
       <div className={`p2-content ${started && phase !== 'intro' && phase !== 'done' ? 'p2-lesson' : ''}`}>
         {transitionRetry && (
