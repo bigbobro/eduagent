@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { InvalidCourseProgressError } from '@/lib/db/progress-snapshot';
-import { getConfig, isRealtimeConfigured } from '@/lib/config';
+import { getConfig, getRealtimeTurnMode, isRealtimeConfigured } from '@/lib/config';
 import { isAllowedHttpOrigin } from '@/lib/voice/ws-origin';
 import { ensureInitialized } from '@/lib/init';
 import { realtimeRequestSchema, encodeRealtimeEvent, type RealtimeEvent } from '@/lib/realtime-protocol';
@@ -28,7 +28,7 @@ export async function POST(req: Request) {
       const classroom = new RealtimeClassroomSession(body.courseId, body.learnerId, body.fresh);
       registerClassroom(classroom);
       log.info('started', { sessionId: classroom.session.id, model: getConfig().realtimeModel, transport: classroom.transport });
-      return NextResponse.json({ sessionId: classroom.session.id, resume: classroom.resume, receipt: snapshot(classroom.session), transport: classroom.transport });
+      return NextResponse.json({ sessionId: classroom.session.id, resume: classroom.resume, receipt: snapshot(classroom.session), transport: classroom.transport, turnMode: getRealtimeTurnMode() });
     }
     requireOwner(body.sessionId, body.learnerId);
     const classroom = realtimeClassrooms.get(body.sessionId);
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
       case 'present-quiz': classroom.presentQuiz(body.quizId); return NextResponse.json({ ok: true });
       case 'repeat': classroom.repeat(body.cardId); return NextResponse.json({ ok: true });
       case 'pause': classroom.pause(body.paused); return NextResponse.json({ ok: true });
-      case 'speech': classroom.speech(body.phase); return NextResponse.json({ ok: true });
+      case 'speech': classroom.speech(body.phase, body.voicedMs); return NextResponse.json({ ok: true });
       case 'pick': return NextResponse.json({ receipt: classroom.pick(body.turnId, body.quizId, body.cardId) });
       case 'phase': return NextResponse.json({ receipt: classroom.phase(body.to) });
       case 'mock-speech':

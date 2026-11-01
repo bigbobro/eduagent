@@ -4,6 +4,8 @@ import type { Classroom, ClassroomEvents, LessonStateName } from './classroom';
 import type { Course, PhaseName } from '@/types/course';
 import type { ResumeInfo } from '@/lib/lesson-protocol';
 import { parseResumeInfo, invalidProgressMessage } from '@/lib/lesson-protocol';
+import { MANUAL_TURN } from '@/lib/realtime/manual-turn';
+import type { ManualTurnVad } from './manual-turn-vad';
 import { parseRealtimeEvent, receiptSchema, type PresentedTarget, type ProviderEvent, type RealtimeEvent } from '@/lib/realtime-protocol';
 
 type Receipt = Extract<RealtimeEvent, { type: 'receipt' }>['receipt'];
@@ -16,6 +18,8 @@ interface Run {
   active: Set<string>; done: Set<string>; transcripts: Map<string, string>;
   waiters: Set<Waiter>; presented: string; failed: (() => Promise<void>) | null;
   pick: { turnId: string; quizId: string; cardId: string } | null; finishing: boolean;
+  // Manual-turn mode only: the local VAD, the ordered speech-signal chain and the pause window after `end`.
+  vad: ManualTurnVad | null; signals: Promise<unknown>; silence: ReturnType<typeof setTimeout> | null;
 }
 const FATAL_MESSAGE = '实时连接已断开，请重新进入课堂，从已保存的进度继续。';
 
@@ -41,7 +45,7 @@ export class RealtimeClassroom implements Classroom {
     const previous = this.endLesson();
     const run: Run = { abort: new AbortController(), learnerId, sessionId: null, transport: 'webrtc', state: 'greeting', phase: 'intro', cardId: '', revision: -1, resumeShown: false,
       stream: null, pc: null, channel: null, audio: null, paused: false, childSpeaking: false, playing: false, waitingReply: null,
-      active: new Set(), done: new Set(), transcripts: new Map(), waiters: new Set(), presented: '', failed: null, pick: null, finishing: false };
+      active: new Set(), done: new Set(), transcripts: new Map(), waiters: new Set(), presented: '', failed: null, pick: null, finishing: false, vad: null, signals: Promise.resolve(), silence: null };
     this.run = run; this.resume = null;
     this.emit('state', 'greeting'); this.emit('intro-busy-change', true);
     try {
@@ -70,8 +74,10 @@ export class RealtimeClassroom implements Classroom {
       }
       const reader = await this.connect(run, sdp);
       if (!this.current(run)) return false;
-      run.failed = null; this.state(run, this.derive(run)); this.emit('intro-busy-change', false);
       void this.listen(run, reader);
+      if (body.turnMode === 'manual') await this.startVad(run);
+      if (!this.current(run)) return false;
+      run.failed = null; this.state(run, this.derive(run)); this.emit('intro-busy-change', false);
       return true;
     } catch (error) {
       if (this.current(run)) { this.error(error); await this.endLesson(); }
@@ -87,7 +93,36 @@ export class RealtimeClassroom implements Classroom {
     if (run.sessionId) await this.endRemote(run.sessionId, run.learnerId);
     run.abort.abort();
   }
+  /** Manual-turn mode: the app decides turns, so the local VAD on the lesson's single mic stream sends speech start/end. */
+  private async startVad(run: Run): Promise<void> {
+    if (!run.stream) throw new Error('MICROPHONE_UNAVAILABLE');
+    const { startManualTurnVad } = await import('./manual-turn-vad');
+    const vad = await startManualTurnVad(run.stream, {
+      onStart: () => {
+        if (!this.current(run) || run.paused || run.finishing) return;
+        if (run.silence) { clearTimeout(run.silence); run.silence = null; }
+        this.stopWaiting(run);
+        run.childSpeaking = true; this.state(run, this.derive(run));
+        this.signal(run, { phase: 'start' });
+      },
+      onEnd: (voicedMs) => {
+        if (!this.current(run) || run.paused || run.finishing || !run.childSpeaking) return;
+        this.signal(run, { phase: 'end', voicedMs: Math.round(voicedMs) });
+        // The server waits commitAfterSilenceMs before committing; until then the child may continue the same turn.
+        run.silence = setTimeout(() => { run.silence = null; this.speechStopped(run); this.state(run, this.derive(run)); }, MANUAL_TURN.commitAfterSilenceMs);
+      },
+    }).catch((error) => { console.error('[realtime] manual-turn VAD failed to start', error); throw new Error('REALTIME_FAILED'); });
+    if (!this.current(run)) { vad.destroy(); return; }
+    run.vad = vad;
+  }
+  /** Speech signals reach the server in order, one request at a time. Failures only cost this turn. */
+  private signal(run: Run, body: { phase: 'start' | 'end'; voicedMs?: number }): void {
+    run.signals = run.signals.then(() => this.post(run, this.owned(run, { action: 'speech', ...body }))).catch(() => {});
+  }
+  private stopWaiting(run: Run): void { if (run.waitingReply) { clearTimeout(run.waitingReply); run.waitingReply = null; } }
   private release(run: Run): void {
+    if (run.silence) clearTimeout(run.silence);
+    run.silence = null; run.vad?.destroy(); run.vad = null;
     if (run.waitingReply) clearTimeout(run.waitingReply);
     run.waiters.forEach((waiter) => waiter.resolve()); run.waiters.clear();
     try { run.channel?.close(); } catch { /* already closed */ }
@@ -190,11 +225,7 @@ export class RealtimeClassroom implements Classroom {
     const id = event.response?.id ?? event.response_id ?? '';
     switch (event.type) {
       case 'input_audio_buffer.speech_started': run.childSpeaking = true; break;
-      case 'input_audio_buffer.speech_stopped':
-        run.childSpeaking = false;
-        if (run.waitingReply) clearTimeout(run.waitingReply);
-        run.waitingReply = setTimeout(() => { run.waitingReply = null; this.state(run, this.derive(run)); }, 8000);
-        break;
+      case 'input_audio_buffer.speech_stopped': this.speechStopped(run); break;
       case 'response.created': {
         run.active.add(id);
         if (run.waitingReply) { clearTimeout(run.waitingReply); run.waitingReply = null; }
@@ -228,6 +259,12 @@ export class RealtimeClassroom implements Classroom {
     }
     this.state(run, this.derive(run));
   }
+  /** The child stopped talking: `thinking` until the reply starts (or 8 s pass). */
+  private speechStopped(run: Run): void {
+    run.childSpeaking = false;
+    this.stopWaiting(run);
+    run.waitingReply = setTimeout(() => { run.waitingReply = null; this.state(run, this.derive(run)); }, 8000);
+  }
   private settle(run: Run, matches: (responseId: string) => boolean): void {
     run.waiters.forEach((waiter) => { if (waiter.responseId && matches(waiter.responseId)) { run.waiters.delete(waiter); waiter.resolve(); } });
   }
@@ -252,6 +289,8 @@ export class RealtimeClassroom implements Classroom {
     if (run.finishing) return;
     run.finishing = true;
     run.stream?.getTracks().forEach((track) => { track.enabled = false; });
+    if (run.silence) { clearTimeout(run.silence); run.silence = null; }
+    run.vad?.destroy(); run.vad = null;
     await this.waitFor(run, (metadata) => metadata.kind === 'goodbye', 20000).promise;
     if (this.current(run)) await this.endLesson();
   }
@@ -283,6 +322,8 @@ export class RealtimeClassroom implements Classroom {
     const run = this.run; if (!run || !this.current(run) || run.paused === paused) return;
     run.paused = paused;
     run.stream?.getTracks().forEach((track) => { track.enabled = !paused; });
+    if (run.silence) { clearTimeout(run.silence); run.silence = null; }
+    if (paused) { run.childSpeaking = false; run.vad?.pause(); } else run.vad?.resume();
     if (paused && run.channel?.readyState === 'open') run.channel.send(JSON.stringify({ type: 'output_audio_buffer.clear' }));
     this.state(run, this.derive(run));
     await this.post(run, this.owned(run, { action: 'pause', paused })).catch(() => {});

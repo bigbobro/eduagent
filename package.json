@@ -8,6 +8,10 @@
   },
   "packageManager": "pnpm@10.33.2",
   "scripts": {
+    "vad:assets": "node scripts/copy-vad-assets.mjs",
+    "predev": "pnpm vad:assets",
+    "prebuild": "pnpm vad:assets",
+    "prestart": "pnpm vad:assets",
     "dev": "tsx watch server.ts",
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
@@ -29,6 +33,7 @@
     "app:icon": "node desktop/scripts/make-icon.mjs"
   },
   "dependencies": {
+    "@ricky0123/vad-web": "^0.0.31",
     "dotenv": "^17.4.2",
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.61.0",

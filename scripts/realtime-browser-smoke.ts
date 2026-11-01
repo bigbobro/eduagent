@@ -13,7 +13,7 @@ function option(name: string, fallback: string) { const at = args.indexOf(name);
 const base = option('--base', 'http://localhost:3018');
 if (!/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(base)) throw new Error('Loopback test server required');
 const live = args.includes('--live');
-// Experimental: needs a server started with REALTIME_TURN_MODE=manual. speak() then also sends the speech start/end signals.
+// Experimental: needs a server started with REALTIME_TURN_MODE=manual. The page's own VAD turns the injected audio into speech start/end signals (offline too).
 const manualTurn = args.includes('--manual-turn');
 if (live === args.includes('--mock')) throw new Error('Choose --live or --mock explicitly');
 const course = getCourseById(option('--course', 'animals')) as Course;
@@ -31,6 +31,9 @@ function clip(name: string, text: string, voice: 'Samantha' | 'Tingting'): strin
   return readFileSync(file).toString('base64');
 }
 function wordClip(cardId: string): string {
+  // Manual turn: the page VAD must detect the clip. The Doubao fixtures (a bare ~0.3 s "dog") peak at speech probability 0.30,
+  // below the VAD threshold, so use the macOS voice there.
+  if (manualTurn) return clip(`word_${cardId}`, course.cards.find((c) => c.id === cardId)!.english, 'Samantha');
   const fixture = `tests/fixtures/audio/${course.id}_${cardId}.wav`;
   if (existsSync(fixture)) return readFileSync(fixture).toString('base64');
   const card = course.cards.find((c) => c.id === cardId)!;
@@ -41,6 +44,7 @@ async function main() {
   const settings = await (await fetch(`${base}/api/settings`)).json();
   if (Boolean(settings.mock) !== !live) throw new Error('Server provider mode differs from requested smoke');
   if (manualTurn && settings.realtimeTurnMode !== 'manual') throw new Error('--manual-turn needs the server started with REALTIME_TURN_MODE=manual');
+  if (manualTurn && !(await fetch(`${base}/vad/silero_vad_v5.onnx`)).ok) throw new Error('VAD assets missing: run pnpm vad:assets before starting the server');
   if (manualTurn && (args.includes('--sitting') || args.includes('--resume-short'))) throw new Error('--manual-turn does not combine with --sitting/--resume-short');
   const learner = await (await fetch(`${base}/api/learners`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Realtime 自然对话验证' }) })).json();
   if (!learner.id) throw new Error('Could not create test child');
@@ -51,6 +55,9 @@ async function main() {
     args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--disable-audio-output'] });
   const results: Record<string, unknown> = { provider: live ? 'live' : 'mock', course: course.id, learnerId: learner.id, scope: 'real page, synthetic adult speech; not child pronunciation or physical speaker/microphone acceptance' };
   const errors: string[] = []; const requests: object[] = [];
+  // VAD evidence: when the page sent speech signals (server-visible), and when the script injected each clip.
+  const speechSignals: Array<{ phase: string; t: number; voicedMs?: number }> = [];
+  const injections: Array<{ label: string; t0: number; t1: number }> = [];
   let sessionId = ''; let quizId = ''; let endStatus = 0;
   try {
     const context = desktop ? desktop.context() : await browser!.newContext({ permissions: ['microphone'], viewport: { width: 1100, height: 720 } });
@@ -61,6 +68,7 @@ async function main() {
       if (/\/api\/(chat|voice\/)/.test(req.url())) errors.push('Realtime used a legacy voice/model endpoint');
       if (!req.url().endsWith('/api/realtime')) return;
       const body = req.postDataJSON();
+      if (body.action === 'speech') { speechSignals.push({ phase: body.phase, t: Date.now(), voicedMs: body.voicedMs }); return; }
       if (body.action === 'present-quiz') quizId = body.quizId;
       if (body.action !== 'presented') requests.push({ action: body.action, quizId: body.quizId, target: body.target });
     });
@@ -106,7 +114,7 @@ async function main() {
         tracks.push(track);
         return new MediaStream([track]);
       };
-    }, { generator: live });
+    }, { generator: live || manualTurn });
     // The desktop shell may still be finishing its own first navigation; retry once if it aborts ours.
     if (desktop) await page.waitForLoadState('load').catch(() => {});
     await page.goto(`${base}/lesson/${course.id}?learnerId=${learner.id}`).catch(async (error) => {
@@ -141,29 +149,18 @@ async function main() {
       const entry = progress.courses.find((c: { courseId: string }) => c.courseId === course.id);
       return { completed: Boolean(entry?.completed), attempts: Object.fromEntries((entry?.words ?? []).map((w: { word: string; attempts: number }) => [w.word, w.attempts])) as Record<string, number> };
     };
-    const signal = async (phase: 'start' | 'end') => {
-      const response = await fetch(`${base}/api/realtime`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'speech', sessionId, learnerId: learner.id, phase }) });
-      if (!response.ok) throw new Error(`speech ${phase} HTTP ${response.status}`);
-    };
-    // holdMs: how long the offline "child" talks (mock has no audio clip to take time); live speech lasts as long as the clip.
-    const speak = async (utterance: { kind: 'attempt' } | { kind: 'request'; cardId: string } | { kind: 'chat' }, audio: string, holdMs = 100) => {
-      if (manualTurn) {
-        // The app owns turns: start right before the audio, end 150 ms after it (an ideal detector plus WebRTC transit, so the
-        // tail reaches the provider before the commit). A real browser VAD reports the end later; Part B must budget for that.
-        await signal('start');
-        if (!live) {
-          const response = await fetch(`${base}/api/realtime`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mock-speech', sessionId, learnerId: learner.id, utterance }) });
-          if (!response.ok) throw new Error(`mock speech HTTP ${response.status}`);
-          await page.waitForTimeout(holdMs);
-        } else await page.evaluate((data) => (window as unknown as { __speak: (b: string) => Promise<void> }).__speak(data), audio);
-        await page.waitForTimeout(150);
-        await signal('end');
-        return;
-      }
+    // Mock: tell the offline provider what kind of utterance this is, then inject the audio. Manual turn: the page's VAD
+    // detects it and sends the speech signals itself, so the script sends none.
+    const speak = async (utterance: { kind: 'attempt' } | { kind: 'request'; cardId: string } | { kind: 'chat' }, audio: string, label: string = utterance.kind) => {
       if (!live) {
         const response = await fetch(`${base}/api/realtime`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mock-speech', sessionId, learnerId: learner.id, utterance }) });
         if (!response.ok) throw new Error(`mock speech HTTP ${response.status}`);
-      } else await page.evaluate((data) => (window as unknown as { __speak: (b: string) => Promise<void> }).__speak(data), audio);
+      }
+      if (live || manualTurn) {
+        const t0 = Date.now();
+        await page.evaluate((data) => (window as unknown as { __speak: (b: string) => Promise<void> }).__speak(data), audio);
+        injections.push({ label, t0, t1: Date.now() - 50 });
+      }
     };
     const cardOf = (english: string | null) => course.cards.find((c) => c.english === english);
 
@@ -205,7 +202,7 @@ async function main() {
       const echoCard = cardOf(await hero());
       const marksA = await marks(); const linesA = await teacherLines(); const echoAt = Date.now();
       // A child's echo is one quick word (~0.5 s); the course fixtures carry padding (~1.3 s), so synthesize it bare.
-      const echoDone = echoCard ? speak({ kind: 'attempt' }, clip(`echo_${echoCard.id}`, echoCard.english, 'Samantha')) : speak({ kind: 'chat' }, clip('echo-fallback', '嗯', 'Tingting'));
+      const echoDone = echoCard ? speak({ kind: 'attempt' }, clip(`echo_${echoCard.id}`, echoCard.english, 'Samantha'), 'echo') : speak({ kind: 'chat' }, clip('echo-fallback', '嗯', 'Tingting'), 'echo');
       while (Date.now() - echoAt < 4000) {
         if (await marks() > marksA) throw new Error('A short echo cut the teacher off');
         await page.waitForTimeout(150);
@@ -218,9 +215,9 @@ async function main() {
       if (echoCard) manual.echoAttempts = (await words()).attempts[echoCard.english] ?? 0;
       // b. sustained speech stops the teacher
       await teacherSpeaking('interrupt-long', '请把这个词讲得更详细一点，多讲几句');
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(live ? 1500 : 500);
       const marksB = await marks(); const linesB = await teacherLines(); const stopAt = Date.now();
-      const stopDone = speak({ kind: 'chat' }, clip('stop-long', '等一下，停一下，我有话想说，请你先别讲了，我想问一个问题', 'Tingting'), 3000);
+      const stopDone = speak({ kind: 'chat' }, clip('stop-long', '等一下，停一下，我有话想说，请你先别讲了，我想问一个问题', 'Tingting'), 'interrupt');
       await until('long speech cut the teacher off', async () => await marks() > marksB, 4000);
       manual.interruptClearedMs = Date.now() - stopAt;
       await stopDone;
@@ -230,11 +227,19 @@ async function main() {
       // c. a normal attempt while the teacher is quiet is saved
       const attemptCard = cardOf(await hero()); if (!attemptCard) throw new Error('No displayed card for the attempt');
       const before = (await words()).attempts[attemptCard.english] ?? 0; const attemptAt = Date.now();
-      await speak({ kind: 'attempt' }, wordClip(attemptCard.id));
+      await speak({ kind: 'attempt' }, wordClip(attemptCard.id), 'attempt');
       await until('attempt saved', async () => ((await words()).attempts[attemptCard.english] ?? 0) > before, 30000);
       manual.attemptSavedMs = Date.now() - attemptAt;
       await quiet('after attempt');
       results.subtitles = await page.locator('.p2-message').allTextContents();
+      // d. VAD timing: first `start` after each injection began, first `end` after it finished.
+      results.vadTimings = injections.map((clipRun) => {
+        const start = speechSignals.find((e) => e.phase === 'start' && e.t >= clipRun.t0);
+        const end = speechSignals.find((e) => e.phase === 'end' && e.t >= clipRun.t0);
+        return { label: clipRun.label, clipMs: clipRun.t1 - clipRun.t0, startLatencyMs: start ? start.t - clipRun.t0 : null,
+          endLatencyMs: end ? end.t - clipRun.t1 : null, voicedMs: end?.voicedMs ?? null };
+      });
+      if ((results.vadTimings as Array<{ startLatencyMs: number | null }>).some((t) => t.startLatencyMs === null)) throw new Error('The page VAD never reported speech for an injected clip');
     }
     if (live && !manualTurn && !args.includes('--resume-short') && !args.includes('--sitting')) {
       // Real attempt at the displayed target is assessed and saved.

@@ -94,7 +94,7 @@ export class RealtimeClassroomSession {
   phase(to: PhaseName): TeachingReceipt { this.require(); return this.conversation.changePhase(to); }
   pause(paused: boolean): void { this.require(); this.conversation.setPaused(paused); }
   /** Experimental manual-turn mode: the child started or stopped speaking (NOT_FOUND outside that mode). */
-  speech(phase: 'start' | 'end'): void { this.require(); this.conversation.childSpeech(phase); }
+  speech(phase: 'start' | 'end', voicedMs?: number): void { this.require(); this.conversation.childSpeech(phase, voicedMs); }
   mockSpeech(utterance: MockUtterance): void {
     this.require();
     if (!(this.call instanceof MockRealtimeCall)) throw new Error('NOT_FOUND');

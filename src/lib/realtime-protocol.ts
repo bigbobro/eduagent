@@ -28,7 +28,7 @@ export const realtimeRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('phase'), ...owner, to: lessonPhaseSchema }),
   z.object({ action: z.literal('pause'), ...owner, paused: z.boolean() }),
   // Experimental manual-turn mode only: the child started/stopped speaking (browser-local VAD or the test script).
-  z.object({ action: z.literal('speech'), ...owner, phase: z.enum(['start', 'end']) }),
+  z.object({ action: z.literal('speech'), ...owner, phase: z.enum(['start', 'end']), voicedMs: z.number().min(0).max(600_000).optional() }),
   // Offline transport only: the controlled provider double "hears" a labelled utterance.
   z.object({ action: z.literal('mock-speech'), ...owner, utterance: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('attempt') }), z.object({ kind: z.literal('request'), cardId: z.string().min(1) }), z.object({ kind: z.literal('chat') }),

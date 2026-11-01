@@ -14,6 +14,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const out = join(root, 'desktop/build/server');
 const require = createRequire(import.meta.url);
 
+execFileSync(process.execPath, [join(root, 'scripts/copy-vad-assets.mjs')], { stdio: 'inherit' });
+
 try {
   execFileSync('cwebp', ['-version'], { stdio: 'pipe' });
 } catch {

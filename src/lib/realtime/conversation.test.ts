@@ -8,7 +8,7 @@ import { summarizeRealtimeUsage } from './usage';
 import { changePhase, type TeachingReceipt } from './teaching';
 import { getCourseProgress } from '@/lib/db/queries';
 import { isResumableProgress } from '@/lib/agent/course-progress';
-import { NaturalConversation, SITTING, type ProviderMessage } from './conversation';
+import { MANUAL_TURN, NaturalConversation, SITTING, type ProviderMessage } from './conversation';
 
 const usage = { input_tokens: 5, output_tokens: 5, input_token_details: { text_tokens: 5, audio_tokens: 0, cached_tokens: 0 }, output_token_details: { text_tokens: 5, audio_tokens: 0 } };
 let session: Session; let sent: Array<Record<string, any>>; let published: TeachingReceipt[]; let conversation: NaturalConversation;
@@ -423,6 +423,7 @@ describe('experimental manual-turn mode (server VAD off)', () => {
   const teacherDone = (id = 'r0') => { done(id); };
   const stopped = () => feed({ type: 'output_audio_buffer.stopped' });
   const committedItem = (item: string) => feed({ type: 'input_audio_buffer.committed', item_id: item });
+  const endSpeech = () => { conversation.childSpeech('end'); vi.advanceTimersByTime(MANUAL_TURN.commitAfterSilenceMs); };
 
   it('turns provider VAD off only in manual mode', () => {
     const config = (c: NaturalConversation) => (c.sessionConfig('m') as { audio: { input: { turn_detection: unknown } } }).audio.input.turn_detection;
@@ -435,7 +436,7 @@ describe('experimental manual-turn mode (server VAD off)', () => {
     conversation.childSpeech('start');
     conversation.setPresented({ kind: 'card', id: 'milk' }); // screen changes while the child is talking
     sent.length = 0;
-    conversation.childSpeech('end');
+    endSpeech();
     expect(types()).toEqual(['input_audio_buffer.commit']);
     committedItem('i1');
     expect(creates()).toHaveLength(1); expect(creates()[0].response.metadata).toMatchObject({ kind: 'commit' });
@@ -445,7 +446,7 @@ describe('experimental manual-turn mode (server VAD off)', () => {
   });
   it('lets a short echo finish without stopping the teacher, then answers it once the teacher is idle', () => {
     teacherSpeaks(); conversation.childSpeech('start');
-    vi.advanceTimersByTime(500); conversation.childSpeech('end');
+    vi.advanceTimersByTime(500); endSpeech();
     vi.advanceTimersByTime(5000);
     expect(types()).not.toContain('response.cancel'); expect(types()).not.toContain('output_audio_buffer.clear'); expect(types()).not.toContain('input_audio_buffer.commit');
     teacherDone(); // generation finished, audio still draining
@@ -462,7 +463,7 @@ describe('experimental manual-turn mode (server VAD off)', () => {
     expect(types().slice(-2)).toEqual(['response.cancel', 'output_audio_buffer.clear']);
     feed({ type: 'output_audio_buffer.cleared' }); done('r0', [], 'cancelled');
     vi.advanceTimersByTime(5000); expect(clearOutputs).toBe(0);
-    conversation.childSpeech('end'); expect(count('input_audio_buffer.commit')).toBe(1);
+    endSpeech(); expect(count('input_audio_buffer.commit')).toBe(1);
     // Teacher audio only (response already finished): no cancel is sent, the clear still is.
     sent.length = 0; committedItem('i1'); created('r1', { ...creates()[0].response.metadata }); done('r1'); feed({ type: 'output_audio_buffer.started' }); sent.length = 0;
     conversation.childSpeech('start'); vi.advanceTimersByTime(1500);
@@ -478,25 +479,59 @@ describe('experimental manual-turn mode (server VAD off)', () => {
     vi.advanceTimersByTime(2000); expect(count('input_audio_buffer.clear')).toBe(1);
     conversation.childSpeech('start'); sent.length = 0;
     vi.advanceTimersByTime(10_000); expect(count('input_audio_buffer.clear')).toBe(0);
-    conversation.childSpeech('end'); expect(types()).toEqual(['input_audio_buffer.commit']);
+    endSpeech(); expect(types()).toEqual(['input_audio_buffer.commit']);
     vi.advanceTimersByTime(4000); expect(count('input_audio_buffer.clear')).toBe(0); // commit in flight
     committedItem('i1'); created('r1', { ...creates()[0].response.metadata }); done('r1'); sent.length = 0;
     vi.advanceTimersByTime(2000); expect(count('input_audio_buffer.clear')).toBe(1);
   });
   it('does not clear the input while a finished turn waits for the teacher', () => {
-    teacherSpeaks(); conversation.childSpeech('start'); conversation.childSpeech('end'); sent.length = 0;
+    teacherSpeaks(); conversation.childSpeech('start'); endSpeech(); sent.length = 0;
     conversation.start(false); sent.length = 0; // opening is held behind the pending turn, hygiene timer starts
     vi.advanceTimersByTime(6000); expect(count('input_audio_buffer.clear')).toBe(0);
   });
   it('commits anyway when the teacher never reports idle', () => {
-    teacherSpeaks(); conversation.childSpeech('start'); conversation.childSpeech('end'); teacherDone();
+    teacherSpeaks(); conversation.childSpeech('start'); endSpeech(); teacherDone();
     vi.advanceTimersByTime(14_999); expect(count('input_audio_buffer.commit')).toBe(0);
     vi.advanceTimersByTime(1); expect(count('input_audio_buffer.commit')).toBe(1);
   });
   it('drops queued chatty requests at speech start and keeps the pending turn ahead of queued app speech', () => {
-    teacherSpeaks(); conversation.repeat('apple'); conversation.childSpeech('start'); conversation.childSpeech('end');
+    teacherSpeaks(); conversation.repeat('apple'); conversation.childSpeech('start'); endSpeech();
     teacherDone(); stopped();
     expect(count('input_audio_buffer.commit')).toBe(1); committedItem('i1');
     expect(creates().map((c) => c.response.metadata.kind)).toEqual(['commit']);
+  });
+  it('waits commitAfterSilenceMs after end before committing', () => {
+    conversation.childSpeech('start'); sent.length = 0;
+    conversation.childSpeech('end', 600);
+    vi.advanceTimersByTime(MANUAL_TURN.commitAfterSilenceMs - 1); expect(count('input_audio_buffer.commit')).toBe(0);
+    vi.advanceTimersByTime(1); expect(count('input_audio_buffer.commit')).toBe(1);
+  });
+  it('treats a start inside the pause window as the same turn: one commit, target from the first start', () => {
+    conversation.childSpeech('start');
+    conversation.setPresented({ kind: 'card', id: 'milk' });
+    conversation.childSpeech('end', 500); vi.advanceTimersByTime(MANUAL_TURN.commitAfterSilenceMs - 100);
+    conversation.childSpeech('start'); vi.advanceTimersByTime(5000);
+    expect(count('input_audio_buffer.commit')).toBe(0); // still talking, window cancelled
+    sent.length = 0; endSpeech();
+    expect(types()).toEqual(['input_audio_buffer.commit']);
+    committedItem('i1'); created('r1', { ...creates()[0].response.metadata }); done('r1', [assess('apple')]);
+    expect(attempts('apple')).toBe(1);
+  });
+  it('keeps the overlap clock on voiced time across small gaps, so sustained talk still interrupts', () => {
+    teacherSpeaks(); conversation.childSpeech('start');
+    vi.advanceTimersByTime(800); conversation.childSpeech('end', 700); // 700 ms voiced, 100 ms hangover
+    vi.advanceTimersByTime(400); expect(types()).not.toContain('output_audio_buffer.clear');
+    conversation.childSpeech('start'); // continues inside the window
+    vi.advanceTimersByTime(799); expect(types()).not.toContain('output_audio_buffer.clear');
+    vi.advanceTimersByTime(1); // 700 + 800 = 1500 ms voiced
+    expect(types().slice(-2)).toEqual(['response.cancel', 'output_audio_buffer.clear']);
+  });
+  it('does not count silence in the pause window toward an interruption', () => {
+    teacherSpeaks(); conversation.childSpeech('start');
+    vi.advanceTimersByTime(600); conversation.childSpeech('end', 500);
+    vi.advanceTimersByTime(MANUAL_TURN.commitAfterSilenceMs - 1);
+    expect(types()).not.toContain('output_audio_buffer.clear');
+    vi.advanceTimersByTime(1); vi.advanceTimersByTime(3000);
+    expect(types()).not.toContain('output_audio_buffer.clear'); expect(types()).not.toContain('response.cancel');
   });
 });

@@ -1,6 +1,7 @@
 import { createLogger } from '@/lib/logger';
 import type { Session } from '@/lib/agent/session-store';
 import { realtimeAssessmentSchema, realtimeUsageSchema, showCardSchema, type PresentedTarget, type ProviderEvent } from '@/lib/realtime-protocol';
+import { MANUAL_TURN } from './manual-turn';
 import { beginResponseUsage, changePhase, recordUsage, saveFeedback, showCard, snapshot, submitAssessment, submitPick, type TeachingReceipt } from './teaching';
 
 const log = createLogger('realtime-conversation');
@@ -21,24 +22,7 @@ export interface ConversationPort {
   /** Manual-turn fallback: ask the browser to send `output_audio_buffer.clear` over its own data channel. */
   clearOutput?(): void;
 }
-/**
- * EXPERIMENTAL manual-turn mode (REALTIME_TURN_MODE=manual, default off): server VAD is off and the app decides turns from
- * browser speech start/end signals. All timings live here.
- */
-export const MANUAL_TURN = {
-  /** Child speech that overlaps a busy teacher for this long is a real interruption; shorter overlap is an echo. */
-  interruptAfterMs: 1500,
-  /** How long to wait for `output_audio_buffer.cleared` after a sideband clear before asking the browser to send it. */
-  clearedWaitMs: 1000,
-  /** A pending commit waits for the teacher to go idle; after this it commits anyway (in case `stopped` never arrives). */
-  idleFallbackMs: 15_000,
-  /**
-   * While the child is silent and no commit is pending, the input buffer is cleared this often. Over WebRTC the mic keeps
-   * flowing into the buffer, so without it silence/noise piles up into the next committed turn. Trade-off: the first
-   * moments of speech between a clear and the `start` signal (detector latency) are lost.
-   */
-  hygieneClearMs: 2000,
-};
+export { MANUAL_TURN };
 /** One sitting (一次课) is one call. Only unpaused call time counts. Tune here after real lessons. */
 export const SITTING = { wrapUpMs: 10 * 60_000, goodbyeMs: 14 * 60_000 };
 type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye' | 'commit';
@@ -64,7 +48,10 @@ export class NaturalConversation {
   private inflight: { request: AppRequest; timer: ReturnType<typeof setTimeout>; awaitingCommit?: boolean } | null = null;
   // Manual-turn mode only (all null/idle otherwise). `speech` is the child's turn in progress; `pendingCommit` is a finished
   // turn waiting for the teacher to go idle; `clearProbe` measures whether a sideband output_audio_buffer.clear is confirmed.
-  private speech: { target: PresentedTarget | null; startedAt: number; busyAtStart: boolean; interrupted: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  // `voicedMs` is the voiced time of finished segments; `segmentAt` is when the running segment started; `ended` means the browser
+  // reported `end` and the turn waits `commitAfterSilenceMs` (`commitTimer`) for the child to continue.
+  private speech: { target: PresentedTarget | null; startedAt: number; segmentAt: number; voicedMs: number; busyAtStart: boolean; interrupted: boolean; ended: boolean;
+    timer: ReturnType<typeof setTimeout> | null; commitTimer: ReturnType<typeof setTimeout> | null } | null = null;
   private pendingCommit: { target: PresentedTarget | null; forced: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
   private clearProbe: { sentAt: number; wasPlaying: boolean; fellBack: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
   private hygiene: ReturnType<typeof setInterval> | null = null;
@@ -416,27 +403,44 @@ export class NaturalConversation {
    * The single entry for child speech boundaries (browser or test script). `start`: the child begins talking; `end`: they
    * stopped. Rejected outside manual mode.
    */
-  childSpeech(phase: 'start' | 'end'): void {
+  childSpeech(phase: 'start' | 'end', voicedMs?: number): void {
     if (!this.manual) throw new Error('NOT_FOUND');
     if (this.paused || this.farewell) { log.info('child speech ignored', { sessionId: this.session.id, phase, paused: this.paused }); return; }
-    if (phase === 'start') this.speechStart(); else this.speechEnd();
+    if (phase === 'start') this.speechStart(); else this.speechEnd(voicedMs);
   }
   private teacherBusy(): boolean { return this.active.size > 0 || this.playing; }
   private speechStart(): void {
-    if (this.speech) { log.warn('child speech start while speaking', { sessionId: this.session.id }); return; }
+    const resumed = this.speech;
+    if (resumed && !resumed.ended) { log.warn('child speech start while speaking', { sessionId: this.session.id }); return; }
     const busy = this.teacherBusy();
+    if (resumed) {
+      // The child continued inside the pause window: same turn, same target, and the overlap clock keeps its voiced time.
+      if (resumed.commitTimer) clearTimeout(resumed.commitTimer);
+      resumed.commitTimer = null; resumed.ended = false; resumed.segmentAt = Date.now();
+      log.info('child speech resumed', { sessionId: this.session.id, voicedMs: resumed.voicedMs, teacherBusy: busy });
+      if (busy && !resumed.interrupted) this.armOverlap(resumed);
+      return;
+    }
     this.childSpeaking = true;
     this.queue = this.queue.filter((request) => SURVIVES_SPEECH.includes(request.kind));
     // Bind to what the browser showed when speech began (a still-pending earlier turn keeps its own, earlier target).
-    const speech = { target: this.pendingCommit ? this.pendingCommit.target : this.presented, startedAt: Date.now(), busyAtStart: busy, interrupted: false, timer: null as ReturnType<typeof setTimeout> | null };
+    const now = Date.now();
+    const speech = { target: this.pendingCommit ? this.pendingCommit.target : this.presented, startedAt: now, segmentAt: now, voicedMs: 0, busyAtStart: busy, interrupted: false, ended: false,
+      timer: null as ReturnType<typeof setTimeout> | null, commitTimer: null as ReturnType<typeof setTimeout> | null };
     this.speech = speech;
     log.info('child speech start', { sessionId: this.session.id, teacherBusy: busy });
-    if (busy) { speech.timer = setTimeout(() => this.overlapElapsed(speech), MANUAL_TURN.interruptAfterMs); speech.timer.unref?.(); }
+    if (busy) this.armOverlap(speech);
+  }
+  /** Overlap clock: counts voiced time only, so pauses between segments of one turn do not count toward an interruption. */
+  private armOverlap(speech: NonNullable<NaturalConversation['speech']>): void {
+    if (speech.timer) clearTimeout(speech.timer);
+    speech.timer = setTimeout(() => this.overlapElapsed(speech), Math.max(0, MANUAL_TURN.interruptAfterMs - speech.voicedMs));
+    speech.timer.unref?.();
   }
   private overlapElapsed(speech: NonNullable<NaturalConversation['speech']>): void {
     if (this.speech !== speech) return;
     speech.timer = null;
-    const durationMs = Date.now() - speech.startedAt;
+    const durationMs = speech.voicedMs + Date.now() - speech.segmentAt;
     if (!this.teacherBusy()) { log.info('overlap decision', { sessionId: this.session.id, durationMs, interrupted: false, reason: 'teacher already idle' }); return; }
     speech.interrupted = true;
     log.info('overlap decision', { sessionId: this.session.id, durationMs, interrupted: true });
@@ -452,15 +456,26 @@ export class NaturalConversation {
     this.clearProbe = probe;
     this.port.send({ type: 'output_audio_buffer.clear' });
   }
-  private speechEnd(): void {
+  /** `voicedMs` (browser-measured, without the detector's end hangover) replaces start-to-end when given. */
+  private speechEnd(voicedMs?: number): void {
     const speech = this.speech;
     if (!speech) { log.warn('child speech end without start', { sessionId: this.session.id }); return; }
+    if (speech.ended) return;
     if (speech.timer) clearTimeout(speech.timer);
+    speech.timer = null; speech.ended = true;
+    const segment = Date.now() - speech.segmentAt;
+    speech.voicedMs += typeof voicedMs === 'number' && Number.isFinite(voicedMs) ? Math.max(0, Math.min(voicedMs, segment)) : segment;
+    log.info('child speech end', { sessionId: this.session.id, voicedMs: speech.voicedMs, waitMs: MANUAL_TURN.commitAfterSilenceMs });
+    speech.commitTimer = setTimeout(() => this.speechFinished(speech), MANUAL_TURN.commitAfterSilenceMs);
+    speech.commitTimer.unref?.();
+  }
+  /** The pause window passed without the child continuing: the turn is over. */
+  private speechFinished(speech: NonNullable<NaturalConversation['speech']>): void {
+    if (this.speech !== speech) return;
     this.speech = null; this.childSpeaking = false;
-    const durationMs = Date.now() - speech.startedAt;
     const busy = this.teacherBusy();
-    if (speech.busyAtStart && !speech.interrupted) log.info('overlap decision', { sessionId: this.session.id, durationMs, interrupted: false });
-    log.info('child speech end', { sessionId: this.session.id, durationMs, teacherBusy: busy });
+    if (speech.busyAtStart && !speech.interrupted) log.info('overlap decision', { sessionId: this.session.id, durationMs: speech.voicedMs, interrupted: false });
+    log.info('child turn finished', { sessionId: this.session.id, voicedMs: speech.voicedMs, teacherBusy: busy });
     if (!this.pendingCommit) this.pendingCommit = { target: speech.target, forced: false, timer: null };
     if (busy) {
       log.info('commit deferred until teacher idle', { sessionId: this.session.id });
@@ -496,6 +511,7 @@ export class NaturalConversation {
   }
   private dropManualTurn(): void {
     if (this.speech?.timer) clearTimeout(this.speech.timer);
+    if (this.speech?.commitTimer) clearTimeout(this.speech.commitTimer);
     if (this.pendingCommit?.timer) clearTimeout(this.pendingCommit.timer);
     this.speech = null; this.pendingCommit = null;
   }
@@ -552,6 +568,7 @@ RETURNING: When the child comes back to a course, first help them recall 2-3 wor
 SUMMARY: At the end of a sitting, after end_sitting the app asks for the goodbye; say only what we practised today and what comes next time, never "you have learned everything" and never that the course is complete unless the app says so. For sentence practice, teach its meaning and invite the full sentence; use chunks only when needed. Partial sentences still need support. The practice quiz may pass on a correct full repetition.
 Tools: show_card to teach, explain or review a card (when the child asks about another card, e.g. "猫那个再讲一下", show that card). record_assessment ONLY when the child actually tried to say the displayed English target: questions, requests (again, slower, another card), chit-chat, Chinese without trying the English, and silence are not attempts; just respond to them. Decide mastery and retry/review/advance/skip yourself from the child's needs; do not drill one word forever. start_practice only once every word of the course has been taught. end_sitting only after the app's time check (see SITTING). Practice pick-word questions are answered by tapping; the app checks them. For repeat-after-me questions assess the whole sentence; next_card_id and next_phase stay null.
 ORDER RULE: when a tool is needed, the tool call is the very first thing in your response, with no words before it: no preamble, no "let me listen", no "我先听一下/我来看看". Speak only after its result, then give the actual feedback directly. Never claim something was saved, mastered or completed before a result says ok:true; ok:false means nothing changed.
+NO BOOKKEEPING TALK: never tell the child about passing or not passing, counting, scores, attempts, saving, or that practice "doesn't count". Just teach and give the next cue.
 TOOL RECOVERY: Internal tool errors are not the child's mistake. Never mention saving, system errors, target IDs or tool details to the child. On an argument/target error, use expected_target to reassess the SAME existing audio and retry once before speaking; do not ask the child to repeat to fix bookkeeping. Do not invent an attempt when there is no associated input. If recovery fails, do not claim a pass; briefly ask a parent for help. After success, simply give learning feedback, without announcing that data was saved.
 Lesson state (phase, what is on screen, words not yet passed, passed words, passed questions) arrives in [app] State messages; the most recent one is current.`;
   }

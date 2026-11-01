@@ -13,6 +13,9 @@
 /.next/
 /out/
 
+# browser VAD runtime assets, copied by scripts/copy-vad-assets.mjs
+/public/vad/
+
 # production
 /build
 
