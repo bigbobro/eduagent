@@ -18,17 +18,11 @@ export interface ConversationPort {
   publish(receipt: TeachingReceipt): void;
   /** This sitting is over but the course is not complete; the goodbye is queued and the browser ends the call after it. */
   sittingEnded(): void;
-  /** Ask the browser to clear unplayed teacher audio (only the WebRTC peer can; the sideband cannot). */
-  interruptPlayback(): void;
 }
 /** One sitting (一次课) is one call. Only unpaused call time counts. Tune here after real lessons. */
 export const SITTING = { wrapUpMs: 10 * 60_000, goodbyeMs: 14 * 60_000 };
-/** Child speech over the teacher interrupts only if it lasts this long; shorter echoes and "mm" do not stop the model. */
-export const INTERRUPT_AFTER_MS = 1500;
-/** A child input committed while the teacher was idle gets this long to receive the provider's own response. */
-const REPLY_GRACE_MS = 800;
-type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye' | 'reply';
-interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean; inputId?: string }
+type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye';
+interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean }
 interface ResponseState { input: string | null; kind: string; transcript: string; feedbackFor?: string }
 const SURVIVES_SPEECH: RequestKind[] = ['present-quiz', 'goodbye'];
 function safeCode(code: string | undefined): string { return code && /^[a-z0-9_]{1,80}$/i.test(code) ? code.toUpperCase() : 'UNKNOWN'; }
@@ -57,25 +51,21 @@ export class NaturalConversation {
   private lastState = '';
   // Sitting clock: unpaused milliseconds so far, the start of the running stretch, and the next milestone timer.
   private sitting = { elapsed: 0, since: null as number | null, timer: null as ReturnType<typeof setTimeout> | null, wrapped: false, ended: false, started: false };
+  // Diagnostic only (provider event log); nothing decides on it.
   private playing = false;
-  // Child speech that began while the teacher was busy; decides interruption after INTERRUPT_AFTER_MS.
-  private overlap: { inputId: string; startedAt: number; timer: ReturnType<typeof setTimeout> | null; interrupted: boolean } | null = null;
-  // The latest committed child input that no response has been created for yet (see replyRequest).
-  private unanswered: { inputId: string; readyAt: number; skipped: boolean } | null = null;
-  private replyTimer: ReturnType<typeof setTimeout> | null = null;
   constructor(private session: Session, private port: ConversationPort, private timing = SITTING) {}
 
   /**
    * Initial session configuration for the provider call. Long-lived credentials never reach this payload.
    * Instructions and tools stay fixed for the whole call so every response can reuse the cached prefix; when the
    * conversation outgrows the context, truncation drops a large block once instead of a few items every turn.
-   * The provider never interrupts by itself (interrupt_response false): short echoes must not cut the model's
-   * demonstration, so handle() decides interruptions from how long the child keeps speaking.
+   * The provider interrupts by itself (interrupt_response true): over WebRTC it clears unplayed teacher audio on
+   * speech_started anyway, so the app cannot arbitrate interruptions (architecture.md §16, 2026-11-01 finding).
    */
   sessionConfig(model: string): object {
     return { type: 'realtime', model, instructions: this.instructions(), tools: this.tools(), tool_choice: 'auto', max_output_tokens: 1200,
       truncation: { type: 'retention_ratio', retention_ratio: 0.8 },
-      audio: { input: { turn_detection: { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: false } }, output: { voice: 'marin' } } };
+      audio: { input: { turn_detection: { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true } }, output: { voice: 'marin' } } };
   }
   start(resumed: boolean): void {
     if (this.session.currentPhase === 'intro') this.commit(changePhase(this.session, 'interactive'));
@@ -92,8 +82,8 @@ export class NaturalConversation {
   close(): void {
     if (this.inflight) clearTimeout(this.inflight.timer);
     this.inflight = null; this.queue = [];
-    for (const timer of [this.sitting.timer, this.replyTimer, this.overlap?.timer]) if (timer) clearTimeout(timer);
-    this.sitting.timer = null; this.replyTimer = null; this.overlap = null; this.unanswered = null;
+    if (this.sitting.timer) clearTimeout(this.sitting.timer);
+    this.sitting.timer = null;
   }
 
   /** Runs the clock toward the next milestone; paused time is excluded by re-arming on every pause change. */
@@ -118,16 +108,22 @@ export class NaturalConversation {
       log.info('sitting wrap-up', { sessionId: this.session.id, elapsedMs: sitting.elapsed });
       // A state message, not a response and not a session.update: the model picks it up on its next turn and the cached instructions stay intact.
       this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text:
-        '[app] Time check: this sitting is nearly over. Finish the word you are on without starting a new one, then play a short recall game with the words practised today (the child says them in a new situation), then say goodbye. Do not say the whole course is finished.' }] } });
+        '[app] Time check: this sitting is nearly over. Finish the word you are on without starting a new one, then play a short recall game with the words practised today (the child says them in a new situation), then call end_sitting. Do not say goodbye yourself: after end_sitting the app asks you to. Do not say the whole course is finished.' }] } });
       this.armSitting();
       return;
     }
+    this.endSitting('deadline');
+    this.pump();
+  }
+  /** The single end of a sitting, from the end_sitting tool or the goodbye deadline, whichever comes first. Callers pump. */
+  private endSitting(by: 'tool' | 'deadline'): void {
+    const sitting = this.sitting;
     sitting.ended = true; this.farewell = true;
-    log.info('sitting ended', { sessionId: this.session.id, elapsedMs: sitting.elapsed, phase: this.session.currentPhase });
+    this.armSitting();
+    log.info('sitting ended', { sessionId: this.session.id, by, elapsedMs: sitting.elapsed, phase: this.session.currentPhase });
     // Same path as the completion goodbye, so child speech never drops it. The phase is untouched: progress is already saved and the next call resumes it.
     this.queue.push({ id: this.requestId(), kind: 'goodbye', noTools: true, note: '[app] Today\'s sitting is over and progress is saved. Say one short warm goodbye in Chinese: what we practised today, that we continue next time. Do not say the course is finished.' });
     this.port.sittingEnded();
-    this.pump();
   }
 
   setPresented(target: PresentedTarget): void {
@@ -174,35 +170,24 @@ export class NaturalConversation {
     if (paused) {
       // Question prompts and the goodbye wait for resume; chatty follow-ups are dropped.
       this.queue = this.queue.filter((request) => SURVIVES_SPEECH.includes(request.kind));
-      this.unanswered = null;
       if (this.active.size) this.port.send({ type: 'response.cancel' });
     } else this.pump();
   }
 
   handle(event: ProviderMessage): void {
+    // DEBUG=true: event order without content, for diagnosing turn-taking against the real provider.
+    if (!event.type.endsWith('.delta')) log.debug('provider event', { sessionId: this.session.id, type: event.type, responseId: event.response?.id ?? event.response_id, itemId: event.item_id, status: event.response?.status, active: this.active.size, playing: this.playing, childSpeaking: this.childSpeaking });
     switch (event.type) {
       case 'input_audio_buffer.speech_started':
         this.childSpeaking = true;
         // Bind the input to what the browser had rendered at speech start, not to later server state.
         if (event.item_id && !this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.presented });
         this.queue = this.queue.filter((request) => SURVIVES_SPEECH.includes(request.kind));
-        this.speechOverTeacher(event.item_id ?? '');
         break;
-      case 'input_audio_buffer.speech_stopped':
-        this.childSpeaking = false; this.speechOverTeacherEnded();
-        // A newer utterance just ended: its commit (and the provider's own response to it) is about to supersede the older unanswered input.
-        if (this.unanswered && event.item_id !== this.unanswered.inputId) this.unanswered = { ...this.unanswered, skipped: false, readyAt: Date.now() + REPLY_GRACE_MS };
-        break;
+      case 'input_audio_buffer.speech_stopped': this.childSpeaking = false; break;
       case 'input_audio_buffer.committed':
-        this.childSpeaking = false; this.speechOverTeacherEnded();
-        if (event.item_id) {
-          if (!this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.presented });
-          this.lastInput = event.item_id;
-          // A newer input supersedes an older unanswered one. If a response is active the provider cannot answer
-          // this input (error or silent skip), so it is due as soon as the teacher is idle; otherwise the provider
-          // should create a response within moments and the grace window waits for it.
-          this.unanswered = { inputId: event.item_id, readyAt: Date.now() + REPLY_GRACE_MS, skipped: this.active.size > 0 };
-        }
+        this.childSpeaking = false;
+        if (event.item_id) { if (!this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.presented }); this.lastInput = event.item_id; }
         break;
       case 'output_audio_buffer.started': this.playing = true; break;
       case 'output_audio_buffer.stopped': case 'output_audio_buffer.cleared': this.playing = false; break;
@@ -219,43 +204,15 @@ export class NaturalConversation {
         const request = this.inflight?.request;
         if (request && event.error?.event_id === request.id) {
           clearTimeout(this.inflight!.timer); this.inflight = null;
-          // A VAD response won the race; the child's turn now owns the conversation. A lost reply needs no retry:
-          // whichever response is active already sees the input, and unanswered clears when it was created.
-          if (code === 'CONVERSATION_ALREADY_HAS_ACTIVE_RESPONSE' && request.kind !== 'followup' && request.kind !== 'reply') this.queue.unshift(request);
-        } else if (code === 'CONVERSATION_ALREADY_HAS_ACTIVE_RESPONSE' && this.unanswered) this.unanswered.skipped = true;
+          // A VAD response won the race; the child's turn now owns the conversation.
+          if (code === 'CONVERSATION_ALREADY_HAS_ACTIVE_RESPONSE' && request.kind !== 'followup') this.queue.unshift(request);
+        }
         break;
       }
     }
     this.pump();
   }
 
-  private teacherBusy(): boolean { return this.active.size > 0 || this.playing; }
-  /**
-   * Child speech while the teacher talks or audio is still playing: wait INTERRUPT_AFTER_MS; only a child who
-   * is still speaking then stops the teacher (cancel the generation, and the browser clears unplayed audio).
-   * Every such overlap is logged without content so the threshold can be tuned from real lessons.
-   */
-  private speechOverTeacher(inputId: string): void {
-    if (!this.teacherBusy() || this.overlap) return;
-    const overlap = { inputId, startedAt: Date.now(), timer: null as ReturnType<typeof setTimeout> | null, interrupted: false };
-    this.overlap = overlap;
-    overlap.timer = setTimeout(() => {
-      overlap.timer = null;
-      if (this.overlap !== overlap || !this.childSpeaking || !this.teacherBusy()) return;
-      overlap.interrupted = true;
-      // response.cancel errors when nothing is generating (audio only); skip it then. Tools of a cancelled response are discarded in done().
-      if (this.active.size) this.port.send({ type: 'response.cancel' });
-      this.port.interruptPlayback();
-    }, INTERRUPT_AFTER_MS);
-    overlap.timer.unref?.();
-  }
-  private speechOverTeacherEnded(): void {
-    const overlap = this.overlap;
-    if (!overlap) return;
-    if (overlap.timer) clearTimeout(overlap.timer);
-    this.overlap = null;
-    log.info('child spoke during teacher', { sessionId: this.session.id, inputId: overlap.inputId, durationMs: Date.now() - overlap.startedAt, interrupted: overlap.interrupted });
-  }
   /** Provider events the browser needs for conversation state and subtitles. */
   static forBrowser(event: ProviderMessage): ProviderEvent | null {
     const forwarded = ['input_audio_buffer.speech_started', 'input_audio_buffer.speech_stopped', 'response.created', 'response.done',
@@ -272,10 +229,8 @@ export class NaturalConversation {
     const request = metadata?.kind as RequestKind | undefined;
     const parent = metadata?.parent ? this.responses.get(metadata.parent) : undefined;
     // A VAD-created response answers the latest committed input; app responses only inherit their parent's input.
-    const input = request ? request === 'followup' ? parent?.input ?? null : request === 'reply' ? metadata?.input ?? null : null : this.lastInput;
+    const input = request ? request === 'followup' ? parent?.input ?? null : null : this.lastInput;
     if (!request) this.lastInput = null;
-    // Any response created after the commit sees the input in its context: it is answered, exactly once.
-    this.unanswered = null;
     this.responses.set(response.id, { input, kind: request ?? 'speech', transcript: '', feedbackFor: metadata?.feedback_for ?? parent?.feedbackFor });
     this.active.add(response.id);
     beginResponseUsage(this.session);
@@ -302,21 +257,23 @@ export class NaturalConversation {
       log.warn('speech before tool', { sessionId: this.session.id, tools: calls.map((c) => c.name).join(',') });
       for (const item of response.output ?? []) if (item.type === 'message' && item.id) this.port.send({ type: 'conversation.item.delete', item_id: item.id });
     }
-    let feedbackFor: string | undefined;
+    let feedbackFor: string | undefined; let sittingEnded = false;
     for (const call of calls) {
       const result = this.execute(call.name ?? '', call.arguments ?? '', state?.input ?? null);
       if (result.feedbackFor) feedbackFor = result.feedbackFor;
+      if (result.sittingEnded) sittingEnded = true;
       if (call.call_id) this.port.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result.output) } });
     }
     this.toolStreak++;
     this.syncState();
-    if (!this.childSpeaking) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, feedbackFor, noTools: this.toolStreak >= 3 });
+    // end_sitting queued the goodbye, which is its follow-up: no extra tool follow-up response.
+    if (!this.childSpeaking && !sittingEnded) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, feedbackFor, noTools: this.toolStreak >= 3 });
   }
-  private execute(name: string, raw: string, input: string | null): { output: object; feedbackFor?: string } {
+  private execute(name: string, raw: string, input: string | null): { output: object; feedbackFor?: string; sittingEnded?: boolean } {
     const target = input ? this.inputs.get(input)?.target : null;
     const quiz = target?.kind === 'quiz' ? this.quiz(target.id) : undefined;
     const reject = (code: string) => {
-      log.warn('tool rejected', { sessionId: this.session.id, tool: ['record_assessment', 'show_card', 'start_practice'].includes(name) ? name : 'unknown', code, inputId: input, targetId: target?.id ?? null });
+      log.warn('tool rejected', { sessionId: this.session.id, tool: ['record_assessment', 'show_card', 'start_practice', 'end_sitting'].includes(name) ? name : 'unknown', code, inputId: input, targetId: target?.id ?? null });
       return { output: { ok: false, error: code,
         expected_target: target ? { id: target.id, text: quiz?.type === 'repeat-after-me' ? quiz.targetText : this.card(target.id)?.english } : null,
         note: 'Internal tool failure. Do not tell the child about saving, IDs or tools, or ask them to repeat because of this failure. For an argument or target error, reassess the existing audio against expected_target and retry once with corrected arguments before speaking. Never claim success without ok:true. If recovery fails, briefly say the teacher needs a moment and ask a parent for help.' } };
@@ -334,6 +291,12 @@ export class NaturalConversation {
         if (this.session.currentPhase !== 'interactive') throw new Error('INVALID_PHASE');
         const receipt = changePhase(this.session, 'reinforcement'); this.commit(receipt);
         return { output: { ok: true, phase: receipt.progress.currentPhase } };
+      }
+      if (name === 'end_sitting') {
+        // Only after the wrap-up time check, and only while the sitting is still running (not ended, course not complete).
+        if (!this.sitting.wrapped || this.sitting.ended || this.farewell) throw new Error('SITTING_NOT_ENDING');
+        this.endSitting('tool');
+        return { output: { ok: true, note: 'The app now asks you to say goodbye. Say nothing else.' }, sittingEnded: true };
       }
       if (name !== 'record_assessment') return reject('UNKNOWN_TOOL');
       if (!input) return reject('NO_CHILD_INPUT');
@@ -376,36 +339,14 @@ export class NaturalConversation {
   }
   private enqueue(request: Omit<AppRequest, 'id'>): void { this.queue.push({ ...request, id: this.requestId() }); this.pump(); }
   private requestId(): string { return `app_${(++this.requests).toString(36)}`; }
-  /**
-   * One response for the latest child input that got none (the provider skipped it because a response was
-   * active, or never answered). Due when idle and either known skipped or the grace window passed without a
-   * response.created. Because response.created of ANY response clears `unanswered`, a provider response that did
-   * arrive can never be followed by a second one for the same input.
-   */
-  private replyRequest(): AppRequest | null {
-    const u = this.unanswered;
-    if (!u || this.sitting.ended || !this.inputs.has(u.inputId)) return null;
-    if (!u.skipped && Date.now() < u.readyAt) {
-      if (!this.replyTimer) {
-        this.replyTimer = setTimeout(() => { this.replyTimer = null; this.pump(); }, Math.max(0, u.readyAt - Date.now()) + 5);
-        this.replyTimer.unref?.();
-      }
-      return null;
-    }
-    this.unanswered = null;
-    log.info('reply to unanswered child input', { sessionId: this.session.id, inputId: u.inputId, skipped: u.skipped });
-    return { id: this.requestId(), kind: 'reply', inputId: u.inputId };
-  }
   private pump(): void {
-    if (this.paused || this.childSpeaking || this.active.size || this.inflight) return;
-    const request = this.queue.shift() ?? this.replyRequest();
-    if (!request) return;
+    if (this.paused || this.childSpeaking || this.active.size || this.inflight || !this.queue.length) return;
+    const request = this.queue.shift()!;
     if (request.note) this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: request.note }] } });
     const metadata: Record<string, string> = { kind: request.kind, request: request.id };
     if (request.parent) metadata.parent = request.parent;
     if (request.quizId) metadata.quiz_id = request.quizId;
     if (request.feedbackFor) metadata.feedback_for = request.feedbackFor;
-    if (request.inputId) metadata.input = request.inputId;
     // A request that never produced response.created must not block later app requests forever.
     const timer = setTimeout(() => { if (this.inflight?.request === request) { this.inflight = null; this.pump(); } }, 10_000);
     timer.unref?.();
@@ -447,21 +388,23 @@ export class NaturalConversation {
         }, required: ['target_id', 'result', 'heard', 'evidence', 'mastered', 'next_action', 'next_card_id', 'next_phase'], additionalProperties: false } },
       { type: 'function', name: 'start_practice', description: 'Move from the word lesson to the practice questions once every word of the course was taught (passed, or deliberately deferred). Never to finish early because the sitting is long.',
         parameters: { type: 'object', properties: {}, additionalProperties: false } },
+      { type: 'function', name: 'end_sitting', description: 'Only after the app\'s time check: call it once the current word is finished and the short recall game is done, instead of saying goodbye yourself. The app then asks you to say goodbye. Rejected before the time check.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false } },
     ];
   }
   private instructions(): string {
     const s = this.session;
     return `You are 麻吉老师, a warm and patient English tutor for a young Chinese-speaking child in a live voice lesson. Speak simple Chinese with clear, unhurried English demonstrations. Make one small teaching move and invite at most one response per turn, then listen; a brief scaffold may take more than two sentences. The child may talk at any time, including while you speak; answer what they actually said. No professional pronunciation scores.
 The screen shows one course card or practice question at a time; [app] messages and tool results tell you what is on screen and what was actually saved. Course: ${JSON.stringify({ title: s.course.title, opening: s.course.teachingHints.opening, sentences: s.course.objectives.sentences })}. Learning targets: ${JSON.stringify(s.course.cards.map(({ id, english, chinese, kind, drillParts }) => ({ id, english, chinese, kind, drillParts })))}. Use these learning targets; brief familiar context and answers to the child's questions are welcome, without adding unrelated learning goals.
-SITTING: The course is taught over several short sittings. This sitting is about 10-15 minutes and covers about 4-6 new words; the rest wait for next time, and progress is saved. Never rush to finish the course. When an [app] message says the time is nearly up, finish the current word, run a short recall game with today's words, and say goodbye.
+SITTING: The course is taught over several short sittings. This sitting is about 10-15 minutes and covers about 4-6 new words; the rest wait for next time, and progress is saved. Never rush to finish the course. When an [app] message says the time is nearly up, finish the current word, run a short recall game with today's words, then call end_sitting. Do not say goodbye before the app asks you to.
 TEACHING: Build 2-3 related words into one small situation (e.g. at the park: run, jump, walk), chosen on the spot from the words still to pass. Keep the child mostly speaking and doing. Move each word up and down this ladder by how the child responds: understand it from the situation, choose between two ("is the dog running or sleeping?"), echo it, fill a gap ("the dog sees the ball and ... ?"), use it freely or in a short sentence ("I can run!"). If the child succeeds, go up; if stuck or silent, go down one step instead of repeating the same question. Chinese is a help, not a ritual announcement on every card. Once words are familiar, weave in the course's target sentences. Never reuse one fixed praise-then-model-then-repeat template.
 PASSING A WORD: Passed (mastered=true) means: in a different situation from the one just modelled, the child recalled or used the word on their own (gap or own use). An echo right after your model, even perfect, is practice: record it with mastered=false and next_action retry, then ask for the word again in a new situation without handing the answer over. A child who already uses the word independently can pass immediately; do not drill what they already know.
 EACH TURN: Do one thing: one model or one question, then hand over the turn clearly ("your turn") and stop to wait. If the child stays silent, go one step easier (offer two choices, give the first sound, show the situation again), not the same question again. Wait patiently when the child pauses mid-answer.
 FEEDBACK: Be specific and tied to meaning ("the dog is running!"), not generic praise every time. If the child's try is not quite right, say the correct version naturally once and continue, without saying "wrong". If the child answers in Chinese, first confirm the meaning is right, then give the English ("对，就是跑！英文是 run"). After two tries with the same kind of help, change the help (situation, splitting the sound with the card's drillParts, two choices).
-CHILD TALKS: If the child interrupts, asks something or shares their own story, answer that first, then connect back to the word. If they are tired or bored, offer a choice (another game, a break), defer the word without awarding mastery (skip), or wrap up early with a normal goodbye; never push. The child may speak over you: a short echo or "mm" while you demonstrate does not stop you, and you get their words afterwards. If their input was a try at the English target, treat it as an attempt and assess it; if it was only agreement, just continue. You have audio and card metadata, not a camera: never claim to see the child or their room.
+CHILD TALKS: If the child interrupts, asks something or shares their own story, answer that first, then connect back to the word. If they are tired or bored, offer a choice (another game, a short break) or defer the word without awarding mastery (skip); never push. Do not say goodbye on your own: a parent can end the lesson early, otherwise the app tells you when the sitting ends. The child may speak at any time; when they do, you stop and their words come next: answer what they said, keeping it short (one sentence of guidance). If their input was a try at the English target, treat it as an attempt and assess it; if it was only agreement, just continue. You have audio and card metadata, not a camera: never claim to see the child or their room.
 RETURNING: When the child comes back to a course, first help them recall 2-3 words passed before, in a new situation and gently (hints are fine, forgetting is not failure). Recall answers do not remove a passed word.
-SUMMARY: Say only what we practised today and what comes next time, never "you have learned everything" and never that the course is complete unless the app says so. For sentence practice, teach its meaning and invite the full sentence; use chunks only when needed. Partial sentences still need support. The practice quiz may pass on a correct full repetition.
-Tools: show_card to teach, explain or review a card (when the child asks about another card, e.g. "猫那个再讲一下", show that card). record_assessment ONLY when the child actually tried to say the displayed English target: questions, requests (again, slower, another card), chit-chat, Chinese without trying the English, and silence are not attempts; just respond to them. Decide mastery and retry/review/advance/skip yourself from the child's needs; do not drill one word forever. start_practice only once every word of the course has been taught. Practice pick-word questions are answered by tapping; the app checks them. For repeat-after-me questions assess the whole sentence; next_card_id and next_phase stay null.
+SUMMARY: At the end of a sitting, after end_sitting the app asks for the goodbye; say only what we practised today and what comes next time, never "you have learned everything" and never that the course is complete unless the app says so. For sentence practice, teach its meaning and invite the full sentence; use chunks only when needed. Partial sentences still need support. The practice quiz may pass on a correct full repetition.
+Tools: show_card to teach, explain or review a card (when the child asks about another card, e.g. "猫那个再讲一下", show that card). record_assessment ONLY when the child actually tried to say the displayed English target: questions, requests (again, slower, another card), chit-chat, Chinese without trying the English, and silence are not attempts; just respond to them. Decide mastery and retry/review/advance/skip yourself from the child's needs; do not drill one word forever. start_practice only once every word of the course has been taught. end_sitting only after the app's time check (see SITTING). Practice pick-word questions are answered by tapping; the app checks them. For repeat-after-me questions assess the whole sentence; next_card_id and next_phase stay null.
 ORDER RULE: when a tool is needed, the tool call is the very first thing in your response, with no words before it: no preamble, no "let me listen", no "我先听一下/我来看看". Speak only after its result, then give the actual feedback directly. Never claim something was saved, mastered or completed before a result says ok:true; ok:false means nothing changed.
 TOOL RECOVERY: Internal tool errors are not the child's mistake. Never mention saving, system errors, target IDs or tool details to the child. On an argument/target error, use expected_target to reassess the SAME existing audio and retry once before speaking; do not ask the child to repeat to fix bookkeeping. Do not invent an attempt when there is no associated input. If recovery fails, do not claim a pass; briefly ask a parent for help. After success, simply give learning feedback, without announcing that data was saved.
 Lesson state (phase, what is on screen, words not yet passed, passed words, passed questions) arrives in [app] State messages; the most recent one is current.`;

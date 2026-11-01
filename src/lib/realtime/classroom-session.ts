@@ -16,12 +16,13 @@ import { markUsageIncomplete, requireOwner, type TeachingReceipt } from './teach
 
 const log = createLogger('realtime-classroom');
 const IDLE_MS = 10 * 60_000;
-// Browser smoke only: REALTIME_TEST_SITTING_MS="wrapUpMs,goodbyeMs" shortens the FIRST sitting of this server process, and
-// only when VOICE_MOCK=true, so a later sitting of the same smoke can run its full length.
+// Browser smoke only: REALTIME_TEST_SITTING_MS="wrapUpMs,goodbyeMs" shortens the FIRST sitting of this server process, so a
+// later sitting of the same smoke can run its full length. It also applies to a caller-owned live test server (a short paid
+// sitting); the packaged app never sets it.
 const testSitting = globalThis as typeof globalThis & { __eduagentTestSittingUsed?: boolean };
 function sittingTiming(): typeof SITTING {
   const raw = process.env.REALTIME_TEST_SITTING_MS;
-  if (!raw || !getConfig().voiceMock || testSitting.__eduagentTestSittingUsed) return SITTING;
+  if (!raw || testSitting.__eduagentTestSittingUsed) return SITTING;
   const [wrapUpMs, goodbyeMs] = raw.split(',').map(Number);
   if (!(wrapUpMs > 0) || !(goodbyeMs > wrapUpMs)) return SITTING;
   testSitting.__eduagentTestSittingUsed = true;
@@ -60,11 +61,6 @@ export class RealtimeClassroomSession {
       send: (event) => this.call?.send(event),
       publish: (receipt) => this.emit({ type: 'receipt', receipt }),
       sittingEnded: () => this.emit({ type: 'sitting-ended' }),
-      interruptPlayback: () => {
-        this.emit({ type: 'interrupt' });
-        // The offline provider has no browser peer to send output_audio_buffer.clear; stand in for it.
-        if (this.call instanceof MockRealtimeCall) this.call.send({ type: 'output_audio_buffer.clear' });
-      },
     }, sittingTiming());
     this.session.lifetime.signal.addEventListener('abort', () => this.close(), { once: true });
     this.armIdle();

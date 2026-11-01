@@ -124,7 +124,7 @@ async function main() {
     const quiet = async (label: string, ms = 60000) => {
       let since = Date.now(); const deadline = Date.now() + ms;
       while (Date.now() < deadline) {
-        if (await page.getByText('课堂完成', { exact: true }).count()) return;
+        if (await page.getByText('课堂完成', { exact: true }).count() || await page.getByText('进度已保存，下次继续', { exact: true }).count()) return;
         if (await state() !== 'awaiting') since = Date.now();
         if (Date.now() - since > 1500) { log(`quiet: ${label}`); return; }
         await page.waitForTimeout(100);
@@ -165,11 +165,14 @@ async function main() {
     await page.screenshot({ path: path.join(out, 'requested-card.png') });
     await quiet('after switch');
 
-    if (live && !args.includes('--resume-short')) {
+    if (live && !args.includes('--resume-short') && !args.includes('--sitting')) {
       // Real attempt at the displayed target is assessed and saved.
       await speak({ kind: 'attempt' }, wordClip(other.id));
       await until('attempt saved', async () => ((await words()).attempts[other.english] ?? 0) >= 1, 30000);
       await quiet('after attempt');
+      // A cleared reply gets " …" appended to its subtitle; the model's own ellipses do not count.
+      const marks = async () => (await page.locator('.p2-message:not(.p2-me)').allTextContents()).filter((text) => /\s…$/.test(text)).length;
+      const teacherLines = async () => page.locator('.p2-message:not(.p2-me)').count();
       // A request for slower speech is answered but never counted.
       const attemptsBefore = (await words()).attempts;
       await speak({ kind: 'chat' }, clip('slower', '慢一点好吗', 'Tingting'));
@@ -180,7 +183,6 @@ async function main() {
       await speak({ kind: 'chat' }, clip('longer', '请把这个词讲长一点，多讲几句', 'Tingting'));
       await until('long reply playing', async () => await state() === 'speaking', 20000);
       await page.waitForTimeout(1500);
-      const marks = async () => ((await page.locator('.p2-msgs').textContent()) ?? '').split('…').length;
       const before = await marks();
       const interruptAt = Date.now();
       await speak({ kind: 'chat' }, clip('stop', '等一下，停一下，我有话想说，请你先别讲了', 'Tingting'));
@@ -243,10 +245,31 @@ async function main() {
       await page.waitForFunction(() => (window as unknown as { __smokeTracks: MediaStreamTrack[] }).__smokeTracks.every((track) => track.readyState === 'ended'), undefined, { timeout: 10000 });
     };
     if (args.includes('--sitting')) {
-      // Needs a server started with REALTIME_TEST_SITTING_MS=<wrapUpMs>,<goodbyeMs> and VOICE_MOCK=true: the first sitting is short.
-      if (live) throw new Error('--sitting is a mock scenario');
-      await speak({ kind: 'attempt' }, '');
-      await until('attempt saved', async () => ((await words()).attempts[other.english] ?? 0) >= 1, 30000);
+      // Needs a server started with REALTIME_TEST_SITTING_MS=<wrapUpMs>,<goodbyeMs>: the first sitting is short.
+      const ended = async () => await page.getByText('进度已保存，下次继续', { exact: true }).count() > 0;
+      if (live) {
+        // Keep answering whatever is displayed until the app ends the sitting; the subtitles are the wrap-up evidence.
+        const deadline = Date.now() + 8 * 60_000;
+        while (!(await ended()) && Date.now() < deadline) {
+          await quiet('before sitting answer', 90000);
+          if (await ended()) break;
+          const card = cardOf(await hero());
+          await speak(card ? { kind: 'attempt' } : { kind: 'chat' }, card ? wordClip(card.id) : clip('again', '再讲一遍好吗', 'Tingting'));
+          await page.waitForTimeout(1500);
+        }
+        results.sittingSubtitles = await page.locator('.p2-message').allTextContents();
+      } else {
+        await speak({ kind: 'attempt' }, '');
+        await until('attempt saved', async () => ((await words()).attempts[other.english] ?? 0) >= 1, 30000);
+        // After the wrap-up note the offline model answers the next utterance with end_sitting (the tool path); chat until the app ends the sitting.
+        const deadline = Date.now() + 60_000;
+        while (!(await ended()) && Date.now() < deadline) {
+          await quiet('before sitting chat', 30000);
+          if (await ended()) break;
+          await speak({ kind: 'chat' }, '');
+          await page.waitForTimeout(1500);
+        }
+      }
       await page.getByText('进度已保存，下次继续', { exact: true }).waitFor({ timeout: 90000 });
       log('sitting end page shown');
       await page.screenshot({ path: path.join(out, 'sitting-ended.png') });
@@ -256,6 +279,8 @@ async function main() {
       const afterFirst = await words();
       if (afterFirst.completed) throw new Error('Course completed in the first sitting');
       results.firstSitting = { attempts: afterFirst.attempts };
+    }
+    if (args.includes('--sitting') && !live) {
       // Come back: same course, same child, resumes from the checkpoint with the remaining work.
       endStatus = 0; sessionId = '';
       await page.goto(`${base}/lesson/${course.id}?learnerId=${learner.id}`);
@@ -268,9 +293,9 @@ async function main() {
       results.resumedAt = resumedHero;
       await page.screenshot({ path: path.join(out, 'resumed.png') });
     }
-    if (args.includes('--full') || args.includes('--sitting')) {
+    if (args.includes('--full') || (args.includes('--sitting') && !live)) {
       await finishCourse();
-    } else {
+    } else if (!args.includes('--sitting')) {
       const end = page.waitForResponse((response) => response.url().endsWith('/api/realtime') && response.request().postDataJSON()?.action === 'end');
       await page.getByRole('button', { name: '下课', exact: true }).click();
       if (!(await end).ok()) throw new Error('Remote classroom did not close cleanly');

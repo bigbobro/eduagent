@@ -8,18 +8,18 @@ import { summarizeRealtimeUsage } from './usage';
 import { changePhase, type TeachingReceipt } from './teaching';
 import { getCourseProgress } from '@/lib/db/queries';
 import { isResumableProgress } from '@/lib/agent/course-progress';
-import { INTERRUPT_AFTER_MS, NaturalConversation, SITTING, type ProviderMessage } from './conversation';
+import { NaturalConversation, SITTING, type ProviderMessage } from './conversation';
 
 const usage = { input_tokens: 5, output_tokens: 5, input_token_details: { text_tokens: 5, audio_tokens: 0, cached_tokens: 0 }, output_token_details: { text_tokens: 5, audio_tokens: 0 } };
 let session: Session; let sent: Array<Record<string, any>>; let published: TeachingReceipt[]; let conversation: NaturalConversation;
-let sittingEnds: number; let clears: number;
+let sittingEnds: number;
 beforeEach(() => {
   session = createSession(foodCourse, 'test-learner', 'realtime');
   session.tokenUsage.realtime = { model: 'gpt-realtime-2.1', usage: [], complete: true };
   changePhase(session, 'interactive'); session.memory.currentCardId = 'apple';
-  sent = []; published = []; sittingEnds = 0; clears = 0;
+  sent = []; published = []; sittingEnds = 0;
   conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt),
-    sittingEnded: () => { sittingEnds++; }, interruptPlayback: () => { clears++; } });
+    sittingEnded: () => { sittingEnds++; } });
   conversation.setPresented({ kind: 'card', id: 'apple' });
   sent.length = 0;
 });
@@ -248,95 +248,25 @@ const finishCourse = () => {
 };
 const minutes = (n: number) => vi.advanceTimersByTime(n * 60_000);
 
-describe('child speech over the teacher', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-  it('configures the provider not to interrupt by itself', () => {
-    expect(conversation.sessionConfig('m')).toMatchObject({ audio: { input: { turn_detection: { type: 'semantic_vad', create_response: true, interrupt_response: false } } } });
+describe('provider auto-interruption', () => {
+  it('lets the provider interrupt by itself', () => {
+    expect(conversation.sessionConfig('m')).toMatchObject({ audio: { input: { turn_detection: { type: 'semantic_vad', create_response: true, interrupt_response: true } } } });
   });
-  it('lets a short echo finish the demonstration, then answers it once', () => {
-    created('r1');
-    feed({ type: 'input_audio_buffer.speech_started', item_id: 'echo' });
-    vi.advanceTimersByTime(INTERRUPT_AFTER_MS - 500);
-    feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'echo' }, { type: 'input_audio_buffer.committed', item_id: 'echo' });
-    vi.advanceTimersByTime(INTERRUPT_AFTER_MS);
-    expect(cancels()).toBe(0); expect(clears).toBe(0); expect(creates()).toHaveLength(0);
-    done('r1');
-    expect(creates()).toHaveLength(1); expect(creates()[0].response.metadata).toMatchObject({ kind: 'reply', input: 'echo' });
-    created('reply', { ...creates()[0].response.metadata }); done('reply'); vi.advanceTimersByTime(5000);
-    expect(creates()).toHaveLength(1);
-  });
-  it('binds the reply to the echo so an attempt in it is assessed', () => {
-    created('r1'); speech('echo'); done('r1');
-    created('reply', { ...creates()[0].response.metadata });
-    done('reply', [assess('apple', { mastered: false, next_action: 'retry' })]);
-    expect(attempts('apple')).toBe(1);
-  });
-  it('stops the teacher when the child keeps talking, and discards the cancelled response tools', () => {
+  it('discards the tools of a response the provider cancelled for the child, and sends no cancel of its own', () => {
     created('r1');
     feed({ type: 'input_audio_buffer.speech_started', item_id: 'wait' });
-    vi.advanceTimersByTime(INTERRUPT_AFTER_MS - 1); expect(cancels()).toBe(0);
-    vi.advanceTimersByTime(2);
-    expect(cancels()).toBe(1); expect(clears).toBe(1);
     done('r1', [call('show_card', { card_id: 'milk' })], 'cancelled');
-    expect(published).toEqual([]); expect(session.memory.currentCardId).toBe('apple');
+    expect(published).toEqual([]); expect(session.memory.currentCardId).toBe('apple'); expect(cancels()).toBe(0);
     feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'wait' }, { type: 'input_audio_buffer.committed', item_id: 'wait' });
     created('answer'); done('answer');
-    vi.advanceTimersByTime(5000); expect(creates()).toHaveLength(0);
-  });
-  it('clears audio that is still playing after the response is done, without a cancel', () => {
-    created('r1'); done('r1'); feed({ type: 'output_audio_buffer.started', response_id: 'r1' });
-    feed({ type: 'input_audio_buffer.speech_started', item_id: 'wait' });
-    vi.advanceTimersByTime(INTERRUPT_AFTER_MS + 1);
-    expect(clears).toBe(1); expect(cancels()).toBe(0);
-  });
-  it('does not interrupt when the teacher is silent', () => {
-    feed({ type: 'input_audio_buffer.speech_started', item_id: 'talk' });
-    vi.advanceTimersByTime(INTERRUPT_AFTER_MS * 3);
-    expect(clears).toBe(0); expect(cancels()).toBe(0);
-  });
-  it('logs each overlap without content', () => {
-    const info = vi.spyOn(console, 'log').mockImplementation(() => {});
-    try {
-      created('r1');
-      feed({ type: 'input_audio_buffer.speech_started', item_id: 'x1' });
-      vi.advanceTimersByTime(400);
-      feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'x1' });
-      const line = info.mock.calls.map((c) => String(c[0])).find((l) => l.includes('child spoke during teacher'));
-      expect(line).toContain('x1'); expect(line).toContain('400'); expect(line).toContain('false');
-    } finally { info.mockRestore(); }
-  });
-  it.each([
-    ['an active-response error', true],
-    ['a silent skip', false],
-  ])('creates exactly one follow-up for an input the provider could not answer: %s', (_name, withError) => {
-    created('r1');
-    speech('echo');
-    if (withError) feed({ type: 'error', error: { code: 'conversation_already_has_active_response' } });
-    done('r1');
-    expect(kinds()).toEqual(['reply']);
-    feed({ type: 'error', error: { code: 'conversation_already_has_active_response', event_id: creates()[0].event_id } });
-    vi.advanceTimersByTime(20_000);
-    expect(kinds()).toEqual(['reply']);
-  });
-  it('lets a newer child input supersede an unanswered one', () => {
-    created('r1'); speech('first'); speech('second'); done('r1');
-    expect(creates()).toHaveLength(1); expect(creates()[0].response.metadata.input).toBe('second');
-  });
-  it('does not double-respond when the provider answers a committed input itself', () => {
-    speech('hello'); vi.advanceTimersByTime(300);
-    created('auto'); done('auto'); vi.advanceTimersByTime(5000);
     expect(creates()).toHaveLength(0);
   });
-  it('steps in only after a grace window when the provider never answers an idle-time input', () => {
-    speech('hello'); vi.advanceTimersByTime(600); expect(creates()).toHaveLength(0);
-    vi.advanceTimersByTime(400); expect(kinds()).toEqual(['reply']);
-  });
-  it('does not reply when the child starts speaking again before the follow-up', () => {
-    created('r1'); speech('echo'); feed({ type: 'input_audio_buffer.speech_started', item_id: 'more' }); done('r1');
-    expect(creates()).toHaveLength(0);
-    feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'more' }, { type: 'input_audio_buffer.committed', item_id: 'more' });
-    created('auto'); vi.advanceTimersByTime(5000); expect(creates()).toHaveLength(0);
+  it('requeues an app request that lost the race to the provider response, but not a tool follow-up', () => {
+    conversation.repeat('apple');
+    const request = creates()[0];
+    feed({ type: 'error', error: { code: 'conversation_already_has_active_response', event_id: request.event_id } });
+    created('auto'); done('auto');
+    expect(kinds()).toEqual(['repeat', 'repeat']);
   });
 });
 
@@ -388,6 +318,73 @@ describe('sitting timing', () => {
     open(); minutes(SITTING.goodbyeMs / 60_000);
     finishCourse();
     expect(kinds()).toEqual(['goodbye']);
+  });
+  describe('end_sitting', () => {
+    const endCall = () => call('end_sitting', {});
+    it('is rejected before the wrap-up time check and changes nothing', () => {
+      open(); speech('i1'); created('r1'); sent.length = 0;
+      done('r1', [endCall()]);
+      expect(outputs()[0]).toMatchObject({ ok: false, error: 'SITTING_NOT_ENDING' });
+      expect(sittingEnds).toBe(0);
+      // The rejection is an ordinary tool result: the model gets its normal follow-up and no goodbye is queued.
+      expect(kinds()).toEqual(['followup']);
+      minutes(SITTING.wrapUpMs / 60_000);
+      expect(kinds()).toEqual(['followup']);
+    });
+    it('after the wrap-up queues exactly one goodbye, ends the sitting and sends no tool follow-up', () => {
+      open(); minutes(SITTING.wrapUpMs / 60_000);
+      speech('i1'); created('r1'); sent.length = 0;
+      done('r1', [endCall()]);
+      expect(outputs()[0]).toMatchObject({ ok: true });
+      expect(sittingEnds).toBe(1); expect(kinds()).toEqual(['goodbye']); expect(creates()[0].response.tool_choice).toBe('none');
+      created('bye', { ...creates()[0].response.metadata }); done('bye');
+      expect(kinds()).toEqual(['goodbye']);
+      minutes(30); expect(kinds()).toEqual(['goodbye']); expect(sittingEnds).toBe(1);
+      expect(session.currentPhase).toBe('interactive');
+    });
+    it('keeps the goodbye through child speech that starts right after the call', () => {
+      open(); minutes(SITTING.wrapUpMs / 60_000);
+      speech('i1'); created('r1'); sent.length = 0;
+      feed({ type: 'input_audio_buffer.speech_started', item_id: 'late' });
+      done('r1', [endCall()]);
+      expect(sittingEnds).toBe(1); expect(creates()).toHaveLength(0);
+      feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'late' }, { type: 'input_audio_buffer.committed', item_id: 'late' });
+      expect(kinds()).toEqual(['goodbye']);
+    });
+    it('is not executed from a response the child cancelled', () => {
+      open(); minutes(SITTING.wrapUpMs / 60_000);
+      created('r1'); feed({ type: 'input_audio_buffer.speech_started', item_id: 'wait' });
+      done('r1', [endCall()], 'cancelled');
+      expect(sittingEnds).toBe(0);
+    });
+    it('is rejected once the sitting already ended at the deadline', () => {
+      open(); minutes(SITTING.goodbyeMs / 60_000);
+      created('bye', { ...creates().at(-1)?.response.metadata }); done('bye');
+      sent.length = 0;
+      speech('i1'); created('r1'); done('r1', [endCall()]);
+      expect(outputs()[0]).toMatchObject({ ok: false, error: 'SITTING_NOT_ENDING' });
+      expect(sittingEnds).toBe(1);
+    });
+    it('leaves the deadline with nothing to do after the tool ended the sitting', () => {
+      open(); minutes(SITTING.wrapUpMs / 60_000);
+      speech('i1'); created('r1'); done('r1', [endCall()]);
+      created('bye', { ...creates().at(-1)?.response.metadata }); done('bye'); sent.length = 0;
+      minutes(SITTING.goodbyeMs / 60_000);
+      expect(creates()).toHaveLength(0); expect(sittingEnds).toBe(1);
+    });
+    it('loses to course completion that happened first', () => {
+      open(); minutes(SITTING.wrapUpMs / 60_000);
+      finishCourse(); expect(kinds()).toEqual(['goodbye']);
+      speech('i1'); created('r1'); done('r1', [endCall()]);
+      expect(outputs().at(-1)).toMatchObject({ ok: false, error: 'SITTING_NOT_ENDING' });
+      expect(sittingEnds).toBe(0); expect(kinds()).toEqual(['goodbye']);
+    });
+    it('is part of the fixed tool list and the wrap-up note names it', () => {
+      const config = conversation.sessionConfig('m') as { tools: Array<{ name: string }> };
+      expect(config.tools.map((t) => t.name)).toContain('end_sitting');
+      open(); minutes(SITTING.wrapUpMs / 60_000);
+      expect(sent.find((e) => e.type === 'conversation.item.create')!.item.content[0].text).toContain('end_sitting');
+    });
   });
 });
 

@@ -16,27 +16,21 @@ export class MockRealtimeCall implements RealtimeCall {
   private playing: string | null = null;
   private chain = Promise.resolve();
   private interruptResponse: boolean;
-  /** What the model would have decided for an input the provider skipped; used by the app's reply to that input. */
-  private skipped: ReturnType<MockRealtimeCall['decide']>;
+  /** Set once the app has sent the wrap-up time check; the next child utterance then makes the model call end_sitting. */
+  private wrapUp = false;
   constructor(private session: Session, private options: Pick<CallOptions, 'onEvent'> & { session?: object }, private step = 40) {
-    // Same switch as the real provider: with interrupt_response false, speech neither cancels the response nor clears audio.
+    // Same switch as the real provider (the app sets it true): with false, speech neither cancels the response nor clears audio.
     const detection = (options.session as { audio?: { input?: { turn_detection?: { interrupt_response?: boolean } } } } | undefined)?.audio?.input?.turn_detection;
     this.interruptResponse = detection?.interrupt_response !== false;
   }
   send(event: { type?: string; response?: { metadata?: Record<string, string> } }): void {
     if (this.closed) return;
-    if (event.type === 'response.create') {
-      const metadata = event.response?.metadata ?? null;
-      const decision = metadata?.kind === 'reply' ? this.skipped : undefined;
-      if (metadata?.kind === 'reply') this.skipped = undefined;
-      this.respond(metadata, decision);
-    }
+    if (event.type === 'response.create') this.respond(event.response?.metadata ?? null);
+    if (event.type === 'conversation.item.create' && JSON.stringify(event).includes('[app] Time check')) this.wrapUp = true;
     if (event.type === 'response.cancel') {
       if (this.active) this.cancel();
       else this.emit({ type: 'error', error: { code: 'response_cancel_not_active' } });
     }
-    // Sent by the browser over WebRTC in the real system (the server calls this on its behalf offline).
-    if (event.type === 'output_audio_buffer.clear' && this.playing) { this.emit({ type: 'output_audio_buffer.cleared', response_id: this.playing }); this.playing = null; }
   }
   close(): void { this.closed = true; if (this.active) this.active.timers.forEach(clearTimeout); this.active = null; }
   /** The test "child" speaks. Interrupts like server VAD only when the session has interrupt_response on. */
@@ -52,11 +46,14 @@ export class MockRealtimeCall implements RealtimeCall {
       this.emit({ type: 'input_audio_buffer.speech_stopped', item_id: item });
       this.emit({ type: 'input_audio_buffer.committed', item_id: item });
       // Without auto-interrupt, a response already running makes the provider skip the auto response silently.
-      if (this.interruptResponse || !this.active) this.respond(null, this.decide(utterance)); else this.skipped = this.decide(utterance);
+      if (this.interruptResponse || !this.active) this.respond(null, this.decide(utterance));
     });
   }
   private decide(utterance: MockUtterance): { name: string; arguments: string } | undefined {
     const memory = this.session.memory;
+    // After the wrap-up note the model finishes by calling end_sitting (deterministic: the first utterance after the note).
+    // The goodbye-deadline path is covered by unit tests, not by this mock.
+    if (this.wrapUp) { this.wrapUp = false; return { name: 'end_sitting', arguments: '{}' }; }
     if (utterance.kind === 'chat') return undefined;
     if (utterance.kind === 'request') return { name: 'show_card', arguments: JSON.stringify({ card_id: utterance.cardId }) };
     if (this.session.currentPhase === 'interactive') {
