@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { getRealtimeTurnMode, isConfigured, isRealtimeConfigured } from '@/lib/config';
+import { isConfigured, isRealtimeConfigured } from '@/lib/config';
 import { rejectBadOrigin } from '@/lib/settings/origin-guard';
 import { scheduleRestart } from '@/lib/settings/restart';
 import {
   currentValues,
+  getRealtimeTurnMode,
   getSettingsMode,
   getSettingsPath,
   maskValues,

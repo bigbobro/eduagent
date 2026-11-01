@@ -92,11 +92,6 @@ export function getConfig(): AppConfig {
   return cachedConfig
 }
 
-/** EXPERIMENTAL: REALTIME_TURN_MODE=manual turns provider VAD off and lets the app decide turns (architecture.md §16-§18). Default 'auto'. */
-export function getRealtimeTurnMode(): 'auto' | 'manual' {
-  return process.env.REALTIME_TURN_MODE === 'manual' ? 'manual' : 'auto'
-}
-
 /**
  * 是否已配置到可以上课:VOICE_MOCK=true 视为已配置;否则 LLM key 与豆包凭据/资源 ID 必须齐全。
  * 直接读 process.env(不走 getConfig 缓存),所以任何时刻都反映当前进程环境。

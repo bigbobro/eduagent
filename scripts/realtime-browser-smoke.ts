@@ -13,7 +13,7 @@ function option(name: string, fallback: string) { const at = args.indexOf(name);
 const base = option('--base', 'http://localhost:3018');
 if (!/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(base)) throw new Error('Loopback test server required');
 const live = args.includes('--live');
-// Experimental: needs a server started with REALTIME_TURN_MODE=manual. The page's own VAD turns the injected audio into speech start/end signals (offline too).
+// Experimental: needs manual turn mode: a server started with REALTIME_TURN_MODE=manual, or EDUAGENT_APP=1 + EDUAGENT_SETTINGS_PATH pointing at a settings.json with realtimeTurnMode "manual". The page's own VAD turns the injected audio into speech start/end signals (offline too).
 const manualTurn = args.includes('--manual-turn');
 if (live === args.includes('--mock')) throw new Error('Choose --live or --mock explicitly');
 const course = getCourseById(option('--course', 'animals')) as Course;
@@ -43,7 +43,7 @@ function wordClip(cardId: string): string {
 async function main() {
   const settings = await (await fetch(`${base}/api/settings`)).json();
   if (Boolean(settings.mock) !== !live) throw new Error('Server provider mode differs from requested smoke');
-  if (manualTurn && settings.realtimeTurnMode !== 'manual') throw new Error('--manual-turn needs the server started with REALTIME_TURN_MODE=manual');
+  if (manualTurn && settings.realtimeTurnMode !== 'manual') throw new Error('--manual-turn needs manual turn mode (saved setting 实验：示范时跟读不打断老师, or REALTIME_TURN_MODE=manual)');
   if (manualTurn && !(await fetch(`${base}/vad/silero_vad_v5.onnx`)).ok) throw new Error('VAD assets missing: run pnpm vad:assets before starting the server');
   if (manualTurn && (args.includes('--sitting') || args.includes('--resume-short'))) throw new Error('--manual-turn does not combine with --sitting/--resume-short');
   const learner = await (await fetch(`${base}/api/learners`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Realtime 自然对话验证' }) })).json();

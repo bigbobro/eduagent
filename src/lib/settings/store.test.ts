@@ -11,6 +11,7 @@ import {
   LEGACY_CHANNEL_ID,
   maskSecret,
   maskValues,
+  getRealtimeTurnMode,
   mergeSubmitted,
   normalizeSettings,
   readSettingsFile,
@@ -37,7 +38,7 @@ describe('settings store', () => {
   const envKeys = [
     'EDUAGENT_APP', 'EDUAGENT_SETTINGS_PATH', 'LLM_API_KEY', 'LLM_BASE_URL', 'LLM_MODEL', 'LLM_PROVIDER',
     'DOUBAO_AUTH_MODE', 'DOUBAO_API_KEY', 'DOUBAO_APP_ID', 'DOUBAO_ACCESS_KEY',
-    'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'DOUBAO_TTS_DEFAULT_SPEAKER',
+    'DOUBAO_ASR_RESOURCE_ID', 'DOUBAO_TTS_RESOURCE_ID', 'DOUBAO_TTS_DEFAULT_SPEAKER', 'REALTIME_TURN_MODE',
   ];
   const saved: Record<string, string | undefined> = {};
 
@@ -190,6 +191,35 @@ describe('settings store', () => {
     applySettingsToEnv();
     expect(process.env.LLM_API_KEY).toBe('from-env-local');
     expect(process.env.LLM_PROVIDER).toBeUndefined();
+  });
+
+  it('realtime turn mode: env > saved setting > auto, read at call time, saved only in app mode', () => {
+    expect(getRealtimeTurnMode()).toBe('auto');
+    process.env.EDUAGENT_APP = '1';
+    process.env.EDUAGENT_SETTINGS_PATH = path;
+    expect(getRealtimeTurnMode()).toBe('auto');
+    writeSettingsFile(path, { ...FAKE, realtimeTurnMode: 'manual' });
+    expect(getRealtimeTurnMode()).toBe('manual');
+    process.env.REALTIME_TURN_MODE = 'auto';
+    expect(getRealtimeTurnMode()).toBe('auto');
+    process.env.REALTIME_TURN_MODE = 'bogus';
+    expect(getRealtimeTurnMode()).toBe('manual');
+    writeSettingsFile(path, { ...FAKE, realtimeTurnMode: 'auto' });
+    expect(getRealtimeTurnMode()).toBe('auto');
+    process.env.REALTIME_TURN_MODE = 'manual';
+    expect(getRealtimeTurnMode()).toBe('manual');
+    delete process.env.REALTIME_TURN_MODE;
+    writeSettingsFile(path, { ...FAKE, realtimeTurnMode: 'manual' });
+    process.env.EDUAGENT_APP = '0';
+    expect(getRealtimeTurnMode()).toBe('auto');
+  });
+
+  it('turn mode normalizes unknown values to auto and survives a submission that omits it', () => {
+    expect(normalizeSettings({ realtimeTurnMode: 'weird' }).realtimeTurnMode).toBe('auto');
+    expect(normalizeSettings({ realtimeTurnMode: 'manual' }).realtimeTurnMode).toBe('manual');
+    const omitted = { ...FAKE, realtimeTurnMode: undefined };
+    expect(mergeSubmitted({ ...FAKE, realtimeTurnMode: 'manual' }, omitted).realtimeTurnMode).toBe('manual');
+    expect(mergeSubmitted({ ...FAKE, realtimeTurnMode: 'manual' }, { ...FAKE, realtimeTurnMode: 'auto' }).realtimeTurnMode).toBe('auto');
   });
 
   it('refuses to delete the current channel or the last channel', () => {

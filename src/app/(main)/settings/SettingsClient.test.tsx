@@ -102,4 +102,33 @@ describe('SettingsClient', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('正在重启'));
   });
+
+  it('realtime turn-mode toggle defaults off, saves manual, and is disabled in web mode', async () => {
+    const calls: Array<{ url: string; body?: string }> = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === '/api/learners') return json([]);
+      calls.push({ url, body: init?.body as string | undefined });
+      if (url === '/api/settings' && !init) return json({ mode: 'app', configured: true, realtimeConfigured: true, realtimeTurnMode: 'auto', values });
+      return json({ ok: true });
+    });
+    render(<SettingsClient />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Realtime' }));
+    const toggle = (await screen.findByLabelText(/实验：示范时跟读不打断老师/)) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/settings' && c.body)).toBe(true));
+    expect(JSON.parse(calls.find((c) => c.url === '/api/settings' && c.body)!.body!)).toMatchObject({ realtimeTurnMode: 'manual' });
+  });
+
+  it('web mode shows the turn-mode toggle read-only', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input) === '/api/learners' ? json([]) : json({ mode: 'web', configured: true, realtimeTurnMode: 'manual', values: { ...values, realtimeTurnMode: 'manual' } }));
+    render(<SettingsClient />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Realtime' }));
+    const toggle = (await screen.findByLabelText(/实验：示范时跟读不打断老师/)) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(toggle).toBeDisabled();
+  });
 });

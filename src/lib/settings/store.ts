@@ -15,11 +15,11 @@ import {
   type LlmProviderId,
 } from '../llm-providers';
 import { canDeleteChannel } from './channels';
-import { VOICE_FIELDS, type SettingsValues, type VoiceField } from './types';
+import { VOICE_FIELDS, type RealtimeTurnMode, type SettingsValues, type VoiceField } from './types';
 
 export { canDeleteChannel };
 
-export type { LlmChannel, LlmProviderId, SettingsValues, VoiceField };
+export type { LlmChannel, LlmProviderId, RealtimeTurnMode, SettingsValues, VoiceField };
 export { VOICE_FIELDS };
 
 /** 空文件用固定 id,这样还没保存过时,打码回传和「保留原值」也能对上同一条渠道。 */
@@ -49,6 +49,7 @@ export function defaultSettings(): SettingsValues {
   return {
     openaiApiKey: '',
     realtimeModel: 'gpt-realtime-2.1',
+    realtimeTurnMode: 'auto',
     llmChannels: [channel],
     activeLlmChannelId: channel.id,
     doubaoAuthMode: 'apikey',
@@ -89,6 +90,7 @@ const channelSchema = z.object({
 export const settingsInputSchema = z.object({
   openaiApiKey: field.default(''),
   realtimeModel: field.min(1).max(200).default('gpt-realtime-2.1'),
+  realtimeTurnMode: z.enum(['auto', 'manual']).optional(),
   llmChannels: z.array(channelSchema).min(1).max(20),
   activeLlmChannelId: field.min(1).max(80),
   doubaoAuthMode: z.enum(['apikey', 'legacy']),
@@ -150,6 +152,7 @@ export function mergeSubmitted(saved: SettingsValues, submitted: SettingsValues)
     ...submitted,
     openaiApiKey: keepSecret(submitted.openaiApiKey ?? '', saved.openaiApiKey ?? ''),
     realtimeModel: submitted.realtimeModel || saved.realtimeModel || 'gpt-realtime-2.1',
+    realtimeTurnMode: submitted.realtimeTurnMode ?? saved.realtimeTurnMode ?? 'auto',
     llmChannels: submitted.llmChannels.map((channel) => {
       const previous = savedById.get(channel.id);
       if (!previous) return channel;
@@ -182,7 +185,8 @@ export function normalizeSettings(raw: unknown): SettingsValues {
   if (!raw || typeof raw !== 'object') return defaults;
   const record = raw as Record<string, unknown>;
   const voice = { ...voiceFrom(record, defaults), ...authFrom(record),
-    openaiApiKey: text(record.openaiApiKey), realtimeModel: text(record.realtimeModel) || 'gpt-realtime-2.1' };
+    openaiApiKey: text(record.openaiApiKey), realtimeModel: text(record.realtimeModel) || 'gpt-realtime-2.1',
+    realtimeTurnMode: record.realtimeTurnMode === 'manual' ? 'manual' as const : 'auto' as const };
   if (Array.isArray(record.llmChannels)) {
     const channels = record.llmChannels.map(parseChannel).filter((channel): channel is LlmChannel => channel !== null);
     const llmChannels = channels.length > 0 ? channels : defaults.llmChannels;
@@ -337,6 +341,18 @@ function applyValues(values: SettingsValues): void {
   console.log('[settings] applied active channel', { provider: channel.provider, doubaoAuth: values.doubaoAuthMode });
 }
 
+/**
+ * EXPERIMENTAL 手动划轮(architecture.md §18)。优先级:env REALTIME_TURN_MODE(manual|auto,开发/测试覆盖)
+ * > App 保存的 realtimeTurnMode > auto。每次开 Realtime 会话时读取,改设置只影响下一次开课。
+ */
+export function getRealtimeTurnMode(): RealtimeTurnMode {
+  const env = process.env.REALTIME_TURN_MODE;
+  if (env === 'manual' || env === 'auto') return env;
+  const path = getSettingsPath();
+  if (getSettingsMode() !== 'app' || !path) return 'auto';
+  return readSettingsFile(path).realtimeTurnMode === 'manual' ? 'manual' : 'auto';
+}
+
 // ─── 当前生效值(给 GET 与测试连接用)───────────────────────────────────
 
 export function currentValues(): SettingsValues {
@@ -362,6 +378,7 @@ function settingsFromEnv(): SettingsValues {
     ...defaults,
     openaiApiKey: config.openaiApiKey,
     realtimeModel: config.realtimeModel,
+    realtimeTurnMode: process.env.REALTIME_TURN_MODE === 'manual' ? 'manual' : 'auto',
     llmChannels: [channel],
     activeLlmChannelId: channel.id,
     doubaoAuthMode: config.doubaoAuthMode,

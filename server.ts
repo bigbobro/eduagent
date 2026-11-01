@@ -34,7 +34,7 @@ const host = process.env.HOST || undefined;
 // 打包后 server.js 与 .next 同目录;开发时 __dirname 即项目根。
 // standalone 目录里没有 next.config.mjs,生产配置取自构建产物 required-server-files.json。
 // 与 Next 自带的 standalone server.js 一致,通过该 env 注入配置(同时跳过 standalone 里不存在的 webpack 运行时)。
-if (process.env.EDUAGENT_APP === '1') {
+if (process.env.EDUAGENT_APP === '1' && process.env.NODE_ENV === 'production') {
   const { config: standaloneConf } = JSON.parse(readFileSync(resolve(__dirname, '.next/required-server-files.json'), 'utf8'));
   process.env.__NEXT_PRIVATE_STANDALONE_CONFIG = JSON.stringify(standaloneConf);
 }

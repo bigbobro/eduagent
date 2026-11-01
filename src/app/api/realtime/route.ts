@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { InvalidCourseProgressError } from '@/lib/db/progress-snapshot';
-import { getConfig, getRealtimeTurnMode, isRealtimeConfigured } from '@/lib/config';
+import { getConfig, isRealtimeConfigured } from '@/lib/config';
+import { getRealtimeTurnMode } from '@/lib/settings/store';
 import { isAllowedHttpOrigin } from '@/lib/voice/ws-origin';
 import { ensureInitialized } from '@/lib/init';
 import { realtimeRequestSchema, encodeRealtimeEvent, type RealtimeEvent } from '@/lib/realtime-protocol';

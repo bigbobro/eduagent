@@ -1,5 +1,6 @@
 import { createLogger } from '@/lib/logger';
-import { getConfig, getRealtimeTurnMode } from '@/lib/config';
+import { getConfig } from '@/lib/config';
+import { getRealtimeTurnMode } from '@/lib/settings/store';
 import { createSession, createSessionFromSnapshot } from '@/lib/agent/session';
 import { isResumableProgress, resolveResumeCardId } from '@/lib/agent/course-progress';
 import { getCourseProgress } from '@/lib/db/queries';
