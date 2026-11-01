@@ -1,5 +1,5 @@
 import { createLogger } from '@/lib/logger';
-import { getConfig } from '@/lib/config';
+import { getConfig, getRealtimeTurnMode } from '@/lib/config';
 import { createSession, createSessionFromSnapshot } from '@/lib/agent/session';
 import { isResumableProgress, resolveResumeCardId } from '@/lib/agent/course-progress';
 import { getCourseProgress } from '@/lib/db/queries';
@@ -33,6 +33,7 @@ export class RealtimeClassroomSession {
   readonly session: Session;
   readonly resume: ResumeInfo | null;
   readonly transport: 'webrtc' | 'mock';
+  readonly turnMode = getRealtimeTurnMode();
   private conversation: NaturalConversation;
   private call: RealtimeCall | null = null;
   private push: ((event: RealtimeEvent) => void) | null = null;
@@ -61,7 +62,8 @@ export class RealtimeClassroomSession {
       send: (event) => this.call?.send(event),
       publish: (receipt) => this.emit({ type: 'receipt', receipt }),
       sittingEnded: () => this.emit({ type: 'sitting-ended' }),
-    }, sittingTiming());
+      clearOutput: () => this.emit({ type: 'clear-output' }),
+    }, sittingTiming(), { manualTurn: this.turnMode === 'manual' });
     this.session.lifetime.signal.addEventListener('abort', () => this.close(), { once: true });
     this.armIdle();
   }
@@ -91,6 +93,8 @@ export class RealtimeClassroomSession {
   pick(turnId: string, quizId: string, cardId: string): TeachingReceipt { this.require(); return this.conversation.pick(turnId, quizId, cardId); }
   phase(to: PhaseName): TeachingReceipt { this.require(); return this.conversation.changePhase(to); }
   pause(paused: boolean): void { this.require(); this.conversation.setPaused(paused); }
+  /** Experimental manual-turn mode: the child started or stopped speaking (NOT_FOUND outside that mode). */
+  speech(phase: 'start' | 'end'): void { this.require(); this.conversation.childSpeech(phase); }
   mockSpeech(utterance: MockUtterance): void {
     this.require();
     if (!(this.call instanceof MockRealtimeCall)) throw new Error('NOT_FOUND');

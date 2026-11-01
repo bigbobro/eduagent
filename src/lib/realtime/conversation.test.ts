@@ -405,3 +405,98 @@ describe('opening note', () => {
     expect(states().at(-1)).toContain('WHOLE course'); expect(states().at(-1)).not.toContain('teach each');
   });
 });
+
+describe('experimental manual-turn mode (server VAD off)', () => {
+  let clearOutputs: number;
+  const types = () => sent.map((e) => e.type as string);
+  const count = (type: string) => sent.filter((e) => e.type === type).length;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    conversation.close(); clearOutputs = 0;
+    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt),
+      sittingEnded: () => { sittingEnds++; }, clearOutput: () => { clearOutputs++; } }, SITTING, { manualTurn: true });
+    conversation.setPresented({ kind: 'card', id: 'apple' });
+    sent.length = 0;
+  });
+  afterEach(() => { vi.useRealTimers(); });
+  const teacherSpeaks = (id = 'r0') => { created(id); feed({ type: 'output_audio_buffer.started' }); };
+  const teacherDone = (id = 'r0') => { done(id); };
+  const stopped = () => feed({ type: 'output_audio_buffer.stopped' });
+  const committedItem = (item: string) => feed({ type: 'input_audio_buffer.committed', item_id: item });
+
+  it('turns provider VAD off only in manual mode', () => {
+    const config = (c: NaturalConversation) => (c.sessionConfig('m') as { audio: { input: { turn_detection: unknown } } }).audio.input.turn_detection;
+    expect(config(conversation)).toBeNull();
+    const auto = new NaturalConversation(session, { send: () => {}, publish: () => {}, sittingEnded: () => {} });
+    expect(config(auto)).toMatchObject({ type: 'semantic_vad', interrupt_response: true });
+    expect(() => auto.childSpeech('start')).toThrow('NOT_FOUND');
+  });
+  it('commits and answers immediately when the teacher is idle, binding the item to the target captured at start', () => {
+    conversation.childSpeech('start');
+    conversation.setPresented({ kind: 'card', id: 'milk' }); // screen changes while the child is talking
+    sent.length = 0;
+    conversation.childSpeech('end');
+    expect(types()).toEqual(['input_audio_buffer.commit']);
+    committedItem('i1');
+    expect(creates()).toHaveLength(1); expect(creates()[0].response.metadata).toMatchObject({ kind: 'commit' });
+    created('r1', { ...creates()[0].response.metadata });
+    done('r1', [assess('apple')]);
+    expect(outputs()[0]).toMatchObject({ ok: true }); expect(attempts('apple')).toBe(1);
+  });
+  it('lets a short echo finish without stopping the teacher, then answers it once the teacher is idle', () => {
+    teacherSpeaks(); conversation.childSpeech('start');
+    vi.advanceTimersByTime(500); conversation.childSpeech('end');
+    vi.advanceTimersByTime(5000);
+    expect(types()).not.toContain('response.cancel'); expect(types()).not.toContain('output_audio_buffer.clear'); expect(types()).not.toContain('input_audio_buffer.commit');
+    teacherDone(); // generation finished, audio still draining
+    expect(types()).not.toContain('input_audio_buffer.commit');
+    stopped();
+    expect(count('input_audio_buffer.commit')).toBe(1); expect(creates()).toHaveLength(0);
+    committedItem('i1'); expect(creates()).toHaveLength(1);
+    expect(sent.map((e) => e.type)).toEqual(expect.arrayContaining(['input_audio_buffer.commit', 'response.create']));
+  });
+  it('stops the teacher when speech lasts past the overlap threshold, cancelling only an active response', () => {
+    teacherSpeaks(); conversation.childSpeech('start');
+    vi.advanceTimersByTime(1499); expect(types()).not.toContain('output_audio_buffer.clear');
+    vi.advanceTimersByTime(1);
+    expect(types().slice(-2)).toEqual(['response.cancel', 'output_audio_buffer.clear']);
+    feed({ type: 'output_audio_buffer.cleared' }); done('r0', [], 'cancelled');
+    vi.advanceTimersByTime(5000); expect(clearOutputs).toBe(0);
+    conversation.childSpeech('end'); expect(count('input_audio_buffer.commit')).toBe(1);
+    // Teacher audio only (response already finished): no cancel is sent, the clear still is.
+    sent.length = 0; committedItem('i1'); created('r1', { ...creates()[0].response.metadata }); done('r1'); feed({ type: 'output_audio_buffer.started' }); sent.length = 0;
+    conversation.childSpeech('start'); vi.advanceTimersByTime(1500);
+    expect(types()).toEqual(['output_audio_buffer.clear']);
+  });
+  it('asks the browser to clear when the sideband clear is not confirmed within a second', () => {
+    teacherSpeaks(); conversation.childSpeech('start'); vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(999); expect(clearOutputs).toBe(0);
+    vi.advanceTimersByTime(1); expect(clearOutputs).toBe(1);
+  });
+  it('answers speech that ends while the teacher is idle right away and never clears between start and commit', () => {
+    conversation.start(false); created('open', { ...creates()[0].response.metadata }); done('open'); sent.length = 0;
+    vi.advanceTimersByTime(2000); expect(count('input_audio_buffer.clear')).toBe(1);
+    conversation.childSpeech('start'); sent.length = 0;
+    vi.advanceTimersByTime(10_000); expect(count('input_audio_buffer.clear')).toBe(0);
+    conversation.childSpeech('end'); expect(types()).toEqual(['input_audio_buffer.commit']);
+    vi.advanceTimersByTime(4000); expect(count('input_audio_buffer.clear')).toBe(0); // commit in flight
+    committedItem('i1'); created('r1', { ...creates()[0].response.metadata }); done('r1'); sent.length = 0;
+    vi.advanceTimersByTime(2000); expect(count('input_audio_buffer.clear')).toBe(1);
+  });
+  it('does not clear the input while a finished turn waits for the teacher', () => {
+    teacherSpeaks(); conversation.childSpeech('start'); conversation.childSpeech('end'); sent.length = 0;
+    conversation.start(false); sent.length = 0; // opening is held behind the pending turn, hygiene timer starts
+    vi.advanceTimersByTime(6000); expect(count('input_audio_buffer.clear')).toBe(0);
+  });
+  it('commits anyway when the teacher never reports idle', () => {
+    teacherSpeaks(); conversation.childSpeech('start'); conversation.childSpeech('end'); teacherDone();
+    vi.advanceTimersByTime(14_999); expect(count('input_audio_buffer.commit')).toBe(0);
+    vi.advanceTimersByTime(1); expect(count('input_audio_buffer.commit')).toBe(1);
+  });
+  it('drops queued chatty requests at speech start and keeps the pending turn ahead of queued app speech', () => {
+    teacherSpeaks(); conversation.repeat('apple'); conversation.childSpeech('start'); conversation.childSpeech('end');
+    teacherDone(); stopped();
+    expect(count('input_audio_buffer.commit')).toBe(1); committedItem('i1');
+    expect(creates().map((c) => c.response.metadata.kind)).toEqual(['commit']);
+  });
+});

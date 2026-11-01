@@ -27,6 +27,8 @@ export const realtimeRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('pick'), ...owner, turnId: z.string().uuid(), quizId: z.string().min(1), cardId: z.string().min(1) }),
   z.object({ action: z.literal('phase'), ...owner, to: lessonPhaseSchema }),
   z.object({ action: z.literal('pause'), ...owner, paused: z.boolean() }),
+  // Experimental manual-turn mode only: the child started/stopped speaking (browser-local VAD or the test script).
+  z.object({ action: z.literal('speech'), ...owner, phase: z.enum(['start', 'end']) }),
   // Offline transport only: the controlled provider double "hears" a labelled utterance.
   z.object({ action: z.literal('mock-speech'), ...owner, utterance: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('attempt') }), z.object({ kind: z.literal('request'), cardId: z.string().min(1) }), z.object({ kind: z.literal('chat') }),
@@ -62,6 +64,8 @@ const realtimeEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), code: z.string(), message: z.string() }),
   /** This sitting is over, the course is not complete: progress is saved; the goodbye is coming, then the browser ends the call. */
   z.object({ type: z.literal('sitting-ended') }),
+  /** Manual-turn fallback: the browser should send output_audio_buffer.clear over its data channel. */
+  z.object({ type: z.literal('clear-output') }),
 ]);
 export type RealtimeEvent = z.infer<typeof realtimeEventSchema>;
 export function parseRealtimeEvent(json: string): RealtimeEvent { return realtimeEventSchema.parse(JSON.parse(json)); }

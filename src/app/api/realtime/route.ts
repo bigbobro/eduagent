@@ -43,6 +43,7 @@ export async function POST(req: Request) {
       case 'present-quiz': classroom.presentQuiz(body.quizId); return NextResponse.json({ ok: true });
       case 'repeat': classroom.repeat(body.cardId); return NextResponse.json({ ok: true });
       case 'pause': classroom.pause(body.paused); return NextResponse.json({ ok: true });
+      case 'speech': classroom.speech(body.phase); return NextResponse.json({ ok: true });
       case 'pick': return NextResponse.json({ receipt: classroom.pick(body.turnId, body.quizId, body.cardId) });
       case 'phase': return NextResponse.json({ receipt: classroom.phase(body.to) });
       case 'mock-speech':

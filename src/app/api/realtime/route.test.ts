@@ -102,3 +102,16 @@ it('preserves a corrupt breakpoint and reports its data error before creating an
   expect(db.prepare('SELECT COUNT(*) AS n FROM lesson_logs').get()).toEqual(before);
   expect(db.prepare("SELECT snapshot FROM course_progress WHERE course_id='animals' AND learner_id='test-learner'").get()).toEqual({ snapshot: '{invalid' });
 });
+
+it('accepts speech signals only in the experimental manual-turn mode, and only from the owner', async () => {
+  vi.stubEnv('VOICE_MOCK', 'true'); resetConfig();
+  const auto = await (await POST(request({ action: 'start', courseId: 'animals', learnerId: 'test-learner', fresh: true }))).json();
+  expect((await POST(request({ action: 'speech', sessionId: auto.sessionId, learnerId: 'test-learner', phase: 'start' }))).status).toBe(404);
+  vi.stubEnv('REALTIME_TURN_MODE', 'manual');
+  const body = await (await POST(request({ action: 'start', courseId: 'animals', learnerId: 'test-learner', fresh: true }))).json();
+  const owner = { learnerId: 'test-learner', sessionId: body.sessionId };
+  expect((await POST(request({ action: 'speech', ...owner, phase: 'start' }))).status).toBe(200);
+  expect((await POST(request({ action: 'speech', ...owner, phase: 'end' }))).status).toBe(200);
+  expect((await POST(request({ action: 'speech', ...owner, phase: 'sideways' }))).status).toBe(400);
+  expect((await POST(request({ action: 'speech', sessionId: body.sessionId, learnerId: 'another-child', phase: 'start' }))).status).toBe(409);
+});

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isConfigured, isRealtimeConfigured } from '@/lib/config';
+import { getRealtimeTurnMode, isConfigured, isRealtimeConfigured } from '@/lib/config';
 import { rejectBadOrigin } from '@/lib/settings/origin-guard';
 import { scheduleRestart } from '@/lib/settings/restart';
 import {
@@ -22,6 +22,7 @@ export async function GET() {
     configured: isConfigured(),
     realtimeConfigured: isRealtimeConfigured(),
     mock: process.env.VOICE_MOCK === 'true',
+    realtimeTurnMode: getRealtimeTurnMode(),
     values: maskValues(currentValues()),
   });
 }

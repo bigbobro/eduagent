@@ -786,3 +786,12 @@ v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真�
 损坏断点在Realtime start同样返回409 INVALID_COURSE_PROGRESS，创建会话之前退出并保留原记录；前端显示数据读取错误。已有完整usage但没有该模型费率时显示暂无估价，不冒充用量缺失。
 
 Realtime老师字幕以提供方 response id 作为messageId，转写delta在控制器内累计，同一回应在SubtitleLog原气泡更新；被打断的回应在原气泡末尾加“…”。孩子侧只显示评估回执中的模型自述（标“模型听到”），未评估的话不出字幕。没有messageId的旧模式事件行为不变。
+
+### 手动划轮原型开关(实验性，默认关闭，2026-11-01)
+
+问题：WebRTC 下提供方的服务端 VAD 一检测到孩子开口就清空未播的老师音频，孩子轻声跟读示范也会打断老师。原型验证“由应用划轮”：`REALTIME_TURN_MODE=manual` 时会话配置 `turn_detection: null`（关闭服务端 VAD），默认（`auto`）行为不变，仍是上面的 `semantic_vad`。`/api/settings` 返回 `realtimeTurnMode` 供测试脚本确认。
+
+- 信号入口：`POST /api/realtime {action:'speech', phase:'start'|'end', sessionId, learnerId}`，与其他动作同样校验孩子归属，转给 `NaturalConversation.childSpeech(phase)`；非 manual 模式返回 404 `NOT_FOUND`。Part A 由测试脚本发信号；Part B 的浏览器本地 VAD 调用同一入口。
+- 策略（常量集中在 `conversation.ts` 的 `MANUAL_TURN`）：`start` 时记下此刻呈现的目标（`input_audio_buffer.committed` 的 item 绑定到它，`record_assessment` 照常可用），孩子说话中沿用原有排队规则（不发新回应，丢弃排队的续答）。若老师在忙（有回应进行中或音频仍在播，由 sideband 的 `output_audio_buffer.started/stopped/cleared` 判断），开 1500 ms 重叠计时：到时仍在说话才算真打断，先 `response.cancel`（仅回应进行中时），再经 sideband 发 `output_audio_buffer.clear`，记录 1 秒内是否收到 `cleared`；没收到则推送 `clear-output` 事件，让浏览器经数据通道发同一条命令。`end` 时若老师在忙（短跟读），登记待提交的一轮，老师空闲（无进行中回应且音频已 stopped/cleared，15 秒兜底）后再 `input_audio_buffer.commit`，收到 `committed` 后 `response.create`（请求种类 `commit`，经同一请求泵串行；该回应绑定刚提交的输入）；老师空闲则立即提交。待提交的一轮排在其他排队的应用回应之前。
+- 缓冲清理：没有孩子说话、也没有待提交时，每 2 秒发一次 `input_audio_buffer.clear`（WebRTC 下麦克风持续写入输入缓冲）；`start` 到提交之间从不清。代价：`start` 信号延迟内的开头几百毫秒语音可能被上一次清理丢掉。
+- 其余（工具、一次课计时、`end_sitting`、状态消息、输入绑定规则、cancelled 回应的工具丢弃）不变。mock（`realtime/mock.ts`）在该模式下不自动划轮，只在 `response.create` 时回应。自动化：`realtime-browser-smoke.ts --manual-turn`（服务端需带该环境变量）。真实 API 的结论待付费实测，见本地 `docs/features/realtime-teaching-interaction/manual-turn-spike.md`。

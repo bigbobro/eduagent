@@ -13,6 +13,8 @@ function option(name: string, fallback: string) { const at = args.indexOf(name);
 const base = option('--base', 'http://localhost:3018');
 if (!/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(base)) throw new Error('Loopback test server required');
 const live = args.includes('--live');
+// Experimental: needs a server started with REALTIME_TURN_MODE=manual. speak() then also sends the speech start/end signals.
+const manualTurn = args.includes('--manual-turn');
 if (live === args.includes('--mock')) throw new Error('Choose --live or --mock explicitly');
 const course = getCourseById(option('--course', 'animals')) as Course;
 if (!course) throw new Error('Unknown course');
@@ -38,6 +40,8 @@ function wordClip(cardId: string): string {
 async function main() {
   const settings = await (await fetch(`${base}/api/settings`)).json();
   if (Boolean(settings.mock) !== !live) throw new Error('Server provider mode differs from requested smoke');
+  if (manualTurn && settings.realtimeTurnMode !== 'manual') throw new Error('--manual-turn needs the server started with REALTIME_TURN_MODE=manual');
+  if (manualTurn && (args.includes('--sitting') || args.includes('--resume-short'))) throw new Error('--manual-turn does not combine with --sitting/--resume-short');
   const learner = await (await fetch(`${base}/api/learners`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Realtime 自然对话验证' }) })).json();
   if (!learner.id) throw new Error('Could not create test child');
   if (args.includes('--resume-short')) seedShortResume(learner.id);
@@ -137,7 +141,25 @@ async function main() {
       const entry = progress.courses.find((c: { courseId: string }) => c.courseId === course.id);
       return { completed: Boolean(entry?.completed), attempts: Object.fromEntries((entry?.words ?? []).map((w: { word: string; attempts: number }) => [w.word, w.attempts])) as Record<string, number> };
     };
-    const speak = async (utterance: { kind: 'attempt' } | { kind: 'request'; cardId: string } | { kind: 'chat' }, audio: string) => {
+    const signal = async (phase: 'start' | 'end') => {
+      const response = await fetch(`${base}/api/realtime`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'speech', sessionId, learnerId: learner.id, phase }) });
+      if (!response.ok) throw new Error(`speech ${phase} HTTP ${response.status}`);
+    };
+    // holdMs: how long the offline "child" talks (mock has no audio clip to take time); live speech lasts as long as the clip.
+    const speak = async (utterance: { kind: 'attempt' } | { kind: 'request'; cardId: string } | { kind: 'chat' }, audio: string, holdMs = 100) => {
+      if (manualTurn) {
+        // The app owns turns: start right before the audio, end 150 ms after it (an ideal detector plus WebRTC transit, so the
+        // tail reaches the provider before the commit). A real browser VAD reports the end later; Part B must budget for that.
+        await signal('start');
+        if (!live) {
+          const response = await fetch(`${base}/api/realtime`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mock-speech', sessionId, learnerId: learner.id, utterance }) });
+          if (!response.ok) throw new Error(`mock speech HTTP ${response.status}`);
+          await page.waitForTimeout(holdMs);
+        } else await page.evaluate((data) => (window as unknown as { __speak: (b: string) => Promise<void> }).__speak(data), audio);
+        await page.waitForTimeout(150);
+        await signal('end');
+        return;
+      }
       if (!live) {
         const response = await fetch(`${base}/api/realtime`, { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mock-speech', sessionId, learnerId: learner.id, utterance }) });
         if (!response.ok) throw new Error(`mock speech HTTP ${response.status}`);
@@ -165,7 +187,56 @@ async function main() {
     await page.screenshot({ path: path.join(out, 'requested-card.png') });
     await quiet('after switch');
 
-    if (live && !args.includes('--resume-short') && !args.includes('--sitting')) {
+    if (manualTurn) {
+      // Experimental manual-turn scenario: a short echo must not cut the teacher off and is answered afterwards; sustained speech stops the teacher.
+      const marks = async () => (await page.locator('.p2-message:not(.p2-me)').allTextContents()).filter((text) => /\s…$/.test(text)).length;
+      const teacherLines = async () => page.locator('.p2-message:not(.p2-me)').count();
+      const teacherSpeaking = async (label: string, ask: string) => {
+        await until(`${label}: teacher speaking`, async () => await state() === 'speaking', 15000).catch(async () => {
+          await quiet(`${label}: teacher quiet`);
+          await speak({ kind: 'chat' }, clip(label, ask, 'Tingting'));
+          await until(`${label}: teacher speaking after ask`, async () => await state() === 'speaking', 30000);
+        });
+      };
+      const manual: Record<string, unknown> = {}; results.manualTurn = manual;
+      // a. short echo while the teacher demonstrates
+      await teacherSpeaking('echo-long', '请把这个词讲长一点，多讲几句');
+      await page.waitForTimeout(1200);
+      const echoCard = cardOf(await hero());
+      const marksA = await marks(); const linesA = await teacherLines(); const echoAt = Date.now();
+      // A child's echo is one quick word (~0.5 s); the course fixtures carry padding (~1.3 s), so synthesize it bare.
+      const echoDone = echoCard ? speak({ kind: 'attempt' }, clip(`echo_${echoCard.id}`, echoCard.english, 'Samantha')) : speak({ kind: 'chat' }, clip('echo-fallback', '嗯', 'Tingting'));
+      while (Date.now() - echoAt < 4000) {
+        if (await marks() > marksA) throw new Error('A short echo cut the teacher off');
+        await page.waitForTimeout(150);
+      }
+      await echoDone;
+      log('short echo did not cut the teacher off');
+      await until('echo answered', async () => await teacherLines() > linesA, 30000);
+      manual.echoAnsweredMs = Date.now() - echoAt;
+      await quiet('after echo');
+      if (echoCard) manual.echoAttempts = (await words()).attempts[echoCard.english] ?? 0;
+      // b. sustained speech stops the teacher
+      await teacherSpeaking('interrupt-long', '请把这个词讲得更详细一点，多讲几句');
+      await page.waitForTimeout(1500);
+      const marksB = await marks(); const linesB = await teacherLines(); const stopAt = Date.now();
+      const stopDone = speak({ kind: 'chat' }, clip('stop-long', '等一下，停一下，我有话想说，请你先别讲了，我想问一个问题', 'Tingting'), 3000);
+      await until('long speech cut the teacher off', async () => await marks() > marksB, 4000);
+      manual.interruptClearedMs = Date.now() - stopAt;
+      await stopDone;
+      await until('long speech answered', async () => await teacherLines() > linesB, 30000);
+      manual.interruptAnsweredMs = Date.now() - stopAt;
+      await quiet('after interruption');
+      // c. a normal attempt while the teacher is quiet is saved
+      const attemptCard = cardOf(await hero()); if (!attemptCard) throw new Error('No displayed card for the attempt');
+      const before = (await words()).attempts[attemptCard.english] ?? 0; const attemptAt = Date.now();
+      await speak({ kind: 'attempt' }, wordClip(attemptCard.id));
+      await until('attempt saved', async () => ((await words()).attempts[attemptCard.english] ?? 0) > before, 30000);
+      manual.attemptSavedMs = Date.now() - attemptAt;
+      await quiet('after attempt');
+      results.subtitles = await page.locator('.p2-message').allTextContents();
+    }
+    if (live && !manualTurn && !args.includes('--resume-short') && !args.includes('--sitting')) {
       // Real attempt at the displayed target is assessed and saved.
       await speak({ kind: 'attempt' }, wordClip(other.id));
       await until('attempt saved', async () => ((await words()).attempts[other.english] ?? 0) >= 1, 30000);

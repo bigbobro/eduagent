@@ -18,11 +18,31 @@ export interface ConversationPort {
   publish(receipt: TeachingReceipt): void;
   /** This sitting is over but the course is not complete; the goodbye is queued and the browser ends the call after it. */
   sittingEnded(): void;
+  /** Manual-turn fallback: ask the browser to send `output_audio_buffer.clear` over its own data channel. */
+  clearOutput?(): void;
 }
+/**
+ * EXPERIMENTAL manual-turn mode (REALTIME_TURN_MODE=manual, default off): server VAD is off and the app decides turns from
+ * browser speech start/end signals. All timings live here.
+ */
+export const MANUAL_TURN = {
+  /** Child speech that overlaps a busy teacher for this long is a real interruption; shorter overlap is an echo. */
+  interruptAfterMs: 1500,
+  /** How long to wait for `output_audio_buffer.cleared` after a sideband clear before asking the browser to send it. */
+  clearedWaitMs: 1000,
+  /** A pending commit waits for the teacher to go idle; after this it commits anyway (in case `stopped` never arrives). */
+  idleFallbackMs: 15_000,
+  /**
+   * While the child is silent and no commit is pending, the input buffer is cleared this often. Over WebRTC the mic keeps
+   * flowing into the buffer, so without it silence/noise piles up into the next committed turn. Trade-off: the first
+   * moments of speech between a clear and the `start` signal (detector latency) are lost.
+   */
+  hygieneClearMs: 2000,
+};
 /** One sitting (一次课) is one call. Only unpaused call time counts. Tune here after real lessons. */
 export const SITTING = { wrapUpMs: 10 * 60_000, goodbyeMs: 14 * 60_000 };
-type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye';
-interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean }
+type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye' | 'commit';
+interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean; commitTarget?: PresentedTarget | null }
 interface ResponseState { input: string | null; kind: string; transcript: string; feedbackFor?: string }
 const SURVIVES_SPEECH: RequestKind[] = ['present-quiz', 'goodbye'];
 function safeCode(code: string | undefined): string { return code && /^[a-z0-9_]{1,80}$/i.test(code) ? code.toUpperCase() : 'UNKNOWN'; }
@@ -41,7 +61,13 @@ export class NaturalConversation {
   private finished = new Set<string>();
   private active = new Set<string>();
   private queue: AppRequest[] = [];
-  private inflight: { request: AppRequest; timer: ReturnType<typeof setTimeout> } | null = null;
+  private inflight: { request: AppRequest; timer: ReturnType<typeof setTimeout>; awaitingCommit?: boolean } | null = null;
+  // Manual-turn mode only (all null/idle otherwise). `speech` is the child's turn in progress; `pendingCommit` is a finished
+  // turn waiting for the teacher to go idle; `clearProbe` measures whether a sideband output_audio_buffer.clear is confirmed.
+  private speech: { target: PresentedTarget | null; startedAt: number; busyAtStart: boolean; interrupted: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  private pendingCommit: { target: PresentedTarget | null; forced: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  private clearProbe: { sentAt: number; wasPlaying: boolean; fellBack: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
+  private hygiene: ReturnType<typeof setInterval> | null = null;
   private picks = new Map<string, TeachingReceipt>();
   private childSpeaking = false;
   private paused = false;
@@ -53,7 +79,8 @@ export class NaturalConversation {
   private sitting = { elapsed: 0, since: null as number | null, timer: null as ReturnType<typeof setTimeout> | null, wrapped: false, ended: false, started: false };
   // Diagnostic only (provider event log); nothing decides on it.
   private playing = false;
-  constructor(private session: Session, private port: ConversationPort, private timing = SITTING) {}
+  private manual: boolean;
+  constructor(private session: Session, private port: ConversationPort, private timing = SITTING, options: { manualTurn?: boolean } = {}) { this.manual = Boolean(options.manualTurn); }
 
   /**
    * Initial session configuration for the provider call. Long-lived credentials never reach this payload.
@@ -65,7 +92,7 @@ export class NaturalConversation {
   sessionConfig(model: string): object {
     return { type: 'realtime', model, instructions: this.instructions(), tools: this.tools(), tool_choice: 'auto', max_output_tokens: 1200,
       truncation: { type: 'retention_ratio', retention_ratio: 0.8 },
-      audio: { input: { turn_detection: { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true } }, output: { voice: 'marin' } } };
+      audio: { input: { turn_detection: this.manual ? null : { type: 'semantic_vad', eagerness: 'low', create_response: true, interrupt_response: true } }, output: { voice: 'marin' } } };
   }
   start(resumed: boolean): void {
     if (this.session.currentPhase === 'intro') this.commit(changePhase(this.session, 'interactive'));
@@ -78,10 +105,19 @@ export class NaturalConversation {
       : '[app] The child is back for practice questions. Welcome them in one short Chinese sentence; the app shows the next question.';
     this.enqueue({ kind: 'opening', note });
     this.sitting.started = true; this.armSitting();
+    if (this.manual && !this.hygiene) {
+      this.hygiene = setInterval(() => this.hygieneClear(), MANUAL_TURN.hygieneClearMs);
+      this.hygiene.unref?.();
+    }
   }
   close(): void {
     if (this.inflight) clearTimeout(this.inflight.timer);
     this.inflight = null; this.queue = [];
+    this.dropManualTurn();
+    if (this.hygiene) clearInterval(this.hygiene);
+    this.hygiene = null;
+    if (this.clearProbe) clearTimeout(this.clearProbe.timer);
+    this.clearProbe = null;
     if (this.sitting.timer) clearTimeout(this.sitting.timer);
     this.sitting.timer = null;
   }
@@ -171,6 +207,7 @@ export class NaturalConversation {
       // Question prompts and the goodbye wait for resume; chatty follow-ups are dropped.
       this.queue = this.queue.filter((request) => SURVIVES_SPEECH.includes(request.kind));
       if (this.active.size) this.port.send({ type: 'response.cancel' });
+      if (this.manual) { this.dropManualTurn(); this.childSpeaking = false; }
     } else this.pump();
   }
 
@@ -186,11 +223,19 @@ export class NaturalConversation {
         break;
       case 'input_audio_buffer.speech_stopped': this.childSpeaking = false; break;
       case 'input_audio_buffer.committed':
+        if (this.manual) { this.committed(event); break; }
         this.childSpeaking = false;
         if (event.item_id) { if (!this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.presented }); this.lastInput = event.item_id; }
         break;
       case 'output_audio_buffer.started': this.playing = true; break;
-      case 'output_audio_buffer.stopped': case 'output_audio_buffer.cleared': this.playing = false; break;
+      case 'output_audio_buffer.stopped': this.playing = false; break;
+      case 'output_audio_buffer.cleared':
+        this.playing = false;
+        if (this.clearProbe) {
+          log.info('output clear confirmed', { sessionId: this.session.id, afterMs: Date.now() - this.clearProbe.sentAt, via: this.clearProbe.fellBack ? 'browser-fallback' : 'sideband' });
+          clearTimeout(this.clearProbe.timer); this.clearProbe = null;
+        }
+        break;
       case 'response.created': this.created(event); break;
       case 'response.output_audio_transcript.delta': {
         const response = event.response_id ? this.responses.get(event.response_id) : undefined;
@@ -202,10 +247,10 @@ export class NaturalConversation {
         const code = safeCode(event.error?.code);
         log.warn('provider event error', { sessionId: this.session.id, code });
         const request = this.inflight?.request;
-        if (request && event.error?.event_id === request.id) {
+        if (request && (event.error?.event_id === request.id || (request.kind === 'commit' && event.error?.event_id === `${request.id}_commit`))) {
           clearTimeout(this.inflight!.timer); this.inflight = null;
-          // A VAD response won the race; the child's turn now owns the conversation.
-          if (code === 'CONVERSATION_ALREADY_HAS_ACTIVE_RESPONSE' && request.kind !== 'followup') this.queue.unshift(request);
+          // A VAD response won the race; the child's turn now owns the conversation. A failed manual commit is dropped.
+          if (code === 'CONVERSATION_ALREADY_HAS_ACTIVE_RESPONSE' && request.kind !== 'followup' && request.kind !== 'commit') this.queue.unshift(request);
         }
         break;
       }
@@ -229,8 +274,8 @@ export class NaturalConversation {
     const request = metadata?.kind as RequestKind | undefined;
     const parent = metadata?.parent ? this.responses.get(metadata.parent) : undefined;
     // A VAD-created response answers the latest committed input; app responses only inherit their parent's input.
-    const input = request ? request === 'followup' ? parent?.input ?? null : null : this.lastInput;
-    if (!request) this.lastInput = null;
+    const input = request ? request === 'followup' ? parent?.input ?? null : request === 'commit' ? this.lastInput : null : this.lastInput;
+    if (!request || request === 'commit') this.lastInput = null;
     this.responses.set(response.id, { input, kind: request ?? 'speech', transcript: '', feedbackFor: metadata?.feedback_for ?? parent?.feedbackFor });
     this.active.add(response.id);
     beginResponseUsage(this.session);
@@ -267,7 +312,7 @@ export class NaturalConversation {
     this.toolStreak++;
     this.syncState();
     // end_sitting queued the goodbye, which is its follow-up: no extra tool follow-up response.
-    if (!this.childSpeaking && !sittingEnded) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, feedbackFor, noTools: this.toolStreak >= 3 });
+    if (!this.childSpeaking && !this.pendingCommit && !sittingEnded) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, feedbackFor, noTools: this.toolStreak >= 3 });
   }
   private execute(name: string, raw: string, input: string | null): { output: object; feedbackFor?: string; sittingEnded?: boolean } {
     const target = input ? this.inputs.get(input)?.target : null;
@@ -340,18 +385,119 @@ export class NaturalConversation {
   private enqueue(request: Omit<AppRequest, 'id'>): void { this.queue.push({ ...request, id: this.requestId() }); this.pump(); }
   private requestId(): string { return `app_${(++this.requests).toString(36)}`; }
   private pump(): void {
-    if (this.paused || this.childSpeaking || this.active.size || this.inflight || !this.queue.length) return;
+    if (this.paused || this.childSpeaking || this.active.size || this.inflight) return;
+    // A finished child turn goes before queued app speech, once the teacher's audio has drained (or the fallback fired).
+    if (this.manual && this.pendingCommit) { if (!this.playing || this.pendingCommit.forced) this.startCommit(); return; }
+    if (!this.queue.length) return;
     const request = this.queue.shift()!;
     if (request.note) this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: request.note }] } });
+    this.inflight = { request, timer: this.inflightTimer(request) };
+    this.createResponse(request);
+  }
+  /** A request that never produced response.created must not block later app requests forever. */
+  private inflightTimer(request: AppRequest): ReturnType<typeof setTimeout> {
+    const timer = setTimeout(() => { if (this.inflight?.request === request) { this.inflight = null; this.pump(); } }, 10_000);
+    timer.unref?.();
+    return timer;
+  }
+  private createResponse(request: AppRequest): void {
     const metadata: Record<string, string> = { kind: request.kind, request: request.id };
     if (request.parent) metadata.parent = request.parent;
     if (request.quizId) metadata.quiz_id = request.quizId;
     if (request.feedbackFor) metadata.feedback_for = request.feedbackFor;
-    // A request that never produced response.created must not block later app requests forever.
-    const timer = setTimeout(() => { if (this.inflight?.request === request) { this.inflight = null; this.pump(); } }, 10_000);
-    timer.unref?.();
-    this.inflight = { request, timer };
     this.port.send({ type: 'response.create', event_id: request.id, response: { metadata, ...(request.noTools ? { tool_choice: 'none' } : {}) } });
+  }
+
+  // ---- Experimental manual-turn mode (server VAD off; the app owns turns). ----------------------------------------------
+  // Official WebRTC push-to-talk procedure: input_audio_buffer.clear drops old input, .commit when the child's speech ends,
+  // then response.create; to stop the teacher: response.cancel (if generating) then output_audio_buffer.clear.
+
+  /**
+   * The single entry for child speech boundaries (browser or test script). `start`: the child begins talking; `end`: they
+   * stopped. Rejected outside manual mode.
+   */
+  childSpeech(phase: 'start' | 'end'): void {
+    if (!this.manual) throw new Error('NOT_FOUND');
+    if (this.paused || this.farewell) { log.info('child speech ignored', { sessionId: this.session.id, phase, paused: this.paused }); return; }
+    if (phase === 'start') this.speechStart(); else this.speechEnd();
+  }
+  private teacherBusy(): boolean { return this.active.size > 0 || this.playing; }
+  private speechStart(): void {
+    if (this.speech) { log.warn('child speech start while speaking', { sessionId: this.session.id }); return; }
+    const busy = this.teacherBusy();
+    this.childSpeaking = true;
+    this.queue = this.queue.filter((request) => SURVIVES_SPEECH.includes(request.kind));
+    // Bind to what the browser showed when speech began (a still-pending earlier turn keeps its own, earlier target).
+    const speech = { target: this.pendingCommit ? this.pendingCommit.target : this.presented, startedAt: Date.now(), busyAtStart: busy, interrupted: false, timer: null as ReturnType<typeof setTimeout> | null };
+    this.speech = speech;
+    log.info('child speech start', { sessionId: this.session.id, teacherBusy: busy });
+    if (busy) { speech.timer = setTimeout(() => this.overlapElapsed(speech), MANUAL_TURN.interruptAfterMs); speech.timer.unref?.(); }
+  }
+  private overlapElapsed(speech: NonNullable<NaturalConversation['speech']>): void {
+    if (this.speech !== speech) return;
+    speech.timer = null;
+    const durationMs = Date.now() - speech.startedAt;
+    if (!this.teacherBusy()) { log.info('overlap decision', { sessionId: this.session.id, durationMs, interrupted: false, reason: 'teacher already idle' }); return; }
+    speech.interrupted = true;
+    log.info('overlap decision', { sessionId: this.session.id, durationMs, interrupted: true });
+    if (this.active.size) this.port.send({ type: 'response.cancel' });
+    if (this.clearProbe) clearTimeout(this.clearProbe.timer);
+    const probe = { sentAt: Date.now(), wasPlaying: this.playing, fellBack: false,
+      timer: setTimeout(() => {
+        probe.fellBack = true;
+        log.warn('output clear not confirmed, asking the browser', { sessionId: this.session.id, afterMs: Date.now() - probe.sentAt, wasPlaying: probe.wasPlaying });
+        this.port.clearOutput?.();
+      }, MANUAL_TURN.clearedWaitMs) };
+    probe.timer.unref?.();
+    this.clearProbe = probe;
+    this.port.send({ type: 'output_audio_buffer.clear' });
+  }
+  private speechEnd(): void {
+    const speech = this.speech;
+    if (!speech) { log.warn('child speech end without start', { sessionId: this.session.id }); return; }
+    if (speech.timer) clearTimeout(speech.timer);
+    this.speech = null; this.childSpeaking = false;
+    const durationMs = Date.now() - speech.startedAt;
+    const busy = this.teacherBusy();
+    if (speech.busyAtStart && !speech.interrupted) log.info('overlap decision', { sessionId: this.session.id, durationMs, interrupted: false });
+    log.info('child speech end', { sessionId: this.session.id, durationMs, teacherBusy: busy });
+    if (!this.pendingCommit) this.pendingCommit = { target: speech.target, forced: false, timer: null };
+    if (busy) {
+      log.info('commit deferred until teacher idle', { sessionId: this.session.id });
+      if (!this.pendingCommit.timer) {
+        const pending = this.pendingCommit;
+        pending.timer = setTimeout(() => { pending.forced = true; log.warn('commit forced, teacher never reported idle', { sessionId: this.session.id }); this.pump(); }, MANUAL_TURN.idleFallbackMs);
+        pending.timer.unref?.();
+      }
+    } else log.info('commit immediate', { sessionId: this.session.id });
+    this.pump();
+  }
+  /** Sends the commit; the response is created once the provider confirms it, so the new item can be bound to its target. */
+  private startCommit(): void {
+    const pending = this.pendingCommit!;
+    if (pending.timer) clearTimeout(pending.timer);
+    this.pendingCommit = null;
+    const request: AppRequest = { id: this.requestId(), kind: 'commit', commitTarget: pending.target };
+    this.inflight = { request, timer: this.inflightTimer(request), awaitingCommit: true };
+    log.info('commit sent', { sessionId: this.session.id, forced: pending.forced });
+    this.port.send({ type: 'input_audio_buffer.commit', event_id: `${request.id}_commit` });
+  }
+  private committed(event: ProviderMessage): void {
+    const inflight = this.inflight;
+    if (!inflight?.awaitingCommit || !event.item_id) { log.debug('unexpected committed', { sessionId: this.session.id }); return; }
+    inflight.awaitingCommit = false;
+    this.inputs.set(event.item_id, { target: inflight.request.commitTarget ?? null });
+    this.lastInput = event.item_id;
+    this.createResponse(inflight.request);
+  }
+  private hygieneClear(): void {
+    if (this.speech || this.pendingCommit || this.inflight?.request.kind === 'commit') return;
+    this.port.send({ type: 'input_audio_buffer.clear' });
+  }
+  private dropManualTurn(): void {
+    if (this.speech?.timer) clearTimeout(this.speech.timer);
+    if (this.pendingCommit?.timer) clearTimeout(this.pendingCommit.timer);
+    this.speech = null; this.pendingCommit = null;
   }
   /**
    * Committed lesson state is appended as an [app] message instead of rewriting the instructions: changing the

@@ -154,6 +154,7 @@ export class RealtimeClassroom implements Classroom {
         if (!event) { this.fatal(run, 'SESSION_EXPIRED'); return; }
         if (event.type === 'receipt') this.apply(run, event.receipt);
         else if (event.type === 'provider') this.provider(run, event.event);
+        else if (event.type === 'clear-output') { if (run.channel?.readyState === 'open') run.channel.send(JSON.stringify({ type: 'output_audio_buffer.clear' })); }
         else if (event.type === 'error') { this.fatal(run, event.code); return; }
         else if (event.type === 'sitting-ended') {
           // Course not complete: same wind-down as completion (mic off, wait for the goodbye, end the call), different end page.
