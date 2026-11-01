@@ -22,7 +22,7 @@ describe('Realtime classroom call ownership', () => {
   it('connects once, moves past the intro and asks the model to open the lesson', async () => {
     const { provider, events, connect } = setup();
     expect(await connect()).toBe('v=0 answer');
-    expect(provider.options?.session).toMatchObject({ audio: { input: { turn_detection: { type: 'semantic_vad', create_response: true, interrupt_response: true } } } });
+    expect(provider.options?.session).toMatchObject({ audio: { input: { turn_detection: { type: 'semantic_vad', create_response: true, interrupt_response: false } } } });
     expect((provider.options?.session as { audio: { input: object } }).audio.input).not.toHaveProperty('transcription');
     expect(provider.options?.session).toMatchObject({ truncation: { type: 'retention_ratio', retention_ratio: 0.8 } });
     // Opening state follows the fixed (cacheable) instructions as an [app] message, before the opening request.
@@ -55,6 +55,31 @@ describe('Realtime classroom call ownership', () => {
     classroom.expire(); events.length = 0;
     provider.options!.onEvent({ type: 'response.done', response: { id: 'late', status: 'completed', output: [{ type: 'function_call', name: 'show_card', call_id: 'c', arguments: '{"card_id":"milk"}' }] } });
     expect(events).toEqual([]); expect(classroom.session.memory.currentCardId).toBe('apple');
+  });
+});
+
+describe('sitting end and interruption pushes', () => {
+  afterEach(() => { vi.useRealTimers(); delete (globalThis as { __eduagentTestSittingUsed?: boolean }).__eduagentTestSittingUsed; });
+  it('tells the browser the sitting ended, only in mock mode with the test timing, and only for the first call', async () => {
+    vi.stubEnv('REALTIME_TEST_SITTING_MS', '40,80'); resetConfig();
+    const ignored = setup(); await ignored.connect(); // VOICE_MOCK is not set: the override must not apply
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(ignored.events.some((e) => e.type === 'sitting-ended')).toBe(false);
+    vi.stubEnv('VOICE_MOCK', 'true'); resetConfig();
+    const first = setup(); await first.connect();
+    await expect.poll(() => first.events.some((e) => e.type === 'sitting-ended'), { timeout: 2000 }).toBe(true);
+    const second = setup(); await second.connect();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(second.events.some((e) => e.type === 'sitting-ended')).toBe(false);
+  });
+  it('asks the browser to clear audio when the child keeps talking over the teacher', async () => {
+    const { provider, events, connect } = setup(); await connect();
+    vi.useFakeTimers();
+    provider.options!.onEvent({ type: 'response.created', response: { id: 'r1' } });
+    provider.options!.onEvent({ type: 'input_audio_buffer.speech_started', item_id: 'i1' });
+    vi.advanceTimersByTime(2000);
+    expect(events.some((e) => e.type === 'interrupt')).toBe(true);
+    expect(provider.sent).toContainEqual({ type: 'response.cancel' });
   });
 });
 

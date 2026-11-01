@@ -155,6 +155,13 @@ export class RealtimeClassroom implements Classroom {
         if (event.type === 'receipt') this.apply(run, event.receipt);
         else if (event.type === 'provider') this.provider(run, event.event);
         else if (event.type === 'error') { this.fatal(run, event.code); return; }
+        else if (event.type === 'sitting-ended') {
+          // Course not complete: same wind-down as completion (mic off, wait for the goodbye, end the call), different end page.
+          this.emit('sitting-ended', undefined); void this.finish(run);
+        } else if (event.type === 'interrupt') {
+          // Server decided the child is really talking over the teacher; only this peer can clear unplayed audio (after the server's response.cancel).
+          if (run.channel?.readyState === 'open') run.channel.send(JSON.stringify({ type: 'output_audio_buffer.clear' }));
+        }
       }
     } catch { if (this.current(run)) this.fatal(run, 'REALTIME_PROTOCOL'); }
   }

@@ -60,6 +60,10 @@ const realtimeEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('receipt'), receipt: receiptSchema }),
   z.object({ type: z.literal('provider'), event: providerEventSchema }),
   z.object({ type: z.literal('error'), code: z.string(), message: z.string() }),
+  /** This sitting is over, the course is not complete: progress is saved; the goodbye is coming, then the browser ends the call. */
+  z.object({ type: z.literal('sitting-ended') }),
+  /** The child kept talking over the teacher: clear unplayed teacher audio (output_audio_buffer.clear over the data channel). */
+  z.object({ type: z.literal('interrupt') }),
 ]);
 export type RealtimeEvent = z.infer<typeof realtimeEventSchema>;
 export function parseRealtimeEvent(json: string): RealtimeEvent { return realtimeEventSchema.parse(JSON.parse(json)); }

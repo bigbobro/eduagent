@@ -183,7 +183,7 @@ async function main() {
       const marks = async () => ((await page.locator('.p2-msgs').textContent()) ?? '').split('…').length;
       const before = await marks();
       const interruptAt = Date.now();
-      await speak({ kind: 'chat' }, clip('stop', '等一下，停一下', 'Tingting'));
+      await speak({ kind: 'chat' }, clip('stop', '等一下，停一下，我有话想说，请你先别讲了', 'Tingting'));
       // The provider clears unplayed audio of the playing reply; its subtitle is marked as cut off.
       await until('long reply interrupted', async () => await marks() > before, 15000);
       results.interruptClearedMs = Date.now() - interruptAt;
@@ -209,7 +209,7 @@ async function main() {
       await page.waitForTimeout(800); await quiet(`attempt loop ${i + 1}`);
     }
     if (loops) results.subtitles = await page.locator('.p2-message').allTextContents();
-    if (args.includes('--full')) {
+    const finishCourse = async () => {
       for (let i = 0; i < 80; i++) {
         if (await page.getByText('课堂完成', { exact: true }).count()) break;
         const choices = page.locator('.p2-options button');
@@ -236,6 +236,40 @@ async function main() {
       if (!(await words()).completed) throw new Error('Course not saved as completed');
       // The classroom ends its own call after the goodbye; the page keeps the done view.
       await until('call ended after completion', async () => endStatus === 200, 30000);
+    };
+    const micReleased = async () => {
+      const count = await page.evaluate(() => (window as unknown as { __smokeTracks: MediaStreamTrack[] }).__smokeTracks.length);
+      if (count !== 1) throw new Error(`Expected one microphone capture, got ${count}`);
+      await page.waitForFunction(() => (window as unknown as { __smokeTracks: MediaStreamTrack[] }).__smokeTracks.every((track) => track.readyState === 'ended'), undefined, { timeout: 10000 });
+    };
+    if (args.includes('--sitting')) {
+      // Needs a server started with REALTIME_TEST_SITTING_MS=<wrapUpMs>,<goodbyeMs> and VOICE_MOCK=true: the first sitting is short.
+      if (live) throw new Error('--sitting is a mock scenario');
+      await speak({ kind: 'attempt' }, '');
+      await until('attempt saved', async () => ((await words()).attempts[other.english] ?? 0) >= 1, 30000);
+      await page.getByText('进度已保存，下次继续', { exact: true }).waitFor({ timeout: 90000 });
+      log('sitting end page shown');
+      await page.screenshot({ path: path.join(out, 'sitting-ended.png') });
+      if (await page.getByText('课堂完成', { exact: true }).count()) throw new Error('Sitting end page claims the course is complete');
+      await until('call ended after sitting', async () => endStatus === 200, 30000);
+      await micReleased();
+      const afterFirst = await words();
+      if (afterFirst.completed) throw new Error('Course completed in the first sitting');
+      results.firstSitting = { attempts: afterFirst.attempts };
+      // Come back: same course, same child, resumes from the checkpoint with the remaining work.
+      endStatus = 0; sessionId = '';
+      await page.goto(`${base}/lesson/${course.id}?learnerId=${learner.id}`);
+      await page.getByRole('radio', { name: /Realtime/ }).click();
+      await page.getByRole('button', { name: '我们开始吧' }).click();
+      await dock.waitFor({ timeout: 60000 });
+      await quiet('resumed opening');
+      const resumedHero = await hero();
+      if (resumedHero === other.english) throw new Error('Resumed on a word that was already passed');
+      results.resumedAt = resumedHero;
+      await page.screenshot({ path: path.join(out, 'resumed.png') });
+    }
+    if (args.includes('--full') || args.includes('--sitting')) {
+      await finishCourse();
     } else {
       const end = page.waitForResponse((response) => response.url().endsWith('/api/realtime') && response.request().postDataJSON()?.action === 'end');
       await page.getByRole('button', { name: '下课', exact: true }).click();

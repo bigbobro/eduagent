@@ -53,6 +53,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   const [resumeClearedCardIds, setResumeClearedCardIds] = useState<string[]>([]);
   const [resumePassedQuizIds, setResumePassedQuizIds] = useState<string[]>([]);
   const [lessonRun, setLessonRun] = useState(0);
+  const [sittingEnded, setSittingEnded] = useState(false);
   const [lessonError, setLessonError] = useState<{ message: string; code?: string } | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // R1 (2026-07-20): guards against re-applying resume info on later, ordinary phase changes
@@ -99,7 +100,9 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       // Configuration problems need to remain visible long enough to act on them.
       if (mode === 'legacy' && !llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
     };
+    const onSittingEnded = () => setSittingEnded(true);
     v2Ref.current = v2;
+    v2.on('sitting-ended', onSittingEnded);
     const onSubtitle = (next: { text: string; source: string }) => { if (next.source === 'ai') setIntroSubtitle(next.text); };
     v2.on('subtitle', onSubtitle);
     v2.on('progress', onProgress);
@@ -113,6 +116,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       v2.off('subtitle', onSubtitle);
       v2.off('progress', onProgress);
       v2.off('error', onError);
+      v2.off('sitting-ended', onSittingEnded);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       phased.off('phase-change', onPhaseChange);
       phased.off('transition-retry-change', onTransitionRetry);
@@ -151,6 +155,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     setLessonError(null);
     setTransitionRetry(false);
     setStarted(false);
+    setSittingEnded(false);
     setPhase('intro');
     setIntroBusy(false);
     setIntroActiveCardId(null);
@@ -198,7 +203,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             onStart={handleStart}
           />
         )}
-        {started && !transitionRetry && phase === 'intro' && (
+        {started && !transitionRetry && !sittingEnded && phase === 'intro' && (
           <IntroFrame
             course={course}
             locked={introBusy}
@@ -208,7 +213,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             subtitle={introSubtitle}
           />
         )}
-        {started && !transitionRetry && phase === 'interactive' && v2 && (
+        {started && !transitionRetry && !sittingEnded && phase === 'interactive' && v2 && (
           <LessonMandalaV2
             course={course}
             controller={v2}
@@ -216,7 +221,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             initialClearedCardIds={resumeClearedCardIds}
           />
         )}
-        {started && !transitionRetry && phase === 'reinforcement' && v2 && (
+        {started && !transitionRetry && !sittingEnded && phase === 'reinforcement' && v2 && (
           <ReinforcementFlow
             course={course}
             controller={v2}
@@ -225,7 +230,10 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             onAllDone={() => v2Ref.current?.completeReinforcement()}
           />
         )}
-        {started && phase !== 'intro' && phase !== 'done' && v2 && <SubtitleLog controller={v2} learnerId={learnerId} />}
+        {started && phase !== 'intro' && phase !== 'done' && !sittingEnded && v2 && <SubtitleLog controller={v2} learnerId={learnerId} />}
+        {sittingEnded && phase !== 'done' && (
+          <div role="status" className="p2-retry"><EmptyState title="今天先学到这里" action={<><Button onClick={handleRestart}>继续上课</Button> <Button variant="glass" onClick={handleLeave}>回到课程</Button></>}>进度已保存，下次继续</EmptyState></div>
+        )}
         {started && !transitionRetry && phase === 'done' && (
           <DoneLesson courseId={course.id} learnerId={learnerId} onAgain={handleRestart} />
         )}

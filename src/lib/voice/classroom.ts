@@ -26,6 +26,8 @@ export interface ClassroomEvents {
   'intro-active-card-change': string | null;
   'quiz-saving': boolean;
   'quiz-result': QuizResult;
+  /** Realtime only: this sitting is over but the course is not complete; progress is saved. */
+  'sitting-ended': undefined;
 }
 
 /** Teaching intentions shared by classroom views. Provider prompts and judging stay inside each mode. */

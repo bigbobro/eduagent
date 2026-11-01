@@ -1,20 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
+import { actionsCourse } from '@/data/courses/actions';
 import { createSession } from '@/lib/agent/session';
 import { sessionStore, type Session } from '@/lib/agent/session-store';
 import { getDb } from '@/lib/db';
 import { summarizeRealtimeUsage } from './usage';
 import { changePhase, type TeachingReceipt } from './teaching';
-import { NaturalConversation, type ProviderMessage } from './conversation';
+import { getCourseProgress } from '@/lib/db/queries';
+import { isResumableProgress } from '@/lib/agent/course-progress';
+import { INTERRUPT_AFTER_MS, NaturalConversation, SITTING, type ProviderMessage } from './conversation';
 
 const usage = { input_tokens: 5, output_tokens: 5, input_token_details: { text_tokens: 5, audio_tokens: 0, cached_tokens: 0 }, output_token_details: { text_tokens: 5, audio_tokens: 0 } };
 let session: Session; let sent: Array<Record<string, any>>; let published: TeachingReceipt[]; let conversation: NaturalConversation;
+let sittingEnds: number; let clears: number;
 beforeEach(() => {
   session = createSession(foodCourse, 'test-learner', 'realtime');
   session.tokenUsage.realtime = { model: 'gpt-realtime-2.1', usage: [], complete: true };
   changePhase(session, 'interactive'); session.memory.currentCardId = 'apple';
-  sent = []; published = [];
-  conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt) });
+  sent = []; published = []; sittingEnds = 0; clears = 0;
+  conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt),
+    sittingEnded: () => { sittingEnds++; }, interruptPlayback: () => { clears++; } });
   conversation.setPresented({ kind: 'card', id: 'apple' });
   sent.length = 0;
 });
@@ -32,6 +37,56 @@ const states = () => sent.filter((e) => e.type === 'conversation.item.create' &&
 const attempts = (word: string) => session.memory.wordPerformance.get(word)?.attempts ?? 0;
 
 describe('natural conversation input binding and tool execution', () => {
+  it('keeps a correct first echo on the card, then advances on a separate recall attempt', () => {
+    speech('echo'); created('echo-response');
+    done('echo-response', [assess('apple', { mastered: false, next_action: 'retry', evidence: 'Immediate imitation; check recall next.' })]);
+    expect(session.memory.currentCardId).toBe('apple');
+    expect(session.memory.clearedCardIds).toEqual([]);
+    expect(states().at(-1)).toContain('"attempts":1,"correct":1');
+    created('cue', { ...creates().at(-1)?.response.metadata }); done('cue');
+    // The next cue is spoken feedback, not another assessment of the same audio.
+    expect(attempts('apple')).toBe(1);
+    speech('recall'); created('recall-response');
+    done('recall-response', [assess('apple', { next_card_id: 'milk', evidence: 'Named apple from a meaning cue without another model.' })]);
+    expect(session.memory.clearedCardIds).toEqual(['apple']);
+    expect(session.memory.currentCardId).toBe('milk');
+    expect(attempts('apple')).toBe(2);
+    expect(sent.some((event) => event.type === 'session.update')).toBe(false);
+  });
+  it.each(actionsCourse.phases.reinforcement.quizzes.filter((q) => q.type === 'repeat-after-me'))('saves sentence $cardId as question $id without another attempt', (quiz) => {
+    if (quiz.type !== 'repeat-after-me') throw new Error('Expected sentence quiz');
+    session.course = actionsCourse;
+    changePhase(session, 'reinforcement');
+    conversation.setPresented({ kind: 'quiz', id: quiz.id });
+    speech('sentence-input'); created('sentence-response');
+    done('sentence-response', [assess(quiz.cardId, { heard: quiz.targetText })]);
+    expect(outputs()[0]).toMatchObject({ ok: true, saved: true, quiz: { quizId: quiz.id, correct: true } });
+    expect(session.memory.passedQuizIds).toContain(quiz.id);
+    const rows = getDb().prepare('SELECT model_calls FROM interaction_logs WHERE lesson_id = ?').all(session.id) as Array<{ model_calls: string }>;
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].model_calls).assessment.target_id).toBe(quiz.id);
+    expect(session.memory.clearedCardIds).not.toContain(quiz.cardId);
+    created('duplicate', { ...creates().at(-1)?.response.metadata });
+    done('duplicate', [assess(quiz.id)]);
+    expect(session.lessonInteractionCount).toBe(1);
+  });
+  it('rejects another sentence and supplies the bound target for recovery on the same input', () => {
+    session.course = actionsCourse;
+    changePhase(session, 'reinforcement');
+    conversation.setPresented({ kind: 'quiz', id: 'q5' });
+    speech('sentence-input'); created('sentence-response');
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      done('sentence-response', [assess('sentence_sing')]);
+      expect(outputs()[0]).toMatchObject({ ok: false, error: 'INVALID_INPUT_ASSOCIATION', expected_target: { id: 'q5', text: 'I can run.' } });
+      expect(session.lessonInteractionCount).toBe(0);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('INVALID_INPUT_ASSOCIATION'));
+      created('repair', { ...creates().at(-1)?.response.metadata });
+      done('repair', [assess('q5', { heard: 'I can run.' })]);
+      expect(session.memory.passedQuizIds).toEqual(['q5']);
+      expect(session.lessonInteractionCount).toBe(1);
+    } finally { warning.mockRestore(); }
+  });
   it('switches to the requested card mid-explanation without counting a failed attempt for the interrupted card', () => {
     created('r1'); // teacher explaining apple
     feed({ type: 'input_audio_buffer.speech_started', item_id: 'i1' });
@@ -177,4 +232,179 @@ it('removes a spoken preamble from the context after a tool turn so the model do
   expect(attempts('apple')).toBe(1); // the committed assessment itself stands
   speech('i2'); created('r2'); done('r2', [{ type: 'message', id: 'msg_plain' }]);
   expect(sent).not.toContainEqual({ type: 'conversation.item.delete', item_id: 'msg_plain' });
+});
+
+const open = () => {
+  conversation.start(false);
+  const metadata = creates().at(-1)!.response.metadata; created('open', { ...metadata }); done('open', [], 'completed', { ...metadata });
+  feed({ type: 'output_audio_buffer.started', response_id: 'open' }, { type: 'output_audio_buffer.stopped', response_id: 'open' });
+  sent.length = 0;
+};
+const kinds = () => creates().map((e) => e.response.metadata.kind);
+const cancels = () => sent.filter((e) => e.type === 'response.cancel').length;
+const finishCourse = () => {
+  session.memory.passedQuizIds = session.course.phases.reinforcement.quizzes.map((q) => q.id);
+  conversation.changePhase('reinforcement'); conversation.changePhase('done');
+};
+const minutes = (n: number) => vi.advanceTimersByTime(n * 60_000);
+
+describe('child speech over the teacher', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('configures the provider not to interrupt by itself', () => {
+    expect(conversation.sessionConfig('m')).toMatchObject({ audio: { input: { turn_detection: { type: 'semantic_vad', create_response: true, interrupt_response: false } } } });
+  });
+  it('lets a short echo finish the demonstration, then answers it once', () => {
+    created('r1');
+    feed({ type: 'input_audio_buffer.speech_started', item_id: 'echo' });
+    vi.advanceTimersByTime(INTERRUPT_AFTER_MS - 500);
+    feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'echo' }, { type: 'input_audio_buffer.committed', item_id: 'echo' });
+    vi.advanceTimersByTime(INTERRUPT_AFTER_MS);
+    expect(cancels()).toBe(0); expect(clears).toBe(0); expect(creates()).toHaveLength(0);
+    done('r1');
+    expect(creates()).toHaveLength(1); expect(creates()[0].response.metadata).toMatchObject({ kind: 'reply', input: 'echo' });
+    created('reply', { ...creates()[0].response.metadata }); done('reply'); vi.advanceTimersByTime(5000);
+    expect(creates()).toHaveLength(1);
+  });
+  it('binds the reply to the echo so an attempt in it is assessed', () => {
+    created('r1'); speech('echo'); done('r1');
+    created('reply', { ...creates()[0].response.metadata });
+    done('reply', [assess('apple', { mastered: false, next_action: 'retry' })]);
+    expect(attempts('apple')).toBe(1);
+  });
+  it('stops the teacher when the child keeps talking, and discards the cancelled response tools', () => {
+    created('r1');
+    feed({ type: 'input_audio_buffer.speech_started', item_id: 'wait' });
+    vi.advanceTimersByTime(INTERRUPT_AFTER_MS - 1); expect(cancels()).toBe(0);
+    vi.advanceTimersByTime(2);
+    expect(cancels()).toBe(1); expect(clears).toBe(1);
+    done('r1', [call('show_card', { card_id: 'milk' })], 'cancelled');
+    expect(published).toEqual([]); expect(session.memory.currentCardId).toBe('apple');
+    feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'wait' }, { type: 'input_audio_buffer.committed', item_id: 'wait' });
+    created('answer'); done('answer');
+    vi.advanceTimersByTime(5000); expect(creates()).toHaveLength(0);
+  });
+  it('clears audio that is still playing after the response is done, without a cancel', () => {
+    created('r1'); done('r1'); feed({ type: 'output_audio_buffer.started', response_id: 'r1' });
+    feed({ type: 'input_audio_buffer.speech_started', item_id: 'wait' });
+    vi.advanceTimersByTime(INTERRUPT_AFTER_MS + 1);
+    expect(clears).toBe(1); expect(cancels()).toBe(0);
+  });
+  it('does not interrupt when the teacher is silent', () => {
+    feed({ type: 'input_audio_buffer.speech_started', item_id: 'talk' });
+    vi.advanceTimersByTime(INTERRUPT_AFTER_MS * 3);
+    expect(clears).toBe(0); expect(cancels()).toBe(0);
+  });
+  it('logs each overlap without content', () => {
+    const info = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      created('r1');
+      feed({ type: 'input_audio_buffer.speech_started', item_id: 'x1' });
+      vi.advanceTimersByTime(400);
+      feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'x1' });
+      const line = info.mock.calls.map((c) => String(c[0])).find((l) => l.includes('child spoke during teacher'));
+      expect(line).toContain('x1'); expect(line).toContain('400'); expect(line).toContain('false');
+    } finally { info.mockRestore(); }
+  });
+  it.each([
+    ['an active-response error', true],
+    ['a silent skip', false],
+  ])('creates exactly one follow-up for an input the provider could not answer: %s', (_name, withError) => {
+    created('r1');
+    speech('echo');
+    if (withError) feed({ type: 'error', error: { code: 'conversation_already_has_active_response' } });
+    done('r1');
+    expect(kinds()).toEqual(['reply']);
+    feed({ type: 'error', error: { code: 'conversation_already_has_active_response', event_id: creates()[0].event_id } });
+    vi.advanceTimersByTime(20_000);
+    expect(kinds()).toEqual(['reply']);
+  });
+  it('lets a newer child input supersede an unanswered one', () => {
+    created('r1'); speech('first'); speech('second'); done('r1');
+    expect(creates()).toHaveLength(1); expect(creates()[0].response.metadata.input).toBe('second');
+  });
+  it('does not double-respond when the provider answers a committed input itself', () => {
+    speech('hello'); vi.advanceTimersByTime(300);
+    created('auto'); done('auto'); vi.advanceTimersByTime(5000);
+    expect(creates()).toHaveLength(0);
+  });
+  it('steps in only after a grace window when the provider never answers an idle-time input', () => {
+    speech('hello'); vi.advanceTimersByTime(600); expect(creates()).toHaveLength(0);
+    vi.advanceTimersByTime(400); expect(kinds()).toEqual(['reply']);
+  });
+  it('does not reply when the child starts speaking again before the follow-up', () => {
+    created('r1'); speech('echo'); feed({ type: 'input_audio_buffer.speech_started', item_id: 'more' }); done('r1');
+    expect(creates()).toHaveLength(0);
+    feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'more' }, { type: 'input_audio_buffer.committed', item_id: 'more' });
+    created('auto'); vi.advanceTimersByTime(5000); expect(creates()).toHaveLength(0);
+  });
+});
+
+describe('sitting timing', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+  it('appends a wrap-up message at the first mark without responding or touching the session', () => {
+    open(); minutes(SITTING.wrapUpMs / 60_000 - 1); expect(sent).toEqual([]);
+    minutes(1);
+    const notes = sent.filter((e) => e.type === 'conversation.item.create').map((e) => e.item.content[0].text as string);
+    expect(notes).toHaveLength(1); expect(notes[0]).toContain('[app]');
+    expect(creates()).toHaveLength(0); expect(sent.some((e) => e.type === 'session.update')).toBe(false); expect(sittingEnds).toBe(0);
+  });
+  it('queues the goodbye at the second mark, ends the sitting once and leaves the phase and progress alone', () => {
+    open();
+    speech('i1'); created('r1'); done('r1', [assess('apple', { next_card_id: 'milk' })]); created('f1', { ...creates().at(-1)?.response.metadata }); done('f1');
+    sent.length = 0;
+    minutes(SITTING.goodbyeMs / 60_000);
+    expect(kinds()).toEqual(['goodbye']); expect(creates()[0].response.tool_choice).toBe('none'); expect(sittingEnds).toBe(1);
+    expect(session.currentPhase).toBe('interactive');
+    const row = getCourseProgress(session.courseId, session.learnerId)!;
+    expect(row.phase).toBe('interactive'); expect(row.completed).toBe(false); expect(row.snapshot.clearedCardIds).toEqual(['apple']);
+    expect(isResumableProgress(row)).toBe(true);
+    minutes(30); expect(kinds()).toEqual(['goodbye']); expect(sittingEnds).toBe(1);
+  });
+  it('does not count paused time', () => {
+    open(); minutes(8);
+    conversation.setPaused(true); minutes(60); expect(sent.filter((e) => e.type === 'conversation.item.create')).toHaveLength(0);
+    conversation.setPaused(false); minutes(1); expect(sent.filter((e) => e.type === 'conversation.item.create')).toHaveLength(0);
+    minutes(1); expect(sent.filter((e) => e.type === 'conversation.item.create')).toHaveLength(1);
+  });
+  it('keeps the goodbye when the child is speaking at the mark', () => {
+    open(); minutes(SITTING.wrapUpMs / 60_000);
+    feed({ type: 'input_audio_buffer.speech_started', item_id: 'chat' });
+    sent.length = 0; minutes((SITTING.goodbyeMs - SITTING.wrapUpMs) / 60_000);
+    expect(creates()).toHaveLength(0); expect(sittingEnds).toBe(1);
+    feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'chat' }, { type: 'input_audio_buffer.committed', item_id: 'chat' });
+    expect(kinds()).toEqual(['goodbye']);
+  });
+  it('says only the completion goodbye when the course finishes before the marks', () => {
+    open(); minutes(3);
+    finishCourse();
+    expect(kinds()).toEqual(['goodbye']);
+    created('bye', { ...creates()[0].response.metadata }); done('bye');
+    minutes(30);
+    expect(kinds()).toEqual(['goodbye']); expect(sittingEnds).toBe(0);
+  });
+  it('does not say a second goodbye if the course completes after the sitting ended', () => {
+    open(); minutes(SITTING.goodbyeMs / 60_000);
+    finishCourse();
+    expect(kinds()).toEqual(['goodbye']);
+  });
+});
+
+describe('opening note', () => {
+  it('lists earlier passed words and asks for recall when resuming', () => {
+    session.memory.clearedCardIds = ['apple', 'milk']; sent.length = 0;
+    conversation.start(true);
+    const note = sent.find((e) => e.type === 'conversation.item.create' && e.item.content[0].text.includes('back to continue'))?.item.content[0].text as string;
+    expect(note).toContain('"apple"'); expect(note).toContain('"milk"'); expect(note.toLowerCase()).toContain('recall');
+  });
+  it('has no recall request on a first sitting', () => {
+    conversation.start(false);
+    const note = sent.find((e) => e.type === 'conversation.item.create' && e.item.content[0].text.startsWith('[app] Lesson started'))?.item.content[0].text as string;
+    expect(note).toBeTruthy(); expect(note.toLowerCase()).not.toContain('recall');
+  });
+  it('states remaining words as course-wide and does not demand teaching them all now', () => {
+    conversation.setPresented({ kind: 'card', id: 'milk' });
+    expect(states().at(-1)).toContain('WHOLE course'); expect(states().at(-1)).not.toContain('teach each');
+  });
 });

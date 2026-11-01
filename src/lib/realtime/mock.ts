@@ -15,24 +15,44 @@ export class MockRealtimeCall implements RealtimeCall {
   private active: { id: string; metadata: Record<string, string> | null; timers: ReturnType<typeof setTimeout>[] } | null = null;
   private playing: string | null = null;
   private chain = Promise.resolve();
-  constructor(private session: Session, private options: Pick<CallOptions, 'onEvent'>, private step = 40) {}
+  private interruptResponse: boolean;
+  /** What the model would have decided for an input the provider skipped; used by the app's reply to that input. */
+  private skipped: ReturnType<MockRealtimeCall['decide']>;
+  constructor(private session: Session, private options: Pick<CallOptions, 'onEvent'> & { session?: object }, private step = 40) {
+    // Same switch as the real provider: with interrupt_response false, speech neither cancels the response nor clears audio.
+    const detection = (options.session as { audio?: { input?: { turn_detection?: { interrupt_response?: boolean } } } } | undefined)?.audio?.input?.turn_detection;
+    this.interruptResponse = detection?.interrupt_response !== false;
+  }
   send(event: { type?: string; response?: { metadata?: Record<string, string> } }): void {
     if (this.closed) return;
-    if (event.type === 'response.create') this.respond(event.response?.metadata ?? null);
-    if (event.type === 'response.cancel' && this.active) this.cancel();
+    if (event.type === 'response.create') {
+      const metadata = event.response?.metadata ?? null;
+      const decision = metadata?.kind === 'reply' ? this.skipped : undefined;
+      if (metadata?.kind === 'reply') this.skipped = undefined;
+      this.respond(metadata, decision);
+    }
+    if (event.type === 'response.cancel') {
+      if (this.active) this.cancel();
+      else this.emit({ type: 'error', error: { code: 'response_cancel_not_active' } });
+    }
+    // Sent by the browser over WebRTC in the real system (the server calls this on its behalf offline).
+    if (event.type === 'output_audio_buffer.clear' && this.playing) { this.emit({ type: 'output_audio_buffer.cleared', response_id: this.playing }); this.playing = null; }
   }
   close(): void { this.closed = true; if (this.active) this.active.timers.forEach(clearTimeout); this.active = null; }
-  /** The test "child" speaks. Interrupts like server VAD with interrupt_response. */
+  /** The test "child" speaks. Interrupts like server VAD only when the session has interrupt_response on. */
   speak(utterance: MockUtterance): void {
     this.queue(async () => {
       const item = `mock_item_${++this.items}`;
       this.emit({ type: 'input_audio_buffer.speech_started', item_id: item });
-      if (this.active) this.cancel();
-      if (this.playing) { this.emit({ type: 'output_audio_buffer.cleared', response_id: this.playing }); this.playing = null; }
+      if (this.interruptResponse) {
+        if (this.active) this.cancel();
+        if (this.playing) { this.emit({ type: 'output_audio_buffer.cleared', response_id: this.playing }); this.playing = null; }
+      }
       await this.wait();
       this.emit({ type: 'input_audio_buffer.speech_stopped', item_id: item });
       this.emit({ type: 'input_audio_buffer.committed', item_id: item });
-      this.respond(null, this.decide(utterance));
+      // Without auto-interrupt, a response already running makes the provider skip the auto response silently.
+      if (this.interruptResponse || !this.active) this.respond(null, this.decide(utterance)); else this.skipped = this.decide(utterance);
     });
   }
   private decide(utterance: MockUtterance): { name: string; arguments: string } | undefined {
