@@ -1,7 +1,7 @@
 import type { AnswerResult } from '@/lib/voice/classroom';
 import type { Course } from '@/types/course';
 
-export const MONSTER_KINDS = 3;
+export const MONSTER_KINDS = 5;
 export const MONSTER_HP = [3, 4, 5]; // 1st, 2nd, 3rd monster of a sitting; every later one uses the last value
 
 export interface Monster { kind: number; gold: boolean; hp: number; maxHp: number }

@@ -23,6 +23,7 @@ export function preloadBattleSfx(): void {
 }
 export function playBattleSfx(name: BattleSfx, delaySeconds = 0): void {
   const buffer = buffers.get(name);
+  if (ctx && !buffer && loading) { void loading.then(() => { if (buffers.has(name)) playBattleSfx(name, 0); }); return; } // still decoding (the opening)
   if (!ctx || !buffer) return;
   try {
     void ctx.resume();

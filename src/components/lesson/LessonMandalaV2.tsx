@@ -9,6 +9,7 @@ import { PushToTalkPill } from '@/components/ui/PushToTalkPill';
 import { talkState } from './talkState';
 import { ConversationDock } from './ConversationDock';
 import { BattleStage } from './battle/BattleStage';
+import type { BattleState } from './battle/battle-state';
 
 interface LessonMandalaV2Props {
   course: Course;
@@ -22,6 +23,7 @@ interface LessonMandalaV2Props {
   battle?: boolean;
   /** Collection when this view mounts; the battle grows it from answers afterwards. */
   initialCollectedCardIds?: string[];
+  onBattleChange?: (battle: BattleState) => void;
 }
 
 interface ProgressSnapshot {
@@ -29,7 +31,7 @@ interface ProgressSnapshot {
   totalAttempts: number;
 }
 
-export function LessonMandalaV2({ course, controller, initialCardId, initialClearedCardIds, battle, initialCollectedCardIds }: LessonMandalaV2Props) {
+export function LessonMandalaV2({ course, controller, initialCardId, initialClearedCardIds, battle, initialCollectedCardIds, onBattleChange }: LessonMandalaV2Props) {
   const cards = useMemo(() => course.cards, [course.cards]);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const [state, setState] = useState<LessonStateName>(controller.getState());
@@ -88,7 +90,7 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
   };
 
   if (battle && conversation) return <BattleStage course={course} card={currentCard} cardState={cardState} answers={answers} initialCollectedCardIds={collectedAtMount}
-    paused={state === 'paused'} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher}
+    paused={state === 'paused'} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher} onBattleChange={onBattleChange}
     dock={<ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} />} />;
 
   return <section className="p2-stage">

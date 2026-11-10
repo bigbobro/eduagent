@@ -11,10 +11,13 @@ export function DoneLesson({
   courseId,
   learnerId,
   onAgain,
+  extra,
 }: {
   courseId: string;
   learnerId?: string;
   onAgain?: () => void;
+  /** Shown under the heading, e.g. the word-battle collection. */
+  extra?: React.ReactNode;
 }) {
   const router = useRouter();
   const { data, error, reload } = useLearningRecords(learnerId);
@@ -32,6 +35,7 @@ export function DoneLesson({
       course={course}
       session={data.sessions.find(item => item.courseId === courseId)}
       next={next}
+      extra={extra}
       onHome={() => router.push('/')}
       onAgain={onAgain ?? (() => router.push(url(courseId)))}
       onNext={() => {

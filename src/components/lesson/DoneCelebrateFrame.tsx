@@ -17,9 +17,10 @@ interface DoneCelebrateFrameProps {
   onHome: () => void;
   onAgain: () => void;
   onNext: () => void;
+  extra?: React.ReactNode;
 }
 
-export function DoneCelebrateFrame({ course, session, next, onHome, onAgain, onNext }: DoneCelebrateFrameProps) {
+export function DoneCelebrateFrame({ course, session, next, onHome, onAgain, onNext, extra }: DoneCelebrateFrameProps) {
   const learned = course.words.filter(word => word.masteryStars >= 2).length;
   const remaining = course.totalWords - learned;
   const nextLearned = next?.words.filter(word => word.masteryStars >= 2).length ?? 0;
@@ -43,6 +44,7 @@ export function DoneCelebrateFrame({ course, session, next, onHome, onAgain, onN
             </p>
           </div>
         </header>
+        {extra}
         <div className="done-table">
           {course.words.map(word => <WordMastery key={word.word} word={word} />)}
         </div>

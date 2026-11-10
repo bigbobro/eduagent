@@ -116,6 +116,16 @@ Background: warm off-white paper background (#FBF5E6), subtle paper grain.
 Avoid: no English text, no Chinese text, no letters, no watermark, no realistic photography, no 3D render, no neon, no glossy plastic.
 ```
 
+### Battle Scene Assets (exception)
+
+The word-battle art in `public/images/battle/` is not course art and does not follow the word-card rules above
+(cream paper background, 512 px, size limits). Characters there are transparent WebP cut-outs sized for the stage,
+and the background is one opaque scene. They are generated outside `image_gen`: a text-to-image tool draws each
+character on a flat green background, the macOS foreground-subject mask cuts it out, and green spill on the edge is
+removed before saving. Every pose of a character is edited from that character's first picture so it stays the same
+character. The shared rules still apply: soft watercolor storybook style, no text burned into the image, no binary
+or base64 pasted into chat. `pnpm course:image-audit` does not cover this folder.
+
 ## Validation & Error Matrix
 
 | Condition | Required response |

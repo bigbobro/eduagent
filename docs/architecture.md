@@ -538,6 +538,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/components/lesson/{IntroFrame,LessonMandalaV2,QuizPickWordFrame,ReinforceFrame,ReinforcementFlow,DoneCelebrateFrame}.tsx` | G 课堂四段与共享的下课 view 层，保留控制器与 phase 状态机 |
 | `src/components/lesson/{LessonToolbar,LessonCard,SubtitleLog}.tsx` | 独立课堂工具栏、共用大卡片、视图层累积字幕 |
 | `src/components/lesson/useStaticPromptSpeech.ts` | 强化 quiz 静态 TTS 播放与解锁 gate |
+| `src/components/lesson/battle/{battle-state,BattleStage,BattleSummary,monsters,sfx}` / `src/lib/word-battle-pref.ts` | 单词大战(Realtime 学词阶段的战斗场景),见下文「单词大战」 |
 | `src/components/records/{RecordsPage,CourseWordsSheet,Heatmap,useLearningRecords,WordMastery}.tsx` | 当前孩子学习记录、居中课程单词墙浮层、正方形热力图、并行读取与请求隔离；下课页逐词表仍用 WordMastery |
 | `src/components/lesson/DoneLesson.tsx` | 课堂内和独立下课路由共用的数据加载与导航 |
 | `src/app/not-found.tsx` | 未知地址:麻吉、`EmptyState`、「找不到这个页面」、「回到课程」 |
@@ -545,6 +546,19 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 | `src/app/api/{progress,sessions,stats}/route.ts` | 三个只读聚合 API;请求开始先 `ensureDatabaseInitialized()` 支持 fresh DB |
 | `scripts/smoke-pages.ts` | `pnpm run smoke` 起 dev server + 探 4 页面 + 4 API |
 | `scripts/lesson-smoke.ts` | `pnpm smoke:lesson` 先用 Chrome 验证 push-to-talk 按钮 / Space 持按保持 recording,再用 `/api/chat` 文本脚本验证 teacher agent 状态机与 speech/show_card 一致性 |
+
+### 单词大战(2026-11-10)
+
+Realtime 课堂的学词阶段可以画成一场战斗:麻吉是小魔法师,捣蛋鬼抢走了词卡,孩子答对就是念对咒语。只是表现层:不判分、不写库、不调接口,教学和进度仍由 §18 的教学层负责。原有课堂(按住说话)不出现。
+
+- 开关:`src/lib/word-battle-pref.ts`,浏览器 `localStorage` 的 `eduagent.wordBattle`(没有值按开),设置 → Realtime 页的「单词大战」开关直接写它,不走保存重启流程。`PhasedLessonView` 在开课时读一次:Realtime 且开关为开,才给 `startLesson` 传 `game: true`(服务端据此给老师加游戏规则,见 §18)并把学词阶段交给战斗场景;关着时课堂渲染与之前一致。
+- 数据:`LessonMandalaV2` 订阅 `answer-result`,把本次课的作答按顺序交给 `BattleStage`;收藏册用开课时的 `progress.collectedCardIds` 初始化,之后只由作答增长(同一回执里 progress 先到,跟着它更新会让新卡不演动画就出现)。
+- 规则在纯函数 `battle-state.ts`(随机数注入,单测覆盖):只处理学词阶段的语音作答(`via=voice` 且无 `quizId`);`mastered` 是大招掉 2 滴血,`correct` 掉 1 滴,`close` 擦边不掉血,其余无反应;词卡第一次打中时进收藏册,句子卡不进;血量按第 1、2、3 只 3、4、5(之后都是 5),打完被收服进队伍,下一只出场;5 种怪兽从随机起点轮换,每只出场时十分之一概率是金色;同一 `revision` 只处理一次。没有输、没有倒计时。
+- 画面 `BattleStage.tsx` + `battle.css`:整屏背景,左边麻吉、右边当前怪兽,队友站在麻吉旁,咒语卡(原词卡的全部内容:图、英文、中文、拆音、「老师再讲一遍」,沿用 `data-picture-card-*` 和 `.p2-word`/`.p2-sent`)浮在上方,右上角是怪兽血量,底部是收藏栏。答对时词卡的图变成泡泡从魔杖飞向怪兽,首次答对再飞进收藏栏;开课时演一段怪兽抢走卡片。连续多条作答都会改状态,只演最新一条。`presented` 上报仍在 `LessonMandalaV2` 原处。reduced motion 下不演位移类动画。
+- 字幕栏:战斗场景下默认收起(仍挂载、照常累积),模式行右侧的「字幕」按钮展开。
+- 音效 `sfx.ts`:7 个短音效(`public/sounds/battle/`,`scripts/battle-sfx.mjs` 用 ElevenLabs 生成)由页面内 Web Audio 播放。实测(Electron 45,蓝牙音箱加无线麦克风)页面自己播放的声音被回声消除去掉,不会被常开麦克风当成孩子说话;App 之外播放的声音会。课堂进行中不要对麦克风开第二路采集(实测会让提供方持续判定有人说话)。
+- 结束:一次课结束页(`sittingEnded`)在原有文案上方显示 `BattleSummary`(本课收藏册、今天收服的怪兽、没打完的那只「跑掉了」);跑掉的怪兽种类记在 `localStorage`,下次课第一只就是它。整门课学完的下课页显示收满的收藏册。战斗状态只在浏览器内存里,不存库;收藏册来自服务端(§18)。
+- 素材 `public/images/battle/`:背景、全身麻吉、5 种怪兽各 3 个姿势(待机、挨打、收服后),透明 WebP。
 
 ### Design tokens
 

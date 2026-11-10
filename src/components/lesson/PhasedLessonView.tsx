@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Course, PhaseName } from '@/types/course';
 import { llmFailureNeedsSettings } from '@/lib/llm-errors';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import type { Classroom } from '@/lib/voice/classroom';
-import { isWordBattleOn } from '@/lib/word-battle-pref';
+import { isWordBattleOn, rememberEscapedMonster } from '@/lib/word-battle-pref';
+import { BattleSummary } from './battle/BattleSummary';
+import type { BattleState } from './battle/battle-state';
 import { RealtimeClassroom } from '@/lib/voice/realtime-classroom';
 import { LegacyClassroom } from '@/lib/voice/legacy-classroom';
 import { DoneLesson } from './DoneLesson';
@@ -59,6 +61,9 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   const [battle, setBattle] = useState(false);
   const [collectedCardIds, setCollectedCardIds] = useState<string[]>([]);
   const [subtitlesOpen, setSubtitlesOpen] = useState(false);
+  const [battleEnd, setBattleEnd] = useState<BattleState | null>(null);
+  const battleNow = useRef<BattleState | null>(null);
+  const onBattleChange = useCallback((next: BattleState) => { battleNow.current = next; }, []);
   const [lessonError, setLessonError] = useState<{ message: string; code?: string } | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // R1 (2026-07-20): guards against re-applying resume info on later, ordinary phase changes
@@ -106,7 +111,12 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       // Configuration problems need to remain visible long enough to act on them.
       if (mode === 'legacy' && !llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
     };
-    const onSittingEnded = () => setSittingEnded(true);
+    const onSittingEnded = () => {
+      // Keep what the battle looked like when the sitting ended; the untamed monster comes back first next time.
+      const last = battleNow.current; setBattleEnd(last);
+      if (last) rememberEscapedMonster(last.monster.kind);
+      setSittingEnded(true);
+    };
     v2Ref.current = v2;
     v2.on('sitting-ended', onSittingEnded);
     const onSubtitle = (next: { text: string; source: string }) => { if (next.source === 'ai') setIntroSubtitle(next.text); };
@@ -138,7 +148,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     setStarted(true);
     const phased = v2Ref.current;
     const game = mode === 'realtime' && isWordBattleOn();
-    setBattle(game); setCollectedCardIds([]); setSubtitlesOpen(false);
+    setBattle(game); setCollectedCardIds([]); setSubtitlesOpen(false); setBattleEnd(null); battleNow.current = null;
     const startedOk = await phased?.startLesson(learnerId, game ? { ...(fresh ? { fresh: true } : {}), game: true } : fresh ? { fresh: true } : undefined);
     if (v2Ref.current !== phased) return;
     if (startedOk === false) {
@@ -232,6 +242,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             initialClearedCardIds={resumeClearedCardIds}
             battle={battle}
             initialCollectedCardIds={collectedCardIds}
+            onBattleChange={onBattleChange}
           />
         )}
         {started && !transitionRetry && !sittingEnded && phase === 'reinforcement' && v2 && (
@@ -245,10 +256,10 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
         )}
         {started && phase !== 'intro' && phase !== 'done' && !sittingEnded && v2 && <SubtitleLog controller={v2} learnerId={learnerId} />}
         {sittingEnded && phase !== 'done' && (
-          <div role="status" className="p2-retry"><EmptyState title="今天先学到这里" action={<><Button onClick={handleRestart}>继续上课</Button> <Button variant="glass" onClick={handleLeave}>回到课程</Button></>}>进度已保存，下次继续</EmptyState></div>
+          <div role="status" className={battle ? 'p2-retry bt-end' : 'p2-retry'}>{battle && <BattleSummary course={course} collectedCardIds={collectedCardIds} team={battleEnd?.team} escaped={battleEnd?.monster} />}<EmptyState title="今天先学到这里" action={<><Button onClick={handleRestart}>继续上课</Button> <Button variant="glass" onClick={handleLeave}>回到课程</Button></>}>进度已保存，下次继续</EmptyState></div>
         )}
         {started && !transitionRetry && phase === 'done' && (
-          <DoneLesson courseId={course.id} learnerId={learnerId} onAgain={handleRestart} />
+          <DoneLesson courseId={course.id} learnerId={learnerId} onAgain={handleRestart} extra={battle ? <BattleSummary course={course} collectedCardIds={collectedCardIds} /> : undefined} />
         )}
       </div>
     </main>

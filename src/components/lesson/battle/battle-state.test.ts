@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnswerResult } from '@/lib/voice/classroom';
 import { foodCourse } from '@/data/courses/food';
-import { applyAnswer, initBattle, type BattleState } from './battle-state';
+import { applyAnswer, initBattle, type BattleState, MONSTER_KINDS } from './battle-state';
 
 const rng = (start = 0, golds: boolean[] = []) => ({ startKind: () => start, gold: () => golds.shift() ?? false });
 
@@ -106,14 +106,15 @@ describe('monsters', () => {
   const hit = (n: number) => Array.from({ length: n }, () => ans('apple'));
 
   it('hp goes 3, 4, 5, 5 and kinds cycle from startKind', () => {
-    const r = rng(2);
+    const r = rng(MONSTER_KINDS - 1);
     let s = initBattle([], r);
     const seen = [{ kind: s.monster.kind, hp: s.monster.maxHp }];
     for (const n of [3, 4, 5]) {
       s = play(s, hit(n), r).state;
       seen.push({ kind: s.monster.kind, hp: s.monster.maxHp });
     }
-    expect(seen).toEqual([{ kind: 2, hp: 3 }, { kind: 0, hp: 4 }, { kind: 1, hp: 5 }, { kind: 2, hp: 5 }]);
+    // Starting on the last kind, the next monsters wrap around to the first ones.
+    expect(seen).toEqual([{ kind: MONSTER_KINDS - 1, hp: 3 }, { kind: 0, hp: 4 }, { kind: 1, hp: 5 }, { kind: 2, hp: 5 }]);
     expect(s.index).toBe(3);
   });
 
