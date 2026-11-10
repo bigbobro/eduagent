@@ -549,15 +549,15 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
 
 ### 单词大战(2026-11-10)
 
-Realtime 课堂的学词阶段可以画成一场战斗:麻吉是小魔法师,捣蛋鬼抢走了词卡,孩子答对就是念对咒语。只是表现层:不判分、不写库、不调接口,教学和进度仍由 §18 的教学层负责。原有课堂(按住说话)不出现。
+先学后打:Realtime 课堂的学词阶段照常用大词卡教;一次课进入收尾(约 10 分钟)时,原有的"回忆今天的词"变成一场战斗。麻吉是小魔法师,捣蛋鬼抢走了今天学的词卡,孩子用英语说出来就是念对咒语,把卡打回来。只是表现层:不判分、不写库、不调接口,教学和进度仍由 §18 的教学层负责。原有课堂(按住说话)不出现;整门课学完后的练习题阶段也不出现(留给以后的 Boss 关卡)。
 
-- 开关:`src/lib/word-battle-pref.ts`,浏览器 `localStorage` 的 `eduagent.wordBattle`(没有值按开),设置 → Realtime 页的「单词大战」开关直接写它,不走保存重启流程。`PhasedLessonView` 在开课时读一次:Realtime 且开关为开,才给 `startLesson` 传 `game: true`(服务端据此给老师加游戏规则,见 §18)并把学词阶段交给战斗场景;关着时课堂渲染与之前一致。
-- 数据:`LessonMandalaV2` 订阅 `answer-result`,把本次课的作答按顺序交给 `BattleStage`;收藏册用开课时的 `progress.collectedCardIds` 初始化,之后只由作答增长(同一回执里 progress 先到,跟着它更新会让新卡不演动画就出现)。
-- 规则在纯函数 `battle-state.ts`(随机数注入,单测覆盖):只处理学词阶段的语音作答(`via=voice` 且无 `quizId`);`mastered` 是大招掉 2 滴血,`correct` 掉 1 滴,`close` 擦边不掉血,其余无反应;词卡第一次打中时进收藏册,句子卡不进;血量按第 1、2、3 只 3、4、5(之后都是 5),打完被收服进队伍,下一只出场;5 种怪兽从随机起点轮换,每只出场时十分之一概率是金色;同一 `revision` 只处理一次。没有输、没有倒计时。
-- 画面 `BattleStage.tsx` + `battle.css`:整屏背景,左边麻吉、右边当前怪兽,队友站在麻吉旁,咒语卡(原词卡的全部内容:图、英文、中文、拆音、「老师再讲一遍」,沿用 `data-picture-card-*` 和 `.p2-word`/`.p2-sent`)浮在上方,右上角是怪兽血量,底部是收藏栏。答对时词卡的图变成泡泡从魔杖飞向怪兽,首次答对再飞进收藏栏;开课时演一段怪兽抢走卡片。连续多条作答都会改状态,只演最新一条。`presented` 上报仍在 `LessonMandalaV2` 原处。reduced motion 下不演位移类动画。
-- 字幕栏:战斗场景下默认收起(仍挂载、照常累积),模式行右侧的「字幕」按钮展开。
+- 开关:`src/lib/word-battle-pref.ts`,浏览器 `localStorage` 的 `eduagent.wordBattle`(没有值按开),设置 → Realtime 页的「单词大战」开关直接写它,不走保存重启流程。`PhasedLessonView` 在开课时读一次:Realtime 且开关为开,才给 `startLesson` 传 `game: true`。关着时课堂渲染与之前一致。
+- 什么时候打:服务端在收尾点发 `sitting-wrap-up`(§18),`PhasedLessonView` 收到后把 `battle` 置真,`LessonMandalaV2` 从大词卡切到 `BattleStage`,并在这一刻取快照:此刻的收藏(最新 `progress.collectedCardIds`)、今天练过的词(本次课此前有语音作答的词卡,被怪兽抢走)、战斗作答的起点。一次课没到收尾就结束(例如直接学完进入练习)则没有战斗。
+- 规则在纯函数 `battle-state.ts`(随机数注入,单测覆盖):只处理语音作答(`via=voice` 且无 `quizId`);`mastered`(不靠提示自己说出)是大招掉 2 滴血,`correct` 掉 1 滴,`close` 擦边不掉血,其余无反应。孩子原本拥有、今天又练过的卡在开战时离开收藏栏,任何一次打中就回来;还没拥有的卡要自己想起来(`mastered`)才进收藏;句子卡不进。血量按第 1、2、3 只 3、4、5(之后都是 5),打完被收服进队伍,下一只出场;5 种怪兽从随机起点轮换,每只十分之一概率是金色;同一 `revision` 只处理一次。没有输、没有倒计时。
+- 画面 `BattleStage.tsx` + `battle.css`:整屏背景,左边麻吉、右边当前怪兽,队友站在麻吉旁,咒语卡浮在上方,右上角是怪兽血量,底部是收藏栏。咒语卡显示图和中文,**英文和拆音藏起来**(显示「? ? ?」,英文仍在 DOM 里供测试读取),这张卡在本场战斗里被打中后才亮出来;沿用 `data-picture-card-*` 和 `.p2-word`/`.p2-sent`,「老师再讲一遍」保留。开场演怪兽蹦进来、今天的卡飞进它的袋子;答对时词卡的图变成泡泡从魔杖飞向怪兽,赢回的卡再飞进收藏栏。连续多条作答都会改状态,只演最新一条。`presented` 上报仍在 `LessonMandalaV2` 原处。reduced motion 下不演位移类动画。
+- 字幕栏:只在战斗场景下收起(仍挂载、照常累积),模式行右侧的「字幕」按钮展开;学词阶段照常显示。
 - 音效 `sfx.ts`:7 个短音效(`public/sounds/battle/`,`scripts/battle-sfx.mjs` 用 ElevenLabs 生成)由页面内 Web Audio 播放。实测(Electron 45,蓝牙音箱加无线麦克风)页面自己播放的声音被回声消除去掉,不会被常开麦克风当成孩子说话;App 之外播放的声音会。课堂进行中不要对麦克风开第二路采集(实测会让提供方持续判定有人说话)。
-- 结束:一次课结束页(`sittingEnded`)在原有文案上方显示 `BattleSummary`(本课收藏册、今天收服的怪兽、没打完的那只「跑掉了」);跑掉的怪兽种类记在 `localStorage`,下次课第一只就是它。整门课学完的下课页显示收满的收藏册。战斗状态只在浏览器内存里,不存库;收藏册来自服务端(§18)。
+- 结束:一次课结束页(`sittingEnded`)在原有文案旁显示 `BattleSummary`(本课收藏册、今天收服的怪兽、没打完的那只「跑掉了」);跑掉的怪兽种类记在 `localStorage`,下次课的战斗第一只就是它。整门课学完的下课页在标题下显示一条收藏册。战斗状态只在浏览器内存里,不存库;收藏册来自服务端(§18)。
 - 素材 `public/images/battle/`:背景、全身麻吉、5 种怪兽各 3 个姿势(待机、挨打、收服后),透明 WebP。
 
 ### Design tokens
@@ -792,7 +792,7 @@ v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真�
 
 生命周期：退出先释放本地资源（关数据通道、`pc.close()`、停麦克风轨道、断开 audio），再发小型 keepalive `end`，最后取消 SSE。服务端 end／SSE 取消／请求 abort 都会关闭 sideband 并调用 `POST /v1/realtime/calls/{id}/hangup`；仅关 sideband 不会结束 WebRTC 媒体。实测浏览器单独关 peer 也会在约 2.6 秒内结束提供方通话，此时 hangup 返回 404（已结束）。提供方断开、sideband 出错或空闲 10 分钟：标记用量不完整、向浏览器发错误、使两个注册表失效；前端释放麦克风并提示从已保存进度重新进入课堂。迟到的提供方事件在失效后不再处理。
 
-收藏与游戏开关（2026-11-10，单词大战的服务端部分）：回执的 `progress.collectedCardIds` 是这个孩子在这门课里答对过（或过关过）的全部词卡，按课程顺序。开课时由 `seedCollection`（`realtime/teaching.ts`）从答题历史推出（`word_performance` 中 correct>0 或 rc_cleared=1 的词、`interaction_logs` 中 mastered 的目标，两种课堂模式的历史都算），再并上当前已过关的卡；断点标记为已完成的课程视为全部收集。通话中词卡评估为 correct 或 mastered 时加入，close／wrong 和句子卡不加。历史记录从不删除，所以“从头复习”覆盖断点后收藏不减少，不改库结构，也不写进断点快照。`start` 请求可带 `game: true`（浏览器的单词大战开关）：仅此时把 `GAME_RULES`（`realtime/conversation.ts`）追加到固定指令末尾，告诉老师画面上有自动演出的战斗、可以把练习说成念咒语、孩子自己想起来的词威力更大，并明确不得为了游戏放宽 `mastered` 或多说话；整通电话不变，不影响提示缓存。战斗画面由浏览器根据 `answer-result` 和 `collectedCardIds` 自行演出，服务端不保存战斗状态。
+收藏与游戏开关（2026-11-10，单词大战的服务端部分）：回执的 `progress.collectedCardIds` 是这个孩子在这门课里自己想起来过（过关过）的全部词卡，按课程顺序；跟读正确只算练过，不收集。开课时由 `seedCollection`（`realtime/teaching.ts`）从历史推出（`interaction_logs` 中 mastered 的目标、`word_performance` 中 rc_cleared=1 的词，后者是原有课堂的过关记录），再并上当前已过关的卡；断点标记为已完成的课程视为全部收集。通话中词卡评估为 mastered 时加入，句子卡不加。历史记录从不删除，所以“从头复习”覆盖断点后收藏不减少，不改库结构，也不写进断点快照。`start` 请求可带 `game: true`（浏览器的单词大战开关）：仅此时把 `GAME_RULES`（`realtime/conversation.ts`）追加到固定指令末尾，告诉老师整节课照常教、战斗只在收尾时出现，并明确不得为了游戏放宽 `mastered`；整通电话不变，不影响提示缓存。收尾点的 `[app]` 消息在游戏开着时换成战斗版（`WRAP_UP_BATTLE`）：先一句话宣布捣蛋鬼抢走了今天的卡，再逐个回忆今天练过的词，每个词先 `show_card` 再问、自己不先说出英文、每次真实作答都 `record_assessment`（不靠提示才 `mastered=true`）、约三分钟后 `end_sitting`；同时经 SSE 向浏览器发一次 `sitting-wrap-up`（仅游戏开着且在 interactive 阶段），浏览器据此切到战斗画面。战斗画面由浏览器根据 `answer-result` 自行演出，服务端不保存战斗状态。mock 在战斗版收尾后把 `attempt` 当作一次回忆作答（mastered），`chat` 仍触发 `end_sitting`。
 
 `/api/realtime` 严格校验loopback Origin和孩子／会话归属；请求体限 100KB（SDP ≤ 64KB），同一课堂只允许一次 connect。提供方 calls 请求 15 秒、sideband 握手 10 秒、hangup 10 秒。`VOICE_MOCK=true` 时 `transport='mock'`：不建 WebRTC，`realtime/mock.ts` 以与真实 sideband 相同的事件形状驱动同一 NaturalConversation，并由 `mock-speech` 动作（仅 mock 可用）模拟孩子说话；其固定判对只用于联调，不是模型质量证据。
 

@@ -64,6 +64,8 @@ const realtimeEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('error'), code: z.string(), message: z.string() }),
   /** This sitting is over, the course is not complete: progress is saved; the goodbye is coming, then the browser ends the call. */
   z.object({ type: z.literal('sitting-ended') }),
+  /** Word battle only: the sitting's closing recall game starts now; the browser switches to the battle scene. */
+  z.object({ type: z.literal('sitting-wrap-up') }),
   /** Manual-turn fallback: the browser should send output_audio_buffer.clear over its data channel. */
   z.object({ type: z.literal('clear-output') }),
 ]);

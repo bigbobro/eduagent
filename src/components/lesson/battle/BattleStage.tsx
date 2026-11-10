@@ -16,10 +16,12 @@ interface BattleStageProps {
   course: Course;
   card: WordCard;
   cardState: string;
-  /** Every committed answer of this lesson run, in order. The stage applies each one once. */
+  /** Every committed answer since the battle started, in order. The stage applies each one once. */
   answers: AnswerResult[];
-  /** Collection when the stage mounted; afterwards it only grows through answers, so every new card is animated. */
+  /** Collection when the battle started; afterwards it only grows through answers, so every card won back is animated. */
   initialCollectedCardIds: string[];
+  /** Words practised in this sitting before the battle: the monster snatches their cards. */
+  stolenCardIds: string[];
   paused: boolean;
   onRepeat: () => void;
   repeatDisabled: boolean;
@@ -44,9 +46,11 @@ function describe(effects: BattleEffect[], key: number): Fx | null {
 }
 
 /** The word battle: a full scene drawn from committed answers. It judges nothing, saves nothing and calls no API. */
-export function BattleStage({ course, card, cardState, answers, initialCollectedCardIds, paused, onRepeat, repeatDisabled, dock, onBattleChange }: BattleStageProps) {
+export function BattleStage({ course, card, cardState, answers, initialCollectedCardIds, stolenCardIds, paused, onRepeat, repeatDisabled, dock, onBattleChange }: BattleStageProps) {
   const reduced = useReducedMotion();
-  const [battle, setBattle] = useState(() => initBattle(initialCollectedCardIds, rng));
+  const [battle, setBattle] = useState(() => initBattle(initialCollectedCardIds, rng, stolenCardIds));
+  // The English stays hidden until the child gets the word in this battle: the battle is recall, not reading.
+  const [revealed, setRevealed] = useState<ReadonlySet<string>>(() => new Set());
   const [fx, setFx] = useState<Fx | null>(null);
   const [hurt, setHurt] = useState(false); const hurtTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const live = useRef(battle); const applied = useRef(0); const pausedRef = useRef(paused); pausedRef.current = paused;
@@ -67,13 +71,15 @@ export function BattleStage({ course, card, cardState, answers, initialCollected
   useEffect(() => { onBattleChange?.(battle); }, [battle, onBattleChange]);
   useEffect(() => {
     if (applied.current >= answers.length) return;
-    let state = live.current; let last: Fx | null = null;
+    let state = live.current; let last: Fx | null = null; const hits: string[] = [];
     // Every answer changes the state; only the newest one is animated, so a burst never queues up.
     for (const answer of answers.slice(applied.current)) {
       const out = applyAnswer(state, answer, course, rng); state = out.state;
       last = describe(out.effects, answer.revision) ?? last;
+      if (out.effects.some((e) => e.type === 'hit')) hits.push(answer.cardId);
     }
     applied.current = answers.length; live.current = state; setBattle(state);
+    if (hits.length) setRevealed((known) => new Set(Array.from(known).concat(hits)));
     if (!last) return;
     if (last.collect) {
       const box = stage.current?.getBoundingClientRect(); const slot = slots.current.get(last.cardId)?.getBoundingClientRect();
@@ -101,6 +107,7 @@ export function BattleStage({ course, card, cardState, answers, initialCollected
 
   const hp = battle.monster.hp; const nearlyTamed = hp === 1;
   const wordSize = card.english.length >= 14 ? 'xl' : card.english.length >= 9 ? 'l' : '';
+  const known = revealed.has(card.id);
   return <section className="bt-wrap">
     <div className="bt-stage" ref={stage} data-battle-monster={battle.index} data-battle-hp={hp} data-battle-team={battle.team.length} data-battle-collected={battle.collected.length}>
       <div className="bt-team" aria-label={`队友 ${battle.team.length}`}>
@@ -129,10 +136,12 @@ export function BattleStage({ course, card, cardState, answers, initialCollected
         <span className="bt-hp">{Array.from({ length: battle.monster.maxHp }, (_, i) => <i key={`${battle.index}-${i}`} className={i < hp ? 'bt-heart' : 'bt-heart bt-heart-gone'} />)}</span>
       </div>
 
-      {opening && !reduced && [0, 1, 2].map((i) => <motion.span key={`stolen-${i}`} className="bt-stolen"
-        initial={{ left: '50%', top: '20%', opacity: 0, rotate: -8 + i * 8, scale: 1 }}
-        animate={{ left: ['50%', '62%', TARGET.left], top: ['20%', '14%', TARGET.top], opacity: [0, 1, 1, 0], rotate: [-8 + i * 8, 40 + i * 30, 180 + i * 60], scale: [1, 1, 0.4] }}
-        transition={{ delay: 0.95 + i * 0.14, duration: 0.75, ease: 'easeIn' }} />)}
+      {opening && !reduced && (stolenCardIds.length ? stolenCardIds.slice(0, 6) : ['', '', '']).map((id, i) => <motion.span key={`stolen-${i}`} className="bt-stolen"
+        initial={{ left: `${38 + i * 5}%`, top: '86%', opacity: 0, rotate: -8 + i * 6, scale: 1 }}
+        animate={{ left: [`${38 + i * 5}%`, '60%', TARGET.left], top: ['86%', '30%', TARGET.top], opacity: [0, 1, 1, 0], rotate: [-8 + i * 6, 30 + i * 20, 160 + i * 40], scale: [1, 1.15, 0.4] }}
+        transition={{ delay: 0.95 + i * 0.12, duration: 0.85, ease: 'easeIn' }}>
+        {images.get(id) && <Image src={images.get(id)!} alt="" width={64} height={64} unoptimized />}
+      </motion.span>)}
 
       {fx && !reduced && <Fragment key={fx.key}>
         <motion.span className={`bt-spell ${fx.kind === 'crit' ? 'bt-spell-crit' : ''}`}
@@ -156,9 +165,11 @@ export function BattleStage({ course, card, cardState, answers, initialCollected
             <div className="bt-card-pic"><Image src={card.imageUrl} alt={card.chinese} fill sizes="160px" unoptimized /></div>
             <div className="bt-card-txt">
               {card.kind === 'sentence' && <span className="p2-tag">跟我读句子</span>}
-              <div className={card.kind === 'sentence' ? 'p2-sent bt-sent' : `p2-word bt-word bt-word-${wordSize}`}>{card.english}</div>
+              {/* Still in the DOM when hidden (tests and the smoke read it); the child sees question marks until the word is won. */}
+              <div className={`${card.kind === 'sentence' ? 'p2-sent bt-sent' : `p2-word bt-word bt-word-${wordSize}`} ${known ? 'bt-known' : 'bt-secret'}`} aria-hidden={!known}>{card.english}</div>
+              {!known && <div className="bt-mystery" role="img" aria-label="用英语说出来">? ? ?</div>}
               <div className="bt-zh">{card.chinese}</div>
-              {card.drillParts.length > 1 && <div className="bt-parts">{card.drillParts.map((part, i) => <Fragment key={`${i}-${part}`}>{i > 0 && <em>·</em>}<span>{part}</span></Fragment>)}</div>}
+              {known && card.drillParts.length > 1 && <div className="bt-parts">{card.drillParts.map((part, i) => <Fragment key={`${i}-${part}`}>{i > 0 && <em>·</em>}<span>{part}</span></Fragment>)}</div>}
             </div>
             <Button variant="glass" size="sm" className="bt-again" disabled={repeatDisabled} onClick={onRepeat}><Volume2 size={14} aria-hidden="true" />老师再讲一遍</Button>
           </motion.div>

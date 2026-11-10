@@ -68,26 +68,28 @@ describe('Realtime teaching transactions', () => {
 describe('word collection (never shrinks)', () => {
   const turn = (id: string, targetId: string): InputTurn => ({ id, targetId, kind: 'audio' });
   const child = (name: string) => createLearner(name).id;
-  it('collects a word on its first correct answer or on mastery, not on close or wrong, and never a sentence', () => {
+  it('collects a word only when the child recalls it unprompted, and never a sentence', () => {
     const learner = child('collector-a'); const own = createSession(foodCourse, learner, 'realtime'); changePhase(own, 'interactive');
     seedCollection(own, false);
     expect(snapshot(own).progress.collectedCardIds).toEqual([]);
     own.memory.currentCardId = 'apple';
     expect(submitAssessment(own, turn('t1', 'apple'), { ...assessment, result: 'close', mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual([]);
-    expect(submitAssessment(own, turn('t2', 'apple'), { ...assessment, mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual(['apple']);
-    expect(submitAssessment(own, turn('t3', 'apple'), { ...assessment, mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual(['apple']);
-    own.memory.currentCardId = 'milk';
-    expect(submitAssessment(own, turn('t4', 'milk'), { ...assessment, target_id: 'milk', result: 'close', mastered: true, next_card_id: null }).progress.collectedCardIds).toEqual(['apple', 'milk']);
+    // A correct echo is practice: nothing collected yet.
+    expect(submitAssessment(own, turn('t2', 'apple'), { ...assessment, mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual([]);
+    expect(submitAssessment(own, turn('t3', 'apple'), { ...assessment, next_card_id: null }).progress.collectedCardIds).toEqual(['apple']);
+    expect(submitAssessment(own, turn('t4', 'apple'), { ...assessment, next_card_id: null }).progress.collectedCardIds).toEqual(['apple']);
     own.memory.currentCardId = 'sentence_apple';
-    expect(submitAssessment(own, turn('t5', 'sentence_apple'), { ...assessment, target_id: 'sentence_apple', mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual(['apple', 'milk']);
+    expect(submitAssessment(own, turn('t5', 'sentence_apple'), { ...assessment, target_id: 'sentence_apple', next_card_id: null }).progress.collectedCardIds).toEqual(['apple']);
     own.lifetime.abort(); sessionStore.delete(own.id);
   });
   it('keeps the collection when a later lesson starts over, and treats a completed course as fully collected', () => {
     const learner = child('collector-b'); const first = createSession(foodCourse, learner, 'realtime'); changePhase(first, 'interactive');
     seedCollection(first, false); first.memory.currentCardId = 'egg';
-    submitAssessment(first, turn('t1', 'egg'), { ...assessment, target_id: 'egg', mastered: false, next_action: 'retry', next_card_id: null });
+    submitAssessment(first, turn('t1', 'egg'), { ...assessment, target_id: 'egg', next_card_id: null });
     first.memory.currentCardId = 'milk';
-    submitAssessment(first, turn('t2', 'milk'), { ...assessment, target_id: 'milk', result: 'close', mastered: true, next_card_id: null });
+    submitAssessment(first, turn('t2', 'milk'), { ...assessment, target_id: 'milk', next_card_id: null });
+    first.memory.currentCardId = 'apple';
+    submitAssessment(first, turn('t3', 'apple'), { ...assessment, mastered: false, next_action: 'retry', next_card_id: null }); // echoed only
     // A fresh review: new session, empty memory, breakpoint about to be overwritten. History still knows both words, in course order.
     const review = createSession(foodCourse, learner, 'realtime'); seedCollection(review, false);
     expect(review.memory.clearedCardIds).toEqual([]);

@@ -241,14 +241,14 @@ export function getWordPerformanceByCourse(db: Database, learnerId: string): Wor
 }
 
 /**
- * Word-battle collection source: what this learner ever got right in this course, across every lesson and both
- * classroom modes. Lesson history is never deleted (a fresh review only overwrites the breakpoint), so the set only grows.
+ * Word-battle collection source: the words this learner ever passed in this course (recalled unprompted in the Realtime
+ * classroom, or cleared in the push-to-talk classroom), across every lesson. Lesson history is never deleted (a fresh review only overwrites the breakpoint), so the set only grows.
  */
 export function getCollectedHistory(courseId: string, learnerId: string): { words: string[]; masteredTargetIds: string[] } {
   const db = getDb();
   const words = db.prepare(
     `SELECT DISTINCT wp.word AS word FROM word_performance wp JOIN lesson_logs ll ON ll.id = wp.lesson_id
-     WHERE ll.course_id = ? AND ll.learner_id = ? AND (wp.correct > 0 OR wp.rc_cleared = 1)`,
+     WHERE ll.course_id = ? AND ll.learner_id = ? AND wp.rc_cleared = 1`,
   ).all(courseId, learnerId) as Array<{ word: string }>;
   const mastered = db.prepare(
     `SELECT DISTINCT json_extract(il.model_calls, '$.assessment.target_id') AS id FROM interaction_logs il JOIN lesson_logs ll ON ll.id = il.lesson_id

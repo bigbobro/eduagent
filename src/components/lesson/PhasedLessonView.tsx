@@ -61,6 +61,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   const [battle, setBattle] = useState(false);
   const [collectedCardIds, setCollectedCardIds] = useState<string[]>([]);
   const [subtitlesOpen, setSubtitlesOpen] = useState(false);
+  // The battle is the sitting's closing recall game: it starts when the server says the wrap-up began.
+  const [fighting, setFighting] = useState(false);
   const [battleEnd, setBattleEnd] = useState<BattleState | null>(null);
   const battleNow = useRef<BattleState | null>(null);
   const onBattleChange = useCallback((next: BattleState) => { battleNow.current = next; }, []);
@@ -111,6 +113,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       // Configuration problems need to remain visible long enough to act on them.
       if (mode === 'legacy' && !llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
     };
+    const onWrapUp = () => setFighting(true);
     const onSittingEnded = () => {
       // Keep what the battle looked like when the sitting ended; the untamed monster comes back first next time.
       const last = battleNow.current; setBattleEnd(last);
@@ -119,6 +122,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     };
     v2Ref.current = v2;
     v2.on('sitting-ended', onSittingEnded);
+    v2.on('sitting-wrap-up', onWrapUp);
     const onSubtitle = (next: { text: string; source: string }) => { if (next.source === 'ai') setIntroSubtitle(next.text); };
     v2.on('subtitle', onSubtitle);
     v2.on('progress', onProgress);
@@ -133,6 +137,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       v2.off('progress', onProgress);
       v2.off('error', onError);
       v2.off('sitting-ended', onSittingEnded);
+      v2.off('sitting-wrap-up', onWrapUp);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       phased.off('phase-change', onPhaseChange);
       phased.off('transition-retry-change', onTransitionRetry);
@@ -148,7 +153,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     setStarted(true);
     const phased = v2Ref.current;
     const game = mode === 'realtime' && isWordBattleOn();
-    setBattle(game); setCollectedCardIds([]); setSubtitlesOpen(false); setBattleEnd(null); battleNow.current = null;
+    setBattle(game); setFighting(false); setCollectedCardIds([]); setSubtitlesOpen(false); setBattleEnd(null); battleNow.current = null;
     const startedOk = await phased?.startLesson(learnerId, game ? { ...(fresh ? { fresh: true } : {}), game: true } : fresh ? { fresh: true } : undefined);
     if (v2Ref.current !== phased) return;
     if (startedOk === false) {
@@ -185,8 +190,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     setLessonRun((run) => run + 1);
   };
   const v2 = v2Ref.current;
-  // In the battle scene the subtitle column starts folded away (still mounted, so it keeps collecting lines).
-  const battleScene = battle && started && phase === 'interactive' && !sittingEnded;
+  // The battle scene folds the subtitle column away (still mounted, so it keeps collecting lines).
+  const battleScene = battle && fighting && started && phase === 'interactive' && !sittingEnded;
 
   return (
     <main className="p2-app">
@@ -240,7 +245,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             controller={v2}
             initialCardId={resumeCardId || undefined}
             initialClearedCardIds={resumeClearedCardIds}
-            battle={battle}
+            battle={battle && fighting}
             initialCollectedCardIds={collectedCardIds}
             onBattleChange={onBattleChange}
           />

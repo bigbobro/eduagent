@@ -35,8 +35,8 @@ export function snapshot(session: Session): TeachingReceipt {
   } };
 }
 /**
- * Seeds the word-battle collection for a new call: every word card this child ever answered correctly (or passed) in this
- * course, in course order. A completed course counts as fully collected even if its breakpoint is about to be overwritten.
+ * Seeds the word-battle collection for a new call: every word card this child ever recalled unprompted (passed) in this
+ * course, in course order. A correct echo is practice and does not collect. A completed course counts as fully collected even if its breakpoint is about to be overwritten.
  */
 export function seedCollection(session: Session, completedBefore: boolean): void {
   const history = getCollectedHistory(session.courseId, session.learnerId);
@@ -112,7 +112,7 @@ export function submitAssessment(session: Session, turn: InputTurn, raw: unknown
     persist(session, memory, phase);
   })();
   session.memory = memory; session.currentPhase = phase; session.lessonInteractionCount++; session.revision++;
-  if (card?.kind === 'word' && (assessment.result === 'correct' || assessment.mastered) && !session.collectedCardIds?.includes(card.id)) {
+  if (card?.kind === 'word' && assessment.mastered && !session.collectedCardIds?.includes(card.id)) {
     session.collectedCardIds = [...(session.collectedCardIds ?? []), card.id];
   }
   const receipt = snapshot(session);

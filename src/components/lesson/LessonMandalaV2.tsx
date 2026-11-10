@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Course } from '@/types/course';
 import type { ToolAction } from '@/types/tools';
 import type { AnswerResult, Classroom, LessonStateName } from '@/lib/voice/classroom';
@@ -19,9 +19,9 @@ interface LessonMandalaV2Props {
   // for a fresh (non-resumed) lesson — falls back to today's default.
   initialCardId?: string;
   initialClearedCardIds?: string[];
-  /** Word battle (conversation classroom only): draw the lesson as a battle scene fed by committed answers. */
+  /** Word battle (conversation classroom only): true once the sitting's closing recall game starts; the view then becomes the battle scene. */
   battle?: boolean;
-  /** Collection when this view mounts; the battle grows it from answers afterwards. */
+  /** Collection when this view mounts; kept current from progress until the battle starts. */
   initialCollectedCardIds?: string[];
   onBattleChange?: (battle: BattleState) => void;
 }
@@ -29,6 +29,7 @@ interface LessonMandalaV2Props {
 interface ProgressSnapshot {
   clearedCardIds: string[];
   totalAttempts: number;
+  collectedCardIds?: string[];
 }
 
 export function LessonMandalaV2({ course, controller, initialCardId, initialClearedCardIds, battle, initialCollectedCardIds, onBattleChange }: LessonMandalaV2Props) {
@@ -39,13 +40,16 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
   const [clearedCardIds, setClearedCardIds] = useState<Set<string>>(() => new Set(initialClearedCardIds));
   const showableCardIds = useMemo(() => new Set(cards.map((card) => card.id)), [cards]);
   const [answers, setAnswers] = useState<AnswerResult[]>([]);
-  const [collectedAtMount] = useState(() => initialCollectedCardIds ?? []);
+  const collected = useRef(initialCollectedCardIds ?? []);
+  // Snapshot taken when the battle starts: what the child owned, which of today's words the monster snatches, and where the battle's answers begin.
+  const [fight, setFight] = useState<{ collected: string[]; stolen: string[]; from: number } | null>(null);
 
   useEffect(() => {
     const onState = (next: LessonStateName) => setState(next);
     const onProgress = (next: ProgressSnapshot) => {
       const cleared = new Set(next.clearedCardIds);
       setClearedCardIds(cleared);
+      if (next.collectedCardIds) collected.current = next.collectedCardIds;
     };
     const onActions = (actions: ToolAction[]) => {
       for (let i = actions.length - 1; i >= 0; i--) {
@@ -76,6 +80,18 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
   // Report the card after React committed it, so conversation speech binds to what the child actually saw.
   useEffect(() => { if (currentCard) controller.presented?.({ kind: 'card', id: currentCard.id }); }, [controller, currentCard]);
   const conversation = controller.interaction === 'conversation';
+  const fighting = Boolean(battle) && conversation;
+  useEffect(() => {
+    if (!fighting) { setFight(null); return; }
+    setFight((current) => {
+      if (current) return current;
+      const wordIds = new Set(wordCards.map((card) => card.id));
+      const stolen = Array.from(new Set(answers.filter((answer) => answer.via === 'voice' && !answer.quizId && wordIds.has(answer.cardId)).map((answer) => answer.cardId)));
+      return { collected: collected.current, stolen, from: answers.length };
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- a snapshot at the moment the battle starts
+  }, [fighting]);
+  const battleAnswers = useMemo(() => fight ? answers.slice(fight.from) : [], [answers, fight]);
   const canAskTeacher = state === 'awaiting';
   const cardState = state === 'listening'
     ? 'recording'
@@ -89,7 +105,7 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
     void controller.repeatCard(currentCard.id);
   };
 
-  if (battle && conversation) return <BattleStage course={course} card={currentCard} cardState={cardState} answers={answers} initialCollectedCardIds={collectedAtMount}
+  if (fight) return <BattleStage course={course} card={currentCard} cardState={cardState} answers={battleAnswers} initialCollectedCardIds={fight.collected} stolenCardIds={fight.stolen}
     paused={state === 'paused'} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher} onBattleChange={onBattleChange}
     dock={<ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} />} />;
 

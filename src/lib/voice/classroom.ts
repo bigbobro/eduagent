@@ -45,6 +45,8 @@ export interface ClassroomEvents {
   'quiz-result': QuizResult;
   /** Realtime only for now: every committed answer, emitted once. Push-to-talk does not emit it. */
   'answer-result': AnswerResult;
+  /** Realtime with the word battle on: the sitting's closing recall game starts now. */
+  'sitting-wrap-up': undefined;
   /** Realtime only: this sitting is over but the course is not complete; progress is saved. */
   'sitting-ended': undefined;
 }

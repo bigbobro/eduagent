@@ -34,21 +34,31 @@ async function start() {
 }
 
 describe('word battle in the Realtime classroom', () => {
-  it('starts the lesson as a game, shows the scene with the saved collection and folds the subtitles away', async () => {
+  const emit = (revision: number, cardId: string, mastered = true) => act(() => live.handlers.get('answer-result')?.({ cardId, via: 'voice', result: 'correct', mastered, revision }));
+  const wrapUp = () => act(() => live.handlers.get('sitting-wrap-up')?.(undefined));
+  it('teaches with the normal card first and turns the closing recall game into the battle', async () => {
     const { container } = await start();
     expect(starts).toEqual([['kid', { game: true }]]);
-    const stage = await waitFor(() => { const el = container.querySelector<HTMLElement>('.bt-stage'); expect(el).toBeTruthy(); return el!; });
-    expect(stage.dataset.battleCollected).toBe('1');
+    await waitFor(() => expect(container.querySelector('.p2-stage')).toBeTruthy());
+    expect(container.querySelector('.bt-stage')).toBeNull();
+    expect(screen.queryByRole('button', { name: '字幕' })).toBeNull(); expect(container.querySelector('.p2-subs-closed')).toBeNull();
+    emit(1, 'apple', false); // learning: nothing on screen changes into a game
+    expect(container.querySelector('.bt-stage')).toBeNull();
+    wrapUp();
+    const stage = container.querySelector<HTMLElement>('.bt-stage')!;
+    expect(stage).toBeTruthy(); expect(container.querySelector('.p2-stage')).toBeNull();
+    expect(stage.dataset.battleCollected).toBe('1'); // milk: owned, not practised today
     expect(container.querySelector('.p2-subs-closed .p2-log')).toBeTruthy(); // still mounted, so it keeps collecting lines
     fireEvent.click(screen.getByRole('button', { name: '字幕' }));
     expect(container.querySelector('.p2-subs-closed')).toBeNull();
   });
   it('shows the collection, today\'s team and the escaped monster when the sitting ends, and remembers that monster', async () => {
     const { container } = await start();
-    await waitFor(() => expect(container.querySelector('.bt-stage')).toBeTruthy());
-    const emit = (revision: number, cardId: string) => act(() => live.handlers.get('answer-result')?.({ cardId, via: 'voice', result: 'correct', mastered: true, revision }));
-    emit(1, 'apple'); emit(2, 'banana'); // two crits tame the first monster
-    act(() => { live.handlers.get('progress')?.({ clearedCardIds: ['apple', 'banana'], totalAttempts: 2, currentPhase: 'interactive', collectedCardIds: ['apple', 'banana', 'milk'] }); live.handlers.get('sitting-ended')?.(undefined); });
+    await waitFor(() => expect(container.querySelector('.p2-stage')).toBeTruthy());
+    emit(1, 'apple', false); emit(2, 'banana', false);
+    wrapUp();
+    emit(3, 'apple'); emit(4, 'banana'); // two unprompted recalls tame the first monster
+    act(() => { live.handlers.get('progress')?.({ clearedCardIds: ['apple', 'banana'], totalAttempts: 4, currentPhase: 'interactive', collectedCardIds: ['apple', 'banana', 'milk'] }); live.handlers.get('sitting-ended')?.(undefined); });
     expect(screen.getByText('今天先学到这里')).toBeTruthy();
     expect(screen.getByText('今天收服了 1 只')).toBeTruthy();
     expect(container.querySelectorAll('.bt-summary-grid [data-collected]')).toHaveLength(3);
@@ -59,6 +69,7 @@ describe('word battle in the Realtime classroom', () => {
     const { container } = await start();
     expect(starts).toEqual([['kid', undefined]]);
     await waitFor(() => expect(container.querySelector('.p2-stage')).toBeTruthy());
+    wrapUp(); // the server never sends it with the game off; even so, nothing changes
     expect(container.querySelector('.bt-stage')).toBeNull();
     expect(screen.queryByRole('button', { name: '字幕' })).toBeNull();
     expect(container.querySelector('.p2-subs-closed')).toBeNull();

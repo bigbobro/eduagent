@@ -19,6 +19,8 @@ export interface ConversationPort {
   publish(receipt: TeachingReceipt): void;
   /** This sitting is over but the course is not complete; the goodbye is queued and the browser ends the call after it. */
   sittingEnded(): void;
+  /** Word battle only: the wrap-up recall game is starting, so the browser shows the battle. */
+  sittingWrapUp?(): void;
   /** Manual-turn fallback: ask the browser to send `output_audio_buffer.clear` over its own data channel. */
   clearOutput?(): void;
 }
@@ -29,7 +31,10 @@ export const SITTING = { wrapUpMs: 10 * 60_000, goodbyeMs: 14 * 60_000 };
  * Appended to the fixed instructions only when the browser started the call with the word battle on. The battle itself is
  * drawn by the browser from committed answers; the teacher only needs to know it exists and must not bend assessment for it.
  */
-export const GAME_RULES = `WORD BATTLE (game mode is on): next to the card, the screen plays a battle that the app runs by itself. A mischievous little monster (捣蛋鬼) has grabbed the word cards. Every time record_assessment saves a correct answer, your spell throws that word's picture at the monster and the picture lands in the child's collection; an answer saved with mastered=true (the child came up with the word unprompted) lands as a bigger spell; after a few hits the monster is tamed and joins your team, then a new one arrives. Nothing happens on screen for other results, and the child can never lose. You are 麻吉, the little wizard casting the spells: you may frame a cue as a spell in a few words (念对咒语就能打中它) and, now and then, tell the child that a word they remember by themselves is stronger magic. If the child talks about the monster, answer in one short sentence and return to the word. Do not narrate or predict the battle, do not promise a hit before a tool result says ok:true, never say the child missed or lost, and do not add turns or longer speech for the game. Every teaching and assessment rule above is unchanged: mastered keeps its strict meaning and must never be set to make a bigger spell.`;
+export const GAME_RULES = `WORD BATTLE (game mode is on): teach the whole sitting exactly as described above, with the normal card on screen. The battle comes only at the end: when the app's time check arrives, the screen switches to a battle scene that the app runs by itself. A mischievous little monster (捣蛋鬼) snatches the cards of the words practised today, and each of those words the child then says correctly is your spell hitting it and winning that card back; a word the child recalls with no help lands as a bigger spell. The time-check message tells you how to run it. You are 麻吉, the little wizard. Before the battle you may mention it once, briefly, as something to look forward to; do not turn the lesson itself into a game. Never say the child missed or lost, never promise a hit before a tool result says ok:true, and mastered keeps its strict meaning: never set it to make a bigger spell.`;
+/** Wrap-up note. With the word battle on, the recall game at the end of the sitting is the battle. */
+const WRAP_UP = '[app] Time check: this sitting is nearly over. Finish the word you are on without starting a new one, then play a short recall game with the words practised today (the child says them in a new situation), then call end_sitting. Do not say goodbye yourself: after end_sitting the app asks you to. Do not say the whole course is finished.';
+const WRAP_UP_BATTLE = '[app] Time check: this sitting is nearly over. Finish the word you are on without starting a new one. Then the WORD BATTLE starts (the screen has already switched to it): tell the child in one short excited sentence that a mischievous monster has snatched today\'s cards and that saying each word in English wins it back. Then go through the words practised today, one at a time: first call show_card for that word (in the battle the card shows only the picture and the Chinese; the English stays hidden until the child gets it), then ask for it in English WITHOUT saying the English word yourself. Assess every real attempt with record_assessment: mastered=true only when the child said it with no help from you; if the child cannot recall it, give a hint or model it, and assess that next attempt with mastered=false. One or two tries per word, about three minutes in all, then call end_sitting. Do not say goodbye yourself: after end_sitting the app asks you to. Do not say the whole course is finished.';
 type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye' | 'commit';
 interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean; commitTarget?: PresentedTarget | null }
 interface ResponseState { input: string | null; kind: string; transcript: string; feedbackFor?: string }
@@ -136,8 +141,9 @@ export class NaturalConversation {
       sitting.wrapped = true;
       log.info('sitting wrap-up', { sessionId: this.session.id, elapsedMs: sitting.elapsed });
       // A state message, not a response and not a session.update: the model picks it up on its next turn and the cached instructions stay intact.
-      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text:
-        '[app] Time check: this sitting is nearly over. Finish the word you are on without starting a new one, then play a short recall game with the words practised today (the child says them in a new situation), then call end_sitting. Do not say goodbye yourself: after end_sitting the app asks you to. Do not say the whole course is finished.' }] } });
+      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: this.game ? WRAP_UP_BATTLE : WRAP_UP }] } });
+      // Word battle: the browser switches the teaching view to the battle scene for the recall game.
+      if (this.game && this.session.currentPhase === 'interactive') this.port.sittingWrapUp?.();
       this.armSitting();
       return;
     }

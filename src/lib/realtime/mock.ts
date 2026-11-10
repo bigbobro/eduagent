@@ -23,6 +23,7 @@ export class MockRealtimeCall implements RealtimeCall {
   private static readonly MANUAL_PLAY_MS = 4000;
   /** Set once the app has sent the wrap-up time check; the next child utterance then makes the model call end_sitting. */
   private wrapUp = false;
+  private battle = false;
   constructor(private session: Session, private options: Pick<CallOptions, 'onEvent'> & { session?: object }, private step = 40) {
     // Same switch as the real provider (the app sets it true): with false, speech neither cancels the response nor clears audio.
     const detection = (options.session as { audio?: { input?: { turn_detection?: { interrupt_response?: boolean } } } } | undefined)?.audio?.input?.turn_detection;
@@ -39,7 +40,7 @@ export class MockRealtimeCall implements RealtimeCall {
     }
     if (this.manual && event.type === 'input_audio_buffer.commit') this.emit({ type: 'input_audio_buffer.committed', item_id: `mock_item_${++this.items}` });
     if (this.manual && event.type === 'output_audio_buffer.clear' && this.playing) { this.emit({ type: 'output_audio_buffer.cleared', response_id: this.playing }); this.playing = null; }
-    if (event.type === 'conversation.item.create' && JSON.stringify(event).includes('[app] Time check')) this.wrapUp = true;
+    if (event.type === 'conversation.item.create' && JSON.stringify(event).includes('[app] Time check')) { this.wrapUp = true; this.battle = JSON.stringify(event).includes('WORD BATTLE'); }
     if (event.type === 'response.cancel') {
       if (this.active) this.cancel();
       else this.emit({ type: 'error', error: { code: 'response_cancel_not_active' } });
@@ -68,6 +69,12 @@ export class MockRealtimeCall implements RealtimeCall {
     const memory = this.session.memory;
     // After the wrap-up note the model finishes by calling end_sitting (deterministic: the first utterance after the note).
     // The goodbye-deadline path is covered by unit tests, not by this mock.
+    if (this.wrapUp && this.battle && utterance.kind === 'attempt' && this.session.currentPhase === 'interactive') {
+      // Word battle: a recall of the displayed word, then move to another word practised today.
+      const other = memory.clearedCardIds.find((id) => id !== memory.currentCardId) ?? null;
+      return { name: 'record_assessment', arguments: JSON.stringify({ target_id: memory.currentCardId, result: 'correct', heard: '[offline mock input]', evidence: 'offline fixture, not model judgment',
+        mastered: true, next_action: 'review', next_card_id: other, next_phase: null }) };
+    }
     if (this.wrapUp) { this.wrapUp = false; return { name: 'end_sitting', arguments: '{}' }; }
     if (utterance.kind === 'chat') return undefined;
     if (utterance.kind === 'request') return { name: 'show_card', arguments: JSON.stringify({ card_id: utterance.cardId }) };

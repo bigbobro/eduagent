@@ -14,7 +14,7 @@ export interface Session {
   revision: number;
   startTime: Date;
   currentPhase: PhaseName;
-  /** Realtime only: word cards ever answered correctly in this course by this learner, seeded from history at start. */
+  /** Realtime only: word cards this learner ever recalled unprompted (passed) in this course, seeded from history at start. */
   collectedCardIds?: string[];
 }
 

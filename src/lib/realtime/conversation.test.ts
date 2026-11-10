@@ -280,6 +280,25 @@ describe('sitting timing', () => {
     expect(notes).toHaveLength(1); expect(notes[0]).toContain('[app]');
     expect(creates()).toHaveLength(0); expect(sent.some((e) => e.type === 'session.update')).toBe(false); expect(sittingEnds).toBe(0);
   });
+  it('with the word battle on, the wrap-up turns the recall game into the battle and tells the browser to show it', () => {
+    conversation.close();
+    let wrapUps = 0;
+    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt),
+      sittingEnded: () => { sittingEnds++; }, sittingWrapUp: () => { wrapUps++; } }, undefined, { game: true });
+    conversation.setPresented({ kind: 'card', id: 'apple' }); sent.length = 0;
+    open(); minutes(SITTING.wrapUpMs / 60_000 - 1); expect(wrapUps).toBe(0);
+    minutes(1);
+    const notes = sent.filter((e) => e.type === 'conversation.item.create').map((e) => e.item.content[0].text as string);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('[app] Time check'); expect(notes[0]).toContain('WORD BATTLE');
+    expect(notes[0]).toContain('WITHOUT saying the English word yourself'); expect(notes[0]).toContain('call end_sitting');
+    expect(wrapUps).toBe(1); expect(creates()).toHaveLength(0); expect(sittingEnds).toBe(0);
+  });
+  it('without the word battle the wrap-up note is unchanged and the browser is not told', () => {
+    open(); minutes(SITTING.wrapUpMs / 60_000);
+    const note = sent.find((e) => e.type === 'conversation.item.create')!.item.content[0].text as string;
+    expect(note).toContain('short recall game'); expect(note).not.toContain('WORD BATTLE');
+  });
   it('queues the goodbye at the second mark, ends the sitting once and leaves the phase and progress alone', () => {
     open();
     speech('i1'); created('r1'); done('r1', [assess('apple', { next_card_id: 'milk' })]); created('f1', { ...creates().at(-1)?.response.metadata }); done('f1');
@@ -431,7 +450,8 @@ describe('experimental manual-turn mode (server VAD off)', () => {
     expect(text(new NaturalConversation(session, port))).not.toContain('WORD BATTLE');
     const game = text(new NaturalConversation(session, port, undefined, { game: true }));
     expect(game).toContain(GAME_RULES);
-    expect(game).toContain('must never be set to make a bigger spell');
+    expect(game).toContain('never set it to make a bigger spell');
+    expect(game).toContain('The battle comes only at the end');
     expect(game.startsWith(text(new NaturalConversation(session, port)))).toBe(true); // appended, the rest is untouched
   });
   it('turns provider VAD off only in manual mode', () => {

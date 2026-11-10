@@ -8,6 +8,7 @@ export interface Monster { kind: number; gold: boolean; hp: number; maxHp: numbe
 export interface Teammate { kind: number; gold: boolean }
 export interface BattleState {
   collected: string[];      // word card ids shown in the collection, in the order they were added
+  reclaimable: string[];    // cards the child already owned that the monster snatched for this battle: any hit wins them back
   monster: Monster;         // the monster currently on stage
   index: number;            // 0-based count of monsters that have entered before this one
   startKind: number;        // kind of the first monster; later kinds cycle from it
@@ -24,10 +25,15 @@ export type BattleEffect =
 /** Injected randomness. startKind() returns an integer 0..MONSTER_KINDS-1; gold() is called once per monster that enters. */
 export interface BattleRng { startKind(): number; gold(): boolean }
 
-export function initBattle(collectedCardIds: string[], rng: BattleRng): BattleState {
-  const startKind = rng.startKind();
+/**
+ * The battle is the sitting's closing recall game. The monster snatches the cards of the words practised today
+ * (`stolenCardIds`): those the child already owned leave the collection until a hit wins them back.
+ */
+export function initBattle(collectedCardIds: string[], rng: BattleRng, stolenCardIds: string[] = []): BattleState {
+  const startKind = rng.startKind(); const stolen = new Set(stolenCardIds);
   return {
-    collected: [...collectedCardIds],
+    collected: collectedCardIds.filter((id) => !stolen.has(id)),
+    reclaimable: collectedCardIds.filter((id) => stolen.has(id)),
     monster: { kind: startKind, gold: rng.gold(), hp: MONSTER_HP[0], maxHp: MONSTER_HP[0] },
     index: 0,
     startKind,
@@ -58,7 +64,8 @@ export function applyAnswer(
   const damage = crit ? 2 : 1;
   const effects: BattleEffect[] = [{ type: 'hit', cardId, crit, damage }];
 
-  if (card.kind === 'word' && !state.collected.includes(cardId)) {
+  // A card enters the collection when the child recalls it unprompted; a snatched card they already owned comes back on any hit.
+  if (card.kind === 'word' && !state.collected.includes(cardId) && (crit || state.reclaimable.includes(cardId))) {
     next.collected = [...state.collected, cardId];
     effects.push({ type: 'collect', cardId });
   }

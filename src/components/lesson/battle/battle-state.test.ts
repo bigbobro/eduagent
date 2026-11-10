@@ -26,7 +26,7 @@ describe('initBattle', () => {
     const ids = ['apple'];
     const s = initBattle(ids, rng(2, [true]));
     expect(s).toEqual({
-      collected: ['apple'], monster: { kind: 2, gold: true, hp: 3, maxHp: 3 },
+      collected: ['apple'], reclaimable: [], monster: { kind: 2, gold: true, hp: 3, maxHp: 3 },
       index: 0, startKind: 2, team: [], lastRevision: -1,
     });
     expect(s.collected).not.toBe(ids);
@@ -76,11 +76,20 @@ describe('outcomes', () => {
 });
 
 describe('collection', () => {
-  it('collects a word once', () => {
-    const { state, effects } = play(initBattle([], rng()), [ans('apple'), ans('apple')]);
-    expect(effects[0].map((e) => e.type)).toEqual(['hit', 'collect']);
-    expect(effects[1].map((e) => e.type)).toEqual(['hit']);
+  it('collects a word the first time the child recalls it unprompted, not on a prompted correct answer', () => {
+    const { state, effects } = play(initBattle([], rng()), [ans('apple'), ans('apple', { mastered: true }), ans('apple', { mastered: true })]);
+    expect(effects[0].map((e) => e.type)).toEqual(['hit']); // said it after a hint: a hit, nothing collected
+    expect(effects[1].map((e) => e.type).slice(0, 2)).toEqual(['hit', 'collect']);
+    expect(effects[2].map((e) => e.type)).toEqual(['hit']);
     expect(state.collected).toEqual(['apple']);
+  });
+
+  it('takes the cards practised today out of the collection and gives an owned one back on any hit', () => {
+    const s0 = initBattle(['egg', 'milk'], rng(), ['milk', 'banana']);
+    expect(s0.collected).toEqual(['egg']); expect(s0.reclaimable).toEqual(['milk']);
+    const { state, effects } = play(s0, [ans('milk'), ans('banana'), ans('banana', { mastered: true })]);
+    expect(effects.map((e) => e.map((x) => x.type))).toEqual([['hit', 'collect'], ['hit'], ['hit', 'collect', 'tame', 'enter']]);
+    expect(state.collected).toEqual(['egg', 'milk', 'banana']);
   });
 
   it('does not re-collect a word from the initial collection', () => {
@@ -90,7 +99,7 @@ describe('collection', () => {
   });
 
   it('keeps insertion order', () => {
-    const { state } = play(initBattle(['egg'], rng()), [ans('apple'), ans('banana')]);
+    const { state } = play(initBattle(['egg'], rng()), [ans('apple', { mastered: true }), ans('banana', { mastered: true })]);
     expect(state.collected).toEqual(['egg', 'apple', 'banana']);
   });
 
@@ -122,7 +131,7 @@ describe('monsters', () => {
     const r = rng(1, [false, false]);
     const s0 = play(initBattle([], r), hit(2), r).state; // 1 hp left
     const out = applyAnswer(s0, ans('apple', { mastered: true }), foodCourse, r);
-    expect(out.effects.map((e) => e.type)).toEqual(['hit', 'tame', 'enter']);
+    expect(out.effects.map((e) => e.type)).toEqual(['hit', 'collect', 'tame', 'enter']);
     expect(out.state.team).toEqual([{ kind: 1, gold: false }]);
     expect(out.state.monster).toEqual({ kind: 2, gold: false, hp: 4, maxHp: 4 });
   });
@@ -140,10 +149,10 @@ describe('monsters', () => {
 
   it('orders hit, collect, tame, enter for one answer', () => {
     const r = rng(0, [false, true]);
-    const s0 = play(initBattle([], r), [ans('milk'), ans('sentence_milk')], r).state; // hp 1, milk collected
-    const out = applyAnswer(s0, ans('egg'), foodCourse, r);
+    const s0 = play(initBattle([], r), [ans('milk'), ans('sentence_milk')], r).state; // hp 1
+    const out = applyAnswer(s0, ans('egg', { mastered: true }), foodCourse, r);
     expect(out.effects).toEqual([
-      { type: 'hit', cardId: 'egg', crit: false, damage: 1 },
+      { type: 'hit', cardId: 'egg', crit: true, damage: 2 },
       { type: 'collect', cardId: 'egg' },
       { type: 'tame', monster: { kind: 0, gold: false } },
       { type: 'enter', monster: { kind: 1, gold: true, hp: 4, maxHp: 4 } },

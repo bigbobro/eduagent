@@ -161,6 +161,14 @@ describe('natural Realtime classroom', () => {
     expect(quizzes).toHaveBeenCalledTimes(3); // practice flow control is unchanged
     await classroom.endLesson();
   });
+  it('tells the view when the closing recall game (the word battle) starts', async () => {
+    const { classroom } = await started();
+    const wrapUps = vi.fn(); classroom.on('sitting-wrap-up', wrapUps);
+    push({ type: 'sitting-wrap-up' });
+    await vi.waitFor(() => expect(wrapUps).toHaveBeenCalledTimes(1));
+    expect(tracks[0].enabled).toBe(true); // the lesson goes on; only the picture changes
+    await classroom.endLesson();
+  });
   it('passes the word-battle switch to the server when the lesson starts', async () => {
     const classroom = new RealtimeClassroom(foodCourse);
     expect(await classroom.startLesson('child', { game: true })).toBe(true);

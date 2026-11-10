@@ -37,7 +37,7 @@ const progressSchema = z.object({
   clearedCardIds: z.array(z.string()), totalAttempts: count, currentPhase: lessonPhaseSchema,
   // Older progress frames predate the parked-word completion flag.
   allWordsDone: z.boolean().optional(),
-  // Realtime only: word cards this child has ever answered correctly in this course (never shrinks).
+  // Realtime only: word cards this child has ever recalled unprompted in this course (never shrinks).
   collectedCardIds: z.array(z.string()).optional(),
 });
 export type LessonProgressSnapshot = z.infer<typeof progressSchema>;

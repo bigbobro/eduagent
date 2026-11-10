@@ -26,35 +26,49 @@ describe('word battle scene', () => {
     const legacy = render(<LessonMandalaV2 course={foodCourse} controller={controller('push-to-talk')} battle />);
     expect(stage(legacy.container)).toBeNull(); expect(screen.getByRole('button', { name: '按住空格说话' })).toBeTruthy();
   });
-  it('keeps every teaching element on the spell card and still reports the rendered card', () => {
+  it('hides the English until the child wins the word, and keeps the rest of the card', () => {
     const c = controller('conversation');
     const { container } = render(<LessonMandalaV2 course={foodCourse} controller={c} battle initialCardId="banana" />);
     const card = container.querySelector('[data-picture-card-size="hero"]')!;
-    expect(card.querySelector('.p2-word')?.textContent).toBe('banana');
+    expect(card.querySelector('.p2-word')?.textContent).toBe('banana'); // in the DOM for tooling, not shown
+    expect(card.querySelector('.p2-word')?.className).toContain('bt-secret');
+    expect(screen.getByRole('img', { name: '用英语说出来' })).toBeTruthy();
+    expect(card.querySelector('.bt-parts')).toBeNull();
     expect(card.textContent).toContain('香蕉');
-    expect(card.querySelectorAll('.bt-parts span')).toHaveLength(foodCourse.cards.find((x) => x.id === 'banana')!.drillParts.length);
     expect(screen.getByRole('button', { name: '老师再讲一遍' })).toBeTruthy();
     expect(c.presented).toHaveBeenCalledWith({ kind: 'card', id: 'banana' });
     expect(screen.getByRole('status', { name: '对话状态' })).toBeTruthy();
+    act(() => c.handlers.get('answer-result')?.(answer('banana', 1, { result: 'close' })));
+    expect(card.querySelector('.p2-word')?.className).toContain('bt-secret'); // a near miss reveals nothing
+    act(() => c.handlers.get('answer-result')?.(answer('banana', 2)));
+    expect(card.querySelector('.p2-word')?.className).toContain('bt-known');
+    expect(screen.queryByRole('img', { name: '用英语说出来' })).toBeNull();
+    expect(card.querySelectorAll('.bt-parts span')).toHaveLength(foodCourse.cards.find((x) => x.id === 'banana')!.drillParts.length);
   });
-  it('turns committed answers into hits, crits and collected cards exactly once', () => {
+  it('fights with the words learned first: the monster snatches today\'s cards and recall wins them back', () => {
     const c = controller('conversation');
-    const { container } = render(<LessonMandalaV2 course={foodCourse} controller={c} battle initialCollectedCardIds={['milk']} />);
-    const data = () => ({ ...stage(container).dataset });
-    expect(data()).toMatchObject({ battleMonster: '0', battleHp: '3', battleTeam: '0', battleCollected: '1' });
+    const view = render(<LessonMandalaV2 course={foodCourse} controller={c} initialCollectedCardIds={['milk', 'water']} />);
     const emit = (a: AnswerResult) => act(() => c.handlers.get('answer-result')?.(a));
-    emit(answer('apple', 1));
+    // Learning: the normal card, no battle. Today the child practises apple, milk and egg.
+    emit(answer('apple', 1)); emit(answer('milk', 2)); emit(answer('egg', 3, { result: 'close' }));
+    expect(stage(view.container)).toBeNull(); expect(view.container.querySelector('.p2-stage')).toBeTruthy();
+    // The closing recall game starts.
+    view.rerender(<LessonMandalaV2 course={foodCourse} controller={c} initialCollectedCardIds={['milk', 'water']} battle />);
+    const data = () => ({ ...stage(view.container).dataset });
+    // water was not practised today and stays; milk was owned and practised, so the monster holds it.
+    expect(data()).toMatchObject({ battleMonster: '0', battleHp: '3', battleTeam: '0', battleCollected: '1' });
+    emit(answer('milk', 4)); // said after a hint: a normal hit, and an owned card comes back on any hit
     expect(data()).toMatchObject({ battleHp: '2', battleCollected: '2' });
-    emit(answer('apple', 1)); // replayed revision
-    emit(answer('apple', 2, { result: 'close' })); // graze
-    emit(answer('apple', 3, { result: 'wrong' }));
-    emit(answer('milk', 4, { via: 'choice', quizId: 'q2' })); // practice answers belong to a later level
+    emit(answer('milk', 4)); // replayed revision
+    emit(answer('egg', 5, { result: 'close' })); // graze
+    emit(answer('egg', 6, { result: 'wrong' }));
+    emit(answer('milk', 7, { via: 'choice', quizId: 'q2' })); // practice answers belong to a later level
     expect(data()).toMatchObject({ battleHp: '2', battleCollected: '2' });
-    emit(answer('milk', 5)); // already collected at mount: hits, does not collect again
+    emit(answer('apple', 8)); // never owned and said only after a hint: hits, not collected yet
     expect(data()).toMatchObject({ battleHp: '1', battleCollected: '2' });
-    emit(answer('egg', 6, { mastered: true })); // crit tames the monster, the next one has 4 hearts
+    emit(answer('apple', 9, { mastered: true })); // recalled unprompted: a crit, collected, and the monster is tamed
     expect(data()).toMatchObject({ battleMonster: '1', battleHp: '4', battleTeam: '1', battleCollected: '3' });
-    expect(container.querySelectorAll('.bt-slot[data-collected]')).toHaveLength(3);
+    expect(view.container.querySelectorAll('.bt-slot[data-collected]')).toHaveLength(3);
   });
   it('does not add a card to the collection from a progress update alone', () => {
     const c = controller('conversation');

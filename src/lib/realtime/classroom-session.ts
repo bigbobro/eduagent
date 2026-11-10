@@ -64,6 +64,7 @@ export class RealtimeClassroomSession {
       send: (event) => this.call?.send(event),
       publish: (receipt) => this.emit({ type: 'receipt', receipt }),
       sittingEnded: () => this.emit({ type: 'sitting-ended' }),
+      sittingWrapUp: () => this.emit({ type: 'sitting-wrap-up' }),
       clearOutput: () => this.emit({ type: 'clear-output' }),
     }, sittingTiming(), { manualTurn: this.turnMode === 'manual', game });
     this.session.lifetime.signal.addEventListener('abort', () => this.close(), { once: true });

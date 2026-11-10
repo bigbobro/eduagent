@@ -99,3 +99,12 @@
 .bt-summary-compact .bt-summary-grid { flex:1; min-width:0; grid-template-columns:repeat(12,minmax(0,34px)); gap:5px; }
 .bt-summary-compact .bt-summary-grid span { width:auto; height:auto; aspect-ratio:1; border-radius:9px; }
 .done-left:has(.bt-summary) { grid-template-rows:auto auto minmax(0,1fr); gap:16px; min-width:0; }
+
+/* Recall: the English is hidden until the child says the word; then it pops in. */
+.bt-secret { position:absolute; visibility:hidden; pointer-events:none; }
+.bt-mystery { font:700 clamp(40px,9.6cqh,62px)/1 var(--font-en); letter-spacing:.08em; color:#A878FF; text-shadow:0 2px 0 #fff; }
+.bt-known { animation:bt-reveal .45s cubic-bezier(.2,1.6,.4,1); }
+@keyframes bt-reveal { from { scale:.4; opacity:0; } to { scale:1; opacity:1; } }
+.bt-stolen { overflow:hidden; }
+.bt-stolen img { width:100%; height:100%; object-fit:cover; }
+@media (prefers-reduced-motion:reduce) { .bt-known { animation:none; } }
