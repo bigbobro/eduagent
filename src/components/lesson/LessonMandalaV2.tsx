@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Course } from '@/types/course';
 import type { ToolAction } from '@/types/tools';
-import type { Classroom, LessonStateName } from '@/lib/voice/classroom';
+import type { AnswerResult, Classroom, LessonStateName } from '@/lib/voice/classroom';
 import { LessonCard } from './LessonCard';
 import { PushToTalkPill } from '@/components/ui/PushToTalkPill';
 import { talkState } from './talkState';
 import { ConversationDock } from './ConversationDock';
+import { BattleStage } from './battle/BattleStage';
 
 interface LessonMandalaV2Props {
   course: Course;
@@ -17,6 +18,10 @@ interface LessonMandalaV2Props {
   // for a fresh (non-resumed) lesson — falls back to today's default.
   initialCardId?: string;
   initialClearedCardIds?: string[];
+  /** Word battle (conversation classroom only): draw the lesson as a battle scene fed by committed answers. */
+  battle?: boolean;
+  /** Collection when this view mounts; the battle grows it from answers afterwards. */
+  initialCollectedCardIds?: string[];
 }
 
 interface ProgressSnapshot {
@@ -24,13 +29,15 @@ interface ProgressSnapshot {
   totalAttempts: number;
 }
 
-export function LessonMandalaV2({ course, controller, initialCardId, initialClearedCardIds }: LessonMandalaV2Props) {
+export function LessonMandalaV2({ course, controller, initialCardId, initialClearedCardIds, battle, initialCollectedCardIds }: LessonMandalaV2Props) {
   const cards = useMemo(() => course.cards, [course.cards]);
   const wordCards = useMemo(() => course.cards.filter((card) => card.kind === 'word'), [course.cards]);
   const [state, setState] = useState<LessonStateName>(controller.getState());
   const [currentCardId, setCurrentCardId] = useState(initialCardId || wordCards[0]?.id || '');
   const [clearedCardIds, setClearedCardIds] = useState<Set<string>>(() => new Set(initialClearedCardIds));
   const showableCardIds = useMemo(() => new Set(cards.map((card) => card.id)), [cards]);
+  const [answers, setAnswers] = useState<AnswerResult[]>([]);
+  const [collectedAtMount] = useState(() => initialCollectedCardIds ?? []);
 
   useEffect(() => {
     const onState = (next: LessonStateName) => setState(next);
@@ -50,7 +57,10 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
     controller.on('state', onState);
     controller.on('progress', onProgress);
     controller.on('actions', onActions);
+    const onAnswer = (answer: AnswerResult) => setAnswers((all) => [...all, answer]);
+    controller.on('answer-result', onAnswer);
     return () => {
+      controller.off('answer-result', onAnswer);
       controller.off('state', onState);
       controller.off('progress', onProgress);
       controller.off('actions', onActions);
@@ -76,6 +86,10 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
     if (!canAskTeacher) return;
     void controller.repeatCard(currentCard.id);
   };
+
+  if (battle && conversation) return <BattleStage course={course} card={currentCard} cardState={cardState} answers={answers} initialCollectedCardIds={collectedAtMount}
+    paused={state === 'paused'} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher}
+    dock={<ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} />} />;
 
   return <section className="p2-stage">
     <LessonCard card={currentCard} state={cardState} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher} />

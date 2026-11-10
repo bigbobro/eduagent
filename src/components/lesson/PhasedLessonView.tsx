@@ -6,6 +6,7 @@ import { Course, PhaseName } from '@/types/course';
 import { llmFailureNeedsSettings } from '@/lib/llm-errors';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import type { Classroom } from '@/lib/voice/classroom';
+import { isWordBattleOn } from '@/lib/word-battle-pref';
 import { RealtimeClassroom } from '@/lib/voice/realtime-classroom';
 import { LegacyClassroom } from '@/lib/voice/legacy-classroom';
 import { DoneLesson } from './DoneLesson';
@@ -54,6 +55,10 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   const [resumePassedQuizIds, setResumePassedQuizIds] = useState<string[]>([]);
   const [lessonRun, setLessonRun] = useState(0);
   const [sittingEnded, setSittingEnded] = useState(false);
+  // Word battle: decided when the lesson starts (Realtime only), so a settings change applies to the next lesson.
+  const [battle, setBattle] = useState(false);
+  const [collectedCardIds, setCollectedCardIds] = useState<string[]>([]);
+  const [subtitlesOpen, setSubtitlesOpen] = useState(false);
   const [lessonError, setLessonError] = useState<{ message: string; code?: string } | null>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // R1 (2026-07-20): guards against re-applying resume info on later, ordinary phase changes
@@ -92,6 +97,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     const onProgress = (next: LessonProgressSnapshot) => {
       setLessonError(null);
       setClearedWordCount(next.clearedCardIds.filter((cardId) => wordCardIds.has(cardId)).length);
+      if (next.collectedCardIds) setCollectedCardIds(next.collectedCardIds);
     };
     const onError = (err: { message: string; code?: string }) => {
       if (!err?.message) return;
@@ -131,7 +137,9 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
     setStarted(true);
     const phased = v2Ref.current;
-    const startedOk = await phased?.startLesson(learnerId, fresh ? { fresh: true } : undefined);
+    const game = mode === 'realtime' && isWordBattleOn();
+    setBattle(game); setCollectedCardIds([]); setSubtitlesOpen(false);
+    const startedOk = await phased?.startLesson(learnerId, game ? { ...(fresh ? { fresh: true } : {}), game: true } : fresh ? { fresh: true } : undefined);
     if (v2Ref.current !== phased) return;
     if (startedOk === false) {
       setStarted(false);
@@ -167,6 +175,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     setLessonRun((run) => run + 1);
   };
   const v2 = v2Ref.current;
+  // In the battle scene the subtitle column starts folded away (still mounted, so it keeps collecting lines).
+  const battleScene = battle && started && phase === 'interactive' && !sittingEnded;
 
   return (
     <main className="p2-app">
@@ -184,8 +194,9 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             }}>{label}</button>)}
           </div>
         </> : <span>{mode === 'realtime' ? 'Realtime 自然对话课堂 · OpenAI（直接说话，可随时插话）' : '原有课堂 · 豆包语音'}</span>}
+        {battleScene && <button type="button" className="p2-subs-toggle" aria-pressed={subtitlesOpen} onClick={() => setSubtitlesOpen((open) => !open)}>{subtitlesOpen ? '收起字幕' : '字幕'}</button>}
       </div>
-      <div className={`p2-content ${started && phase !== 'intro' && phase !== 'done' ? 'p2-lesson' : ''}`}>
+      <div className={`p2-content ${started && phase !== 'intro' && phase !== 'done' ? 'p2-lesson' : ''} ${battleScene && !subtitlesOpen ? 'p2-subs-closed' : ''}`}>
         {transitionRetry && (
           <div role="alert" className="p2-retry"><EmptyState title="老师还没准备好下一步,再试一次吧" action={<Button disabled={retrying} onClick={async () => {
               const phased = v2Ref.current;
@@ -219,6 +230,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
             controller={v2}
             initialCardId={resumeCardId || undefined}
             initialClearedCardIds={resumeClearedCardIds}
+            battle={battle}
+            initialCollectedCardIds={collectedCardIds}
           />
         )}
         {started && !transitionRetry && !sittingEnded && phase === 'reinforcement' && v2 && (

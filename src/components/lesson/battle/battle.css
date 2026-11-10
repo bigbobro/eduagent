@@ -1,0 +1,78 @@
+/* Word battle: one full scene, everything else floats on it. Only used by the conversation classroom with the battle on. */
+.bt-wrap { display:grid; grid-template-rows:minmax(0,1fr) auto; height:100%; min-height:0; min-width:0; padding:12px 20px 0; }
+.bt-stage { position:relative; min-height:0; border-radius:28px; overflow:hidden; container-type:size; isolation:isolate;
+  background:#DDE9C8 url(/images/battle/bg.jpg) center 62%/cover no-repeat;
+  box-shadow:0 0 0 3px rgba(255,255,255,.85), 0 18px 44px -18px rgba(60,40,120,.45); }
+.bt-stage::after { content:''; position:absolute; inset:0; pointer-events:none; z-index:1;
+  background:radial-gradient(120% 90% at 50% 100%, rgba(40,20,90,.20), transparent 55%); }
+
+/* Characters stand on the grass, above the collection bar. */
+.bt-maji, .bt-monster { position:absolute; bottom:15%; height:54cqh; z-index:3; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
+.bt-maji { left:5%; transform-origin:50% 100%; }
+.bt-monster { right:6%; transform-origin:50% 100%; }
+.bt-maji img, .bt-monster-body img { height:100%; width:auto; filter:drop-shadow(0 14px 10px rgba(40,30,80,.28)); }
+.bt-monster-body { flex:1; min-height:0; transform-origin:50% 100%; }
+.bt-monster-body::before, .bt-maji::before { content:''; position:absolute; left:12%; right:12%; bottom:-3%; height:9%; border-radius:50%; background:rgba(40,30,80,.22); filter:blur(6px); z-index:-1; }
+.bt-worried { animation:bt-shiver .5s ease-in-out infinite; }
+@keyframes bt-shiver { 0%,100% { translate:0 0; } 25% { translate:-2px 0; } 75% { translate:2px 0; } }
+
+/* The monster's hearts: a HUD in the corner, clear of the spell card whatever its width. */
+.bt-hud { position:absolute; z-index:7; right:2.5%; top:4%; display:grid; justify-items:end; gap:4px; }
+.bt-hud b { padding:2px 10px; border-radius:999px; font-size:12px; color:#fff; background:rgba(43,27,94,.72); }
+.bt-hp { display:flex; gap:5px; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.92); box-shadow:0 4px 12px -4px rgba(40,30,80,.4); }
+.bt-heart { width:22px; height:20px; background:#FF4D6D; transition:background .2s .45s, scale .25s .45s, opacity .2s .45s;
+  clip-path:path('M11 19.5C4 14 0 10.5 0 6a5.6 5.6 0 0 1 11-1.6A5.6 5.6 0 0 1 22 6c0 4.5-4 8-11 13.5z'); }
+.bt-heart-gone { background:#CBD5E1; scale:.8; opacity:.75; }
+
+/* Tamed monsters line up beside Maji, below the spell's flight path. */
+.bt-team { position:absolute; left:27%; bottom:15%; height:23cqh; z-index:2; }
+.bt-team-row { display:flex; align-items:flex-end; height:100%; }
+.bt-mate { height:100%; margin-right:-3cqh; }
+.bt-mate img { height:100%; width:auto; transform:scaleX(-1); filter:drop-shadow(0 8px 6px rgba(40,30,80,.25)); }
+
+/* The spell: the word's own picture in a magic bubble. */
+.bt-spell { position:absolute; z-index:6; width:15cqh; height:15cqh; margin:-7.5cqh 0 0 -7.5cqh; border-radius:50%; overflow:hidden; pointer-events:none;
+  box-shadow:0 0 0 4px #fff, 0 0 0 8px rgba(255,214,102,.9), 0 0 34px 12px rgba(255,214,102,.75); }
+.bt-spell img { width:100%; height:100%; object-fit:cover; }
+.bt-spell-crit { width:21cqh; height:21cqh; margin:-10.5cqh 0 0 -10.5cqh; box-shadow:0 0 0 5px #fff, 0 0 0 11px rgba(168,120,255,.95), 0 0 60px 26px rgba(255,214,102,.9); }
+.bt-burst { position:absolute; z-index:5; width:30cqh; height:30cqh; margin:-15cqh 0 0 -15cqh; pointer-events:none; background:#FFE066;
+  clip-path:polygon(50% 0,61% 31%,93% 18%,74% 46%,100% 62%,68% 66%,72% 100%,50% 76%,28% 100%,32% 66%,0 62%,26% 46%,7% 18%,39% 31%); }
+.bt-burst-crit { width:52cqh; height:52cqh; margin:-26cqh 0 0 -26cqh; background:linear-gradient(135deg,#FFE066,#FF9EC4 55%,#A878FF); }
+.bt-flash { position:absolute; inset:0; z-index:4; pointer-events:none; background:#fff; }
+
+/* The spell card: what to say. Compact, but every teaching element of the lesson card is still here. */
+.bt-card { position:absolute; z-index:7; left:50%; top:3.5%; translate:-50% 0; width:max-content; min-width:300px; max-width:58%; }
+.bt-card-in { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; column-gap:18px; padding:12px 18px 12px 12px; border-radius:24px;
+  background:rgba(255,253,247,.95); box-shadow:0 0 0 3px rgba(255,255,255,.9), 0 16px 34px -14px rgba(60,40,120,.55); }
+.bt-card-pic { position:relative; width:22cqh; height:22cqh; max-width:132px; max-height:132px; grid-row:span 2; border-radius:18px; overflow:hidden; }
+.bt-card-pic img { object-fit:cover; }
+.bt-card-txt { min-width:0; }
+.bt-card-txt>.p2-tag { margin-bottom:4px; }
+.bt-word { font:700 clamp(40px,9.6cqh,62px)/1 var(--font-en); letter-spacing:-.01em; white-space:nowrap; color:#2B1B5E; }
+.bt-word-l { font-size:clamp(34px,8cqh,52px); } .bt-word-xl { font-size:clamp(28px,6.6cqh,42px); }
+.bt-sent { font:700 clamp(24px,5.4cqh,34px)/1.12 var(--font-en); letter-spacing:-.01em; color:#2B1B5E; }
+.bt-zh { margin-top:4px; font-size:clamp(16px,3.6cqh,22px); font-weight:600; color:#64748B; }
+.bt-parts { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:6px; }
+.bt-parts span { font:600 clamp(13px,3cqh,17px) var(--font-en); padding:3px 11px; border-radius:999px; background:rgba(104,66,255,.12); color:#6842FF; white-space:nowrap; }
+.bt-parts em { color:#94A3B8; font-style:normal; }
+.bt-again { grid-column:2; justify-self:start; margin-top:8px; }
+
+/* Collection: an inventory bar along the bottom of the scene. */
+.bt-album { position:absolute; z-index:7; left:50%; bottom:2.5%; translate:-50% 0; display:flex; align-items:center; gap:10px; padding:7px 12px 7px 14px; border-radius:20px;
+  background:rgba(43,27,94,.72); backdrop-filter:blur(8px); box-shadow:0 0 0 2px rgba(255,255,255,.55), 0 10px 24px -10px rgba(20,10,60,.7); }
+.bt-album b { display:grid; font-size:12px; line-height:1.15; color:#fff; white-space:nowrap; }
+.bt-album small { font:700 13px var(--font-en); color:#FFE066; }
+.bt-slots { display:flex; gap:5px; }
+.bt-slot { width:clamp(34px,8.4cqh,46px); aspect-ratio:1; border-radius:11px; background:rgba(255,255,255,.14); box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.28); }
+.bt-slot-pic { display:block; width:100%; height:100%; border-radius:11px; overflow:hidden; background:#FFF8E1; box-shadow:inset 0 0 0 2px #FFE066; }
+.bt-slot-pic img { width:100%; height:100%; object-fit:cover; }
+
+.bt-dock { padding:10px 0 14px; }
+@media (prefers-reduced-transparency:reduce) { .bt-album { background:#2B1B5E; backdrop-filter:none; } }
+@media (prefers-reduced-motion:reduce) { .bt-worried { animation:none; } }
+
+/* Subtitle column: folded away while the battle scene is up; the toggle sits in the mode row. */
+.p2-subs-toggle { margin-left:auto; height:28px; padding:0 12px; border-radius:999px; font-size:12px; font-weight:600; color:#6842FF; background:rgba(104,66,255,.1); }
+.p2-subs-toggle[aria-pressed=true] { background:#6842FF; color:#fff; }
+.p2-lesson.p2-subs-closed { grid-template-columns:minmax(0,1fr); }
+.p2-subs-closed .p2-log { display:none; }
