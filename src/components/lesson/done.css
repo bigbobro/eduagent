@@ -133,20 +133,22 @@
 }
 
 .done-preview {
-  flex: 1;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-  min-height: 0;
 }
 
+/* Square thumbnails in one row: a stretched 2x2 grid cropped them to thin strips in a short window. */
 .done-preview img {
   width: 100%;
-  height: 100%;
+  height: auto;
+  aspect-ratio: 1;
   object-fit: cover;
   border-radius: 12px;
-  min-height: 0;
+}
+
+.done-next > button {
+  margin-top: auto;
 }
 
 .done-actions {
