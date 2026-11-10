@@ -259,7 +259,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
           <div role="status" className={battle ? 'p2-retry bt-end' : 'p2-retry'}>{battle && <BattleSummary course={course} collectedCardIds={collectedCardIds} team={battleEnd?.team} escaped={battleEnd?.monster} />}<EmptyState title="今天先学到这里" action={<><Button onClick={handleRestart}>继续上课</Button> <Button variant="glass" onClick={handleLeave}>回到课程</Button></>}>进度已保存，下次继续</EmptyState></div>
         )}
         {started && !transitionRetry && phase === 'done' && (
-          <DoneLesson courseId={course.id} learnerId={learnerId} onAgain={handleRestart} extra={battle ? <BattleSummary course={course} collectedCardIds={collectedCardIds} /> : undefined} />
+          <DoneLesson courseId={course.id} learnerId={learnerId} onAgain={handleRestart} extra={battle ? <BattleSummary course={course} collectedCardIds={collectedCardIds} compact /> : undefined} />
         )}
       </div>
     </main>
