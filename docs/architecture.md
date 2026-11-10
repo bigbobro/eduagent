@@ -717,7 +717,7 @@ speech/actions 是未提交预览，`progress_snapshot`/`done` 与 quiz `{ok:tru
 
 ## 16. 课堂视图的意图接口(2026-10-29)
 
-课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习和带来源的练习结果，发送介绍、重讲、录音、呈现题目及点击答案等意图。`interaction` 区分按住说话（原有）与自然对话（Realtime）；自然对话视图显示对话状态和暂停麦克风按钮，并在渲染后上报 `presented`。入口按开课前选择构造 LegacyClassroom 或 RealtimeClassroom，整堂课模式固定。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
+课堂页面通过 `voice/classroom.ts` 的 Classroom 接口订阅状态、字幕、卡片、阶段、保存中的练习、带来源的练习结果和统一的答题结果（`answer-result`，见 §18；目前只有 Realtime 发出，原有课堂不发），发送介绍、重讲、录音、呈现题目及点击答案等意图。`interaction` 区分按住说话（原有）与自然对话（Realtime）；自然对话视图显示对话状态和暂停麦克风按钮，并在渲染后上报 `presented`。入口按开课前选择构造 LegacyClassroom 或 RealtimeClassroom，整堂课模式固定。它组合既有 LessonController 和 PhasedLessonController，保留旧阶段策略。既有原始协议与 ASR/TTS 管线不变。
 
 LegacyClassroom 拥有旧重讲提示词、句子 ASR 匹配、候选句、静态题目话术、保存后重试计数及已清词不可重看的过滤。共享组件不读取 asr-final 来判跟读，不提交模型口头表扬为成绩，也不写 raw LLM 指令。选词仍按课程客观答案确定显示；保存及下一题决定来自控制器的 quiz-result。保存失败留在同题、重试不提前累计，旧模式第三次错误仍按原规则前进。已经通过的非连续题目在续课中被跳过；无待做练习时触发完成出口。
 
@@ -768,7 +768,7 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 - 课堂状态（阶段、屏幕、整门课剩余未过关的词、已过关、已过题）以 `[app] State:` system 消息追加到对话末尾（措辞：剩余词是整门课范围，本次只学约 4 到 6 个，不要赶进度，也不能静默放弃某个词；已过关指整门课至今），不再用 `session.update` 改指令（2026-10-30）。提示缓存只命中与上一次回应完全相同的前缀，指令和工具位于最前，改一次指令会让其后整段对话失去缓存（音频输入未命中 $32 对命中 $0.4／百万 token）；旧做法每次切卡和每次工具提交都会改指令。状态只在两次回应之间写、内容变化才写；老师说话中途的切屏等该回应结束（含被打断）后再写。指令和工具整通电话固定，指令声明“最近一条 State 为准”。
 - 上下文截断：会话配置 `truncation: { type: 'retention_ratio', retention_ratio: 0.8 }`（已对 `gpt-realtime-2.1` 实测接受）。默认 `auto` 在超窗后每轮只删刚好够的旧条目，前缀每轮都变、缓存每轮失效；改为超窗时一次删到 80%，之后较长时间不再截断。未设 `token_limits.post_instructions` 上限：一节课是否会撞窗、缓存命中率多少，要以真人课 `token_usage.realtime` 为准再决定。教学进度由应用持久化，被截掉的早期对话不影响进度。
 
-回执带 `revision`，浏览器按 revision 单调应用（选词结果既在 HTTP 响应也在 SSE 中出现，只生效一次）。选词由应用按课程答案判定后，把结果交给模型简短反馈；跟读句子由模型评估。题目示范在对应 metadata（`kind=present-quiz`、`quiz_id`）的回应播完（stopped/cleared，或无音频完成）后才解锁选项，最长 30 秒兜底。重讲按钮只在安静时可用；暂停会禁用麦克风轨道、清空未播音频并取消进行中的回应，恢复后继续。课堂完成后禁用麦克风，等告别播完（最长 20 秒）再结束通话，页面停在完成页。一次课结束（课程未完成）复用同一收尾流程（`sitting-ended` 事件触发 `finish`：禁麦、等告别播完、结束通话），`PhasedLessonView` 显示“今天先学到这里 / 进度已保存，下次继续”页，不显示课程完成；“继续上课”重建课堂，再次开课从断点续上。
+回执带 `revision`，浏览器按 revision 单调应用（选词结果既在 HTTP 响应也在 SSE 中出现，只生效一次）。每个已提交的作答，浏览器另发一次 `answer-result`（`cardId`、`via`: voice|choice、`result`、`mastered`、可选 `quizId`、`revision`），供表现层（单词大战）消费：学词阶段的课程卡评估按被评估的卡发出（首次跟读正确是 `correct`＋`mastered=false`，孩子不靠提示自己说出才是 `mastered=true`）；跟读题对应其句子卡，选图题对应正确答案卡且 `via=choice`，两者 `mastered` 恒为 false。练习题的流程控制仍只看 `quiz-result`。选词由应用按课程答案判定后，把结果交给模型简短反馈；跟读句子由模型评估。题目示范在对应 metadata（`kind=present-quiz`、`quiz_id`）的回应播完（stopped/cleared，或无音频完成）后才解锁选项，最长 30 秒兜底。重讲按钮只在安静时可用；暂停会禁用麦克风轨道、清空未播音频并取消进行中的回应，恢复后继续。课堂完成后禁用麦克风，等告别播完（最长 20 秒）再结束通话，页面停在完成页。一次课结束（课程未完成）复用同一收尾流程（`sitting-ended` 事件触发 `finish`：禁麦、等告别播完、结束通话），`PhasedLessonView` 显示“今天先学到这里 / 进度已保存，下次继续”页，不显示课程完成；“继续上课”重建课堂，再次开课从断点续上。
 
 `realtime/teaching.ts` 经既有 SQL helper 事务写 interaction、word_performance、lesson summary 与 course_progress，提交后才替换内存。correct累计尝试和正确，close/wrong只累计尝试，off_topic/silence不累计；model mastered写实际卡片完成状态，不编造cardCorrectCount或park字段；skip保留未完成。quiz correct写passedQuizIds。词卡评估要求阶段为 interactive 且是课程卡，目标与输入的对应由 NaturalConversation 保证（可能落后于刚提交的切卡）。工具续答的转写写回该输入的交互记录，不重奖。断点沿用旧序列化结构，两模式计数不互相伪造；星级仍基于真实已提交尝试比例。
 
@@ -777,6 +777,8 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 v6 additive migration为lesson_logs增加lesson_mode，旧行默认legacy。真实Realtime usage存token_usage.realtime，含模型、音频／文本／缓存明细和完整性标志。自然对话中回应由 VAD 自动创建，因此在 sideband 收到 `response.created` 时持久标记 pending，`response.done`（按 id 首次）写入 usage；通话结束时仍有未完成回应、或提供方异常断开，均标记不完整，不按零价格显示。记录和报告标明模式及模型评估，token价格估算与账户抵扣分开。
 
 生命周期：退出先释放本地资源（关数据通道、`pc.close()`、停麦克风轨道、断开 audio），再发小型 keepalive `end`，最后取消 SSE。服务端 end／SSE 取消／请求 abort 都会关闭 sideband 并调用 `POST /v1/realtime/calls/{id}/hangup`；仅关 sideband 不会结束 WebRTC 媒体。实测浏览器单独关 peer 也会在约 2.6 秒内结束提供方通话，此时 hangup 返回 404（已结束）。提供方断开、sideband 出错或空闲 10 分钟：标记用量不完整、向浏览器发错误、使两个注册表失效；前端释放麦克风并提示从已保存进度重新进入课堂。迟到的提供方事件在失效后不再处理。
+
+收藏与游戏开关（2026-11-10，单词大战的服务端部分）：回执的 `progress.collectedCardIds` 是这个孩子在这门课里答对过（或过关过）的全部词卡，按课程顺序。开课时由 `seedCollection`（`realtime/teaching.ts`）从答题历史推出（`word_performance` 中 correct>0 或 rc_cleared=1 的词、`interaction_logs` 中 mastered 的目标，两种课堂模式的历史都算），再并上当前已过关的卡；断点标记为已完成的课程视为全部收集。通话中词卡评估为 correct 或 mastered 时加入，close／wrong 和句子卡不加。历史记录从不删除，所以“从头复习”覆盖断点后收藏不减少，不改库结构，也不写进断点快照。`start` 请求可带 `game: true`（浏览器的单词大战开关）：仅此时把 `GAME_RULES`（`realtime/conversation.ts`）追加到固定指令末尾，告诉老师画面上有自动演出的战斗、可以把练习说成念咒语、孩子自己想起来的词威力更大，并明确不得为了游戏放宽 `mastered` 或多说话；整通电话不变，不影响提示缓存。战斗画面由浏览器根据 `answer-result` 和 `collectedCardIds` 自行演出，服务端不保存战斗状态。
 
 `/api/realtime` 严格校验loopback Origin和孩子／会话归属；请求体限 100KB（SDP ≤ 64KB），同一课堂只允许一次 connect。提供方 calls 请求 15 秒、sideband 握手 10 秒、hangup 10 秒。`VOICE_MOCK=true` 时 `transport='mock'`：不建 WebRTC，`realtime/mock.ts` 以与真实 sideband 相同的事件形状驱动同一 NaturalConversation，并由 `mock-speech` 动作（仅 mock 可用）模拟孩子说话；其固定判对只用于联调，不是模型质量证据。
 

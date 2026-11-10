@@ -25,6 +25,11 @@ export interface ConversationPort {
 export { MANUAL_TURN };
 /** One sitting (一次课) is one call. Only unpaused call time counts. Tune here after real lessons. */
 export const SITTING = { wrapUpMs: 10 * 60_000, goodbyeMs: 14 * 60_000 };
+/**
+ * Appended to the fixed instructions only when the browser started the call with the word battle on. The battle itself is
+ * drawn by the browser from committed answers; the teacher only needs to know it exists and must not bend assessment for it.
+ */
+export const GAME_RULES = `WORD BATTLE (game mode is on): next to the card, the screen plays a battle that the app runs by itself. A mischievous little monster (捣蛋鬼) has grabbed the word cards. Every time record_assessment saves a correct answer, your spell throws that word's picture at the monster and the picture lands in the child's collection; an answer saved with mastered=true (the child came up with the word unprompted) lands as a bigger spell; after a few hits the monster is tamed and joins your team, then a new one arrives. Nothing happens on screen for other results, and the child can never lose. You are 麻吉, the little wizard casting the spells: you may frame a cue as a spell in a few words (念对咒语就能打中它) and, now and then, tell the child that a word they remember by themselves is stronger magic. If the child talks about the monster, answer in one short sentence and return to the word. Do not narrate or predict the battle, do not promise a hit before a tool result says ok:true, never say the child missed or lost, and do not add turns or longer speech for the game. Every teaching and assessment rule above is unchanged: mastered keeps its strict meaning and must never be set to make a bigger spell.`;
 type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye' | 'commit';
 interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean; commitTarget?: PresentedTarget | null }
 interface ResponseState { input: string | null; kind: string; transcript: string; feedbackFor?: string }
@@ -67,7 +72,8 @@ export class NaturalConversation {
   // Diagnostic only (provider event log); nothing decides on it.
   private playing = false;
   private manual: boolean;
-  constructor(private session: Session, private port: ConversationPort, private timing = SITTING, options: { manualTurn?: boolean } = {}) { this.manual = Boolean(options.manualTurn); }
+  private game: boolean;
+  constructor(private session: Session, private port: ConversationPort, private timing = SITTING, options: { manualTurn?: boolean; game?: boolean } = {}) { this.manual = Boolean(options.manualTurn); this.game = Boolean(options.game); }
 
   /**
    * Initial session configuration for the provider call. Long-lived credentials never reach this payload.
@@ -570,6 +576,7 @@ Tools: show_card to teach, explain or review a card (when the child asks about a
 ORDER RULE: when a tool is needed, the tool call is the very first thing in your response, with no words before it: no preamble, no "let me listen", no "我先听一下/我来看看". Speak only after its result, then give the actual feedback directly. Never claim something was saved, mastered or completed before a result says ok:true; ok:false means nothing changed.
 NO BOOKKEEPING TALK: never tell the child about passing or not passing, counting, scores, attempts, saving, or that practice "doesn't count". Just teach and give the next cue.
 TOOL RECOVERY: Internal tool errors are not the child's mistake. Never mention saving, system errors, target IDs or tool details to the child. On an argument/target error, use expected_target to reassess the SAME existing audio and retry once before speaking; do not ask the child to repeat to fix bookkeeping. Do not invent an attempt when there is no associated input. If recovery fails, do not claim a pass; briefly ask a parent for help. After success, simply give learning feedback, without announcing that data was saved.
-Lesson state (phase, what is on screen, words not yet passed, passed words, passed questions) arrives in [app] State messages; the most recent one is current.`;
+Lesson state (phase, what is on screen, words not yet passed, passed words, passed questions) arrives in [app] State messages; the most recent one is current.${this.game ? `
+${GAME_RULES}` : ''}`;
   }
 }

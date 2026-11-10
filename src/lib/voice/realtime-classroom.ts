@@ -1,6 +1,6 @@
 'use client';
 
-import type { Classroom, ClassroomEvents, LessonStateName } from './classroom';
+import { findQuiz, type AnswerResult, type Classroom, type ClassroomEvents, type LessonStateName } from './classroom';
 import type { Course, PhaseName } from '@/types/course';
 import type { ResumeInfo } from '@/lib/lesson-protocol';
 import { parseResumeInfo, invalidProgressMessage } from '@/lib/lesson-protocol';
@@ -41,7 +41,7 @@ export class RealtimeClassroom implements Classroom {
   getState(): LessonStateName { return this.run?.state ?? 'idle'; }
   getResumeInfo(): ResumeInfo | null { return this.resume; }
 
-  async startLesson(learnerId: string, options?: { fresh?: boolean }): Promise<boolean> {
+  async startLesson(learnerId: string, options?: { fresh?: boolean; game?: boolean }): Promise<boolean> {
     const previous = this.endLesson();
     const run: Run = { abort: new AbortController(), learnerId, sessionId: null, transport: 'webrtc', state: 'greeting', phase: 'intro', cardId: '', revision: -1, resumeShown: false,
       stream: null, pc: null, channel: null, audio: null, paused: false, childSpeaking: false, playing: false, waitingReply: null,
@@ -212,6 +212,8 @@ export class RealtimeClassroom implements Classroom {
     const previousPhase = run.phase;
     run.phase = receipt.progress.currentPhase; run.cardId = receipt.cardId;
     this.emit('progress', receipt.progress);
+    const answer = this.answer(receipt);
+    if (answer) this.emit('answer-result', answer);
     if (previousPhase !== run.phase || (this.resume?.resumed && !run.resumeShown)) { run.resumeShown = true; this.emit('phase-change', run.phase); }
     if (run.cardId && run.phase !== 'reinforcement' && run.phase !== 'done') this.emit('actions', [{ tool: 'show_card', params: { card_id: run.cardId } }]);
     if (receipt.assessment?.heard) {
@@ -220,6 +222,21 @@ export class RealtimeClassroom implements Classroom {
     }
     if (receipt.quiz) this.emit('quiz-result', receipt.quiz);
     if (run.phase === 'done') void this.finish(run);
+  }
+  /** One answer stream for presentation layers: a spoken card, a repeat-after-me question or a picture choice, keyed by course card. */
+  private answer(receipt: Receipt): AnswerResult | null {
+    const assessed = receipt.assessment;
+    if (receipt.quiz) {
+      if (!receipt.quiz.ok) return null;
+      const quiz = findQuiz(this.course, receipt.quiz.quizId);
+      if (!quiz) return null;
+      const result = assessed?.result ?? (receipt.quiz.correct ? 'correct' : 'wrong');
+      return quiz.type === 'pick-word'
+        ? { cardId: quiz.correctCardId, via: 'choice', result, mastered: false, quizId: quiz.id, revision: receipt.revision }
+        : { cardId: quiz.cardId, via: 'voice', result, mastered: false, quizId: quiz.id, revision: receipt.revision };
+    }
+    if (!assessed || !this.course.cards.some((card) => card.id === assessed.target_id)) return null;
+    return { cardId: assessed.target_id, via: 'voice', result: assessed.result, mastered: assessed.mastered, revision: receipt.revision };
   }
   private provider(run: Run, event: ProviderEvent): void {
     const id = event.response?.id ?? event.response_id ?? '';

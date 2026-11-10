@@ -12,6 +12,23 @@ export interface QuizResult {
   source: 'legacy-asr' | 'application' | 'model';
   next: 'retry' | 'advance';
 }
+/**
+ * One committed answer about a course card, whatever the exercise: a spoken card in the teaching phase, a
+ * repeat-after-me question or a picture choice. Presentation layers (the word battle) consume this single stream;
+ * practice-question flow control still uses `quiz-result`.
+ */
+export interface AnswerResult {
+  /** The course card the answer was about: the assessed card, or the card a practice question targets. */
+  cardId: string;
+  via: 'voice' | 'choice';
+  result: 'correct' | 'close' | 'wrong' | 'off_topic' | 'silence';
+  /** Voice answers only: the child recalled or used the word unprompted (not an echo). Always false for questions. */
+  mastered: boolean;
+  /** Set when the answer was to a practice question. */
+  quizId?: string;
+  /** Receipt revision: unique per committed answer within one lesson run, usable as an animation key. */
+  revision: number;
+}
 export interface ClassroomEvents {
   state: LessonStateName;
   subtitle: { text: string; source: 'user' | 'ai'; provenance?: 'asr' | 'model'; messageId?: string };
@@ -26,6 +43,8 @@ export interface ClassroomEvents {
   'intro-active-card-change': string | null;
   'quiz-saving': boolean;
   'quiz-result': QuizResult;
+  /** Realtime only for now: every committed answer, emitted once. Push-to-talk does not emit it. */
+  'answer-result': AnswerResult;
   /** Realtime only: this sitting is over but the course is not complete; progress is saved. */
   'sitting-ended': undefined;
 }
@@ -38,7 +57,8 @@ export interface Classroom {
   off<K extends keyof ClassroomEvents>(event: K, listener: (data: ClassroomEvents[K]) => void): void;
   getState(): LessonStateName;
   getResumeInfo(): ResumeInfo | null;
-  startLesson(learnerId: string, options?: { fresh?: boolean }): Promise<boolean>;
+  /** `game` (conversation mode only): the word battle is on, so the teacher is told the game rules for this call. */
+  startLesson(learnerId: string, options?: { fresh?: boolean; game?: boolean }): Promise<boolean>;
   endLesson(): Promise<void>;
   startListening(): Promise<void>;
   stopListening(): Promise<void>;

@@ -13,7 +13,7 @@ import { sessionStore, type Session } from '@/lib/agent/session-store';
 import { MockRealtimeCall } from './mock';
 import { openAiCallFactory, type CallFactory, type RealtimeCall } from './call';
 import { NaturalConversation, SITTING, type ProviderMessage } from './conversation';
-import { markUsageIncomplete, requireOwner, type TeachingReceipt } from './teaching';
+import { markUsageIncomplete, requireOwner, seedCollection, type TeachingReceipt } from './teaching';
 
 const log = createLogger('realtime-classroom');
 const IDLE_MS = 10 * 60_000;
@@ -41,7 +41,7 @@ export class RealtimeClassroomSession {
   private connecting = false;
   private idle: ReturnType<typeof setTimeout> | null = null;
   private expired = false;
-  constructor(courseId: string, learnerId: string, fresh = false, private callFactory?: CallFactory) {
+  constructor(courseId: string, learnerId: string, fresh = false, private callFactory?: CallFactory, game = false) {
     const course = getCourseById(courseId);
     if (!course || !getLearner(learnerId)) throw new Error('NOT_FOUND');
     const progress = !fresh ? getCourseProgress(courseId, learnerId) : undefined;
@@ -51,6 +51,7 @@ export class RealtimeClassroomSession {
       const card = course.cards.find((item) => item.kind === 'word');
       this.session.memory.currentCardId = card?.id ?? ''; this.session.memory.currentWord = card?.english ?? '';
     }
+    seedCollection(this.session, Boolean(progress?.completed));
     this.resume = resumed ? { resumed: true, phase: this.session.currentPhase, clearedCardIds: [...this.session.memory.clearedCardIds],
       passedQuizIds: [...this.session.memory.passedQuizIds], resumeCardId: resolveResumeCardId(course, this.session.memory) } : null;
     if (this.resume?.resumeCardId) {
@@ -64,7 +65,7 @@ export class RealtimeClassroomSession {
       publish: (receipt) => this.emit({ type: 'receipt', receipt }),
       sittingEnded: () => this.emit({ type: 'sitting-ended' }),
       clearOutput: () => this.emit({ type: 'clear-output' }),
-    }, sittingTiming(), { manualTurn: this.turnMode === 'manual' });
+    }, sittingTiming(), { manualTurn: this.turnMode === 'manual', game });
     this.session.lifetime.signal.addEventListener('abort', () => this.close(), { once: true });
     this.armIdle();
   }

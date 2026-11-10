@@ -240,6 +240,23 @@ export function getWordPerformanceByCourse(db: Database, learnerId: string): Wor
     .all(learnerId) as WordPerfByCourseRow[];
 }
 
+/**
+ * Word-battle collection source: what this learner ever got right in this course, across every lesson and both
+ * classroom modes. Lesson history is never deleted (a fresh review only overwrites the breakpoint), so the set only grows.
+ */
+export function getCollectedHistory(courseId: string, learnerId: string): { words: string[]; masteredTargetIds: string[] } {
+  const db = getDb();
+  const words = db.prepare(
+    `SELECT DISTINCT wp.word AS word FROM word_performance wp JOIN lesson_logs ll ON ll.id = wp.lesson_id
+     WHERE ll.course_id = ? AND ll.learner_id = ? AND (wp.correct > 0 OR wp.rc_cleared = 1)`,
+  ).all(courseId, learnerId) as Array<{ word: string }>;
+  const mastered = db.prepare(
+    `SELECT DISTINCT json_extract(il.model_calls, '$.assessment.target_id') AS id FROM interaction_logs il JOIN lesson_logs ll ON ll.id = il.lesson_id
+     WHERE ll.course_id = ? AND ll.learner_id = ? AND json_extract(il.model_calls, '$.assessment.mastered') = 1`,
+  ).all(courseId, learnerId) as Array<{ id: string | null }>;
+  return { words: words.map((row) => row.word), masteredTargetIds: mastered.flatMap((row) => row.id ? [row.id] : []) };
+}
+
 /** Feedback can complete after its assessment transaction; never changes its award. */
 export function updateRealtimeFeedback(lessonId: string, turnId: string, text: string): void {
   getDb().prepare("UPDATE interaction_logs SET ai_response = ? WHERE lesson_id = ? AND json_extract(model_calls, '$.assessment.turnId') = ?").run(text, lessonId, turnId);

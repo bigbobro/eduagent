@@ -58,6 +58,16 @@ describe('Realtime classroom call ownership', () => {
   });
 });
 
+it('starts a word-battle call with the game rules and a seeded collection', async () => {
+  const provider = { options: null as CallOptions | null };
+  const classroom = new RealtimeClassroomSession('food', 'test-learner', true, async (options) => {
+    provider.options = options; return { answer: 'v=0 answer', call: { send: () => {}, close: () => {} } };
+  }, true);
+  active.push(classroom); registerClassroom(classroom);
+  expect(Array.isArray(classroom.session.collectedCardIds)).toBe(true);
+  await classroom.connect('v=0 offer', () => {});
+  expect((provider.options?.session as { instructions: string }).instructions).toContain('WORD BATTLE');
+});
 describe('sitting end push', () => {
   afterEach(() => { vi.useRealTimers(); delete (globalThis as { __eduagentTestSittingUsed?: boolean }).__eduagentTestSittingUsed; });
   it('tells the browser the sitting ended with the test timing, and only for the first call', async () => {

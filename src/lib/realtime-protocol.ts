@@ -17,7 +17,7 @@ export type PresentedTarget = z.infer<typeof presentedTargetSchema>;
 
 const owner = { sessionId: z.string().min(1), learnerId: z.string().min(1) };
 export const realtimeRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('start'), learnerId: z.string().min(1), courseId: z.string().min(1), fresh: z.boolean().optional() }),
+  z.object({ action: z.literal('start'), learnerId: z.string().min(1), courseId: z.string().min(1), fresh: z.boolean().optional(), game: z.boolean().optional() }),
   z.object({ action: z.literal('end'), ...owner }),
   // WebRTC offer; the mock transport has no media peer and sends null.
   z.object({ action: z.literal('connect'), ...owner, sdp: z.string().min(1).max(64_000).nullable() }),
@@ -47,7 +47,7 @@ export type RealtimeUsage = z.infer<typeof realtimeUsageSchema>;
 
 export const receiptSchema = z.object({
   ok: z.boolean(), error: z.string().optional(), cardId: z.string(), revision: z.number().int().nonnegative(),
-  progress: z.object({ clearedCardIds: z.array(z.string()), totalAttempts: z.number().int().nonnegative(), currentPhase: lessonPhaseSchema }),
+  progress: z.object({ clearedCardIds: z.array(z.string()), totalAttempts: z.number().int().nonnegative(), currentPhase: lessonPhaseSchema, collectedCardIds: z.array(z.string()).optional() }),
   quiz: z.object({ quizId: z.string(), ok: z.boolean(), correct: z.boolean(), source: z.enum(['legacy-asr', 'application', 'model']), next: z.enum(['retry', 'advance']) }).optional(),
   assessment: realtimeAssessmentSchema.optional(),
 });

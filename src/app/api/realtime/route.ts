@@ -26,9 +26,9 @@ export async function POST(req: Request) {
   try {
     if (body.action === 'start') {
       if (!isRealtimeConfigured()) return NextResponse.json({ code: 'NOT_CONFIGURED', error: '请先配置 OpenAI API Key。' }, { status: 503 });
-      const classroom = new RealtimeClassroomSession(body.courseId, body.learnerId, body.fresh);
+      const classroom = new RealtimeClassroomSession(body.courseId, body.learnerId, body.fresh, undefined, body.game === true);
       registerClassroom(classroom);
-      log.info('started', { sessionId: classroom.session.id, model: getConfig().realtimeModel, transport: classroom.transport });
+      log.info('started', { sessionId: classroom.session.id, model: getConfig().realtimeModel, transport: classroom.transport, game: body.game === true });
       return NextResponse.json({ sessionId: classroom.session.id, resume: classroom.resume, receipt: snapshot(classroom.session), transport: classroom.transport, turnMode: getRealtimeTurnMode() });
     }
     requireOwner(body.sessionId, body.learnerId);

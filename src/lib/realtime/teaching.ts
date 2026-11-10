@@ -2,7 +2,7 @@ import { getSession } from '@/lib/agent/session';
 import type { Session } from '@/lib/agent/session-store';
 import { serializeProgress, isCourseComplete } from '@/lib/agent/course-progress';
 import { getDb } from '@/lib/db';
-import { insertInteraction, touchLessonLog, updateRealtimeFeedback, upsertCourseProgress, upsertWordPerformance } from '@/lib/db/queries';
+import { getCollectedHistory, insertInteraction, touchLessonLog, updateRealtimeFeedback, upsertCourseProgress, upsertWordPerformance } from '@/lib/db/queries';
 import { realtimeAssessmentSchema, type RealtimeAssessment, type RealtimeUsage } from '@/lib/realtime-protocol';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import type { PhaseName } from '@/types/course';
@@ -31,7 +31,18 @@ export function snapshot(session: Session): TeachingReceipt {
     clearedCardIds: [...session.memory.clearedCardIds],
     totalAttempts: Array.from(session.memory.wordPerformance.values()).reduce((n, word) => n + word.attempts, 0),
     currentPhase: session.currentPhase,
+    collectedCardIds: [...(session.collectedCardIds ?? [])],
   } };
+}
+/**
+ * Seeds the word-battle collection for a new call: every word card this child ever answered correctly (or passed) in this
+ * course, in course order. A completed course counts as fully collected even if its breakpoint is about to be overwritten.
+ */
+export function seedCollection(session: Session, completedBefore: boolean): void {
+  const history = getCollectedHistory(session.courseId, session.learnerId);
+  const words = new Set(history.words); const ids = new Set([...history.masteredTargetIds, ...session.memory.clearedCardIds]);
+  session.collectedCardIds = session.course.cards
+    .filter((card) => card.kind === 'word' && (completedBefore || words.has(card.english) || ids.has(card.id))).map((card) => card.id);
 }
 function persist(session: Session, memory: Session['memory'], phase = session.currentPhase) {
   upsertCourseProgress(session.courseId, serializeProgress(memory), phase, isCourseComplete(session.course, memory), session.learnerId);
@@ -101,6 +112,9 @@ export function submitAssessment(session: Session, turn: InputTurn, raw: unknown
     persist(session, memory, phase);
   })();
   session.memory = memory; session.currentPhase = phase; session.lessonInteractionCount++; session.revision++;
+  if (card?.kind === 'word' && (assessment.result === 'correct' || assessment.mastered) && !session.collectedCardIds?.includes(card.id)) {
+    session.collectedCardIds = [...(session.collectedCardIds ?? []), card.id];
+  }
   const receipt = snapshot(session);
   receipt.assessment = assessment;
   if (quiz) receipt.quiz = { quizId: quiz.id, ok: true, correct: assessment.result === 'correct', source: 'model',

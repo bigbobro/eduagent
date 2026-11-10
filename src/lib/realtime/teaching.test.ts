@@ -3,8 +3,9 @@ import { foodCourse } from '@/data/courses/food';
 import { createSession, createSessionFromSnapshot, endSession, getSession } from '@/lib/agent/session';
 import { getDb } from '@/lib/db';
 import { getCourseProgress } from '@/lib/db/queries';
+import { createLearner } from '@/lib/db/learners';
 import { sessionStore, type Session } from '@/lib/agent/session-store';
-import { changePhase, requireOwner, submitAssessment, submitPick, type InputTurn } from './teaching';
+import { changePhase, requireOwner, seedCollection, snapshot, submitAssessment, submitPick, type InputTurn } from './teaching';
 
 let session: Session;
 beforeEach(() => { session = createSession(foodCourse, 'test-learner', 'realtime'); changePhase(session, 'interactive'); session.memory.currentCardId = 'apple'; });
@@ -64,6 +65,40 @@ describe('Realtime teaching transactions', () => {
   });
 });
 
+describe('word collection (never shrinks)', () => {
+  const turn = (id: string, targetId: string): InputTurn => ({ id, targetId, kind: 'audio' });
+  const child = (name: string) => createLearner(name).id;
+  it('collects a word on its first correct answer or on mastery, not on close or wrong, and never a sentence', () => {
+    const learner = child('collector-a'); const own = createSession(foodCourse, learner, 'realtime'); changePhase(own, 'interactive');
+    seedCollection(own, false);
+    expect(snapshot(own).progress.collectedCardIds).toEqual([]);
+    own.memory.currentCardId = 'apple';
+    expect(submitAssessment(own, turn('t1', 'apple'), { ...assessment, result: 'close', mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual([]);
+    expect(submitAssessment(own, turn('t2', 'apple'), { ...assessment, mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual(['apple']);
+    expect(submitAssessment(own, turn('t3', 'apple'), { ...assessment, mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual(['apple']);
+    own.memory.currentCardId = 'milk';
+    expect(submitAssessment(own, turn('t4', 'milk'), { ...assessment, target_id: 'milk', result: 'close', mastered: true, next_card_id: null }).progress.collectedCardIds).toEqual(['apple', 'milk']);
+    own.memory.currentCardId = 'sentence_apple';
+    expect(submitAssessment(own, turn('t5', 'sentence_apple'), { ...assessment, target_id: 'sentence_apple', mastered: false, next_action: 'retry', next_card_id: null }).progress.collectedCardIds).toEqual(['apple', 'milk']);
+    own.lifetime.abort(); sessionStore.delete(own.id);
+  });
+  it('keeps the collection when a later lesson starts over, and treats a completed course as fully collected', () => {
+    const learner = child('collector-b'); const first = createSession(foodCourse, learner, 'realtime'); changePhase(first, 'interactive');
+    seedCollection(first, false); first.memory.currentCardId = 'egg';
+    submitAssessment(first, turn('t1', 'egg'), { ...assessment, target_id: 'egg', mastered: false, next_action: 'retry', next_card_id: null });
+    first.memory.currentCardId = 'milk';
+    submitAssessment(first, turn('t2', 'milk'), { ...assessment, target_id: 'milk', result: 'close', mastered: true, next_card_id: null });
+    // A fresh review: new session, empty memory, breakpoint about to be overwritten. History still knows both words, in course order.
+    const review = createSession(foodCourse, learner, 'realtime'); seedCollection(review, false);
+    expect(review.memory.clearedCardIds).toEqual([]);
+    expect(snapshot(review).progress.collectedCardIds).toEqual(['milk', 'egg']);
+    const other = createSession(foodCourse, child('collector-c'), 'realtime'); seedCollection(other, false);
+    expect(snapshot(other).progress.collectedCardIds).toEqual([]); // another child's history does not leak
+    seedCollection(other, true);
+    expect(snapshot(other).progress.collectedCardIds).toEqual(foodCourse.cards.filter((c) => c.kind === 'word').map((c) => c.id));
+    for (const s of [first, review, other]) { s.lifetime.abort(); sessionStore.delete(s.id); }
+  });
+});
 it('rejects contradictory skip and mastery fields without awarding the input', () => {
   const turn = input();
   expect(() => submitAssessment(session, turn, { ...assessment, next_action: 'skip', mastered: true })).toThrow('INVALID_ASSESSMENT');

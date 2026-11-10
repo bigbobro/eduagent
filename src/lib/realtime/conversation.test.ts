@@ -8,7 +8,7 @@ import { summarizeRealtimeUsage } from './usage';
 import { changePhase, type TeachingReceipt } from './teaching';
 import { getCourseProgress } from '@/lib/db/queries';
 import { isResumableProgress } from '@/lib/agent/course-progress';
-import { MANUAL_TURN, NaturalConversation, SITTING, type ProviderMessage } from './conversation';
+import { GAME_RULES, MANUAL_TURN, NaturalConversation, SITTING, type ProviderMessage } from './conversation';
 
 const usage = { input_tokens: 5, output_tokens: 5, input_token_details: { text_tokens: 5, audio_tokens: 0, cached_tokens: 0 }, output_token_details: { text_tokens: 5, audio_tokens: 0 } };
 let session: Session; let sent: Array<Record<string, any>>; let published: TeachingReceipt[]; let conversation: NaturalConversation;
@@ -425,6 +425,15 @@ describe('experimental manual-turn mode (server VAD off)', () => {
   const committedItem = (item: string) => feed({ type: 'input_audio_buffer.committed', item_id: item });
   const endSpeech = () => { conversation.childSpeech('end'); vi.advanceTimersByTime(MANUAL_TURN.commitAfterSilenceMs); };
 
+  it('tells the teacher the word-battle rules only when the call started with the game on, in the fixed instructions', () => {
+    const text = (c: NaturalConversation) => (c.sessionConfig('m') as { instructions: string }).instructions;
+    const port = { send: () => {}, publish: () => {}, sittingEnded: () => {} };
+    expect(text(new NaturalConversation(session, port))).not.toContain('WORD BATTLE');
+    const game = text(new NaturalConversation(session, port, undefined, { game: true }));
+    expect(game).toContain(GAME_RULES);
+    expect(game).toContain('must never be set to make a bigger spell');
+    expect(game.startsWith(text(new NaturalConversation(session, port)))).toBe(true); // appended, the rest is untouched
+  });
   it('turns provider VAD off only in manual mode', () => {
     const config = (c: NaturalConversation) => (c.sessionConfig('m') as { audio: { input: { turn_detection: unknown } } }).audio.input.turn_detection;
     expect(config(conversation)).toBeNull();

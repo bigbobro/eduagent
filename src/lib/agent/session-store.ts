@@ -14,6 +14,8 @@ export interface Session {
   revision: number;
   startTime: Date;
   currentPhase: PhaseName;
+  /** Realtime only: word cards ever answered correctly in this course by this learner, seeded from history at start. */
+  collectedCardIds?: string[];
 }
 
 export interface SessionStore {

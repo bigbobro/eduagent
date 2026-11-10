@@ -137,6 +137,36 @@ describe('natural Realtime classroom', () => {
     await vi.waitFor(() => expect(errors).toEqual([expect.objectContaining({ code: 'SESSION_EXPIRED' })]));
     await vi.waitFor(() => expect(tracks[0].stop).toHaveBeenCalled());
   });
+  it('reports every committed answer once on one stream: spoken cards, repeat questions and picture choices', async () => {
+    const { classroom } = await started();
+    const answers: unknown[] = []; classroom.on('answer-result', (r) => answers.push(r));
+    const quizzes = vi.fn(); classroom.on('quiz-result', quizzes);
+    const assessment = (target_id: string, result: string, mastered: boolean) => ({ assessment: { target_id, result, heard: 'x', evidence: 'x', mastered, next_action: 'retry', next_card_id: null, next_phase: null } });
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'apple', assessment('apple', 'correct', false)) });
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'apple', assessment('apple', 'correct', false)) }); // replayed revision
+    push({ type: 'receipt', receipt: receipt(4, 'interactive', 'milk', assessment('apple', 'correct', true)) }); // card switched in the same receipt
+    push({ type: 'receipt', receipt: receipt(5, 'interactive', 'milk', assessment('milk', 'close', false)) });
+    push({ type: 'receipt', receipt: receipt(6, 'reinforcement', 'apple', { ...assessment('q5', 'close', false), quiz: { quizId: 'q5', ok: true, correct: false, source: 'model', next: 'retry' } }) });
+    push({ type: 'receipt', receipt: receipt(7, 'reinforcement', 'apple', { quiz: { quizId: 'q2', ok: true, correct: true, source: 'application', next: 'advance' } }) });
+    push({ type: 'receipt', receipt: receipt(8, 'reinforcement', 'apple', { quiz: { quizId: 'q1', ok: true, correct: false, source: 'application', next: 'retry' } }) });
+    await vi.waitFor(() => expect(answers).toHaveLength(6));
+    expect(answers).toEqual([
+      { cardId: 'apple', via: 'voice', result: 'correct', mastered: false, revision: 3 },
+      { cardId: 'apple', via: 'voice', result: 'correct', mastered: true, revision: 4 },
+      { cardId: 'milk', via: 'voice', result: 'close', mastered: false, revision: 5 },
+      { cardId: 'sentence_apple', via: 'voice', result: 'close', mastered: false, quizId: 'q5', revision: 6 },
+      { cardId: 'milk', via: 'choice', result: 'correct', mastered: false, quizId: 'q2', revision: 7 },
+      { cardId: 'apple', via: 'choice', result: 'wrong', mastered: false, quizId: 'q1', revision: 8 },
+    ]);
+    expect(quizzes).toHaveBeenCalledTimes(3); // practice flow control is unchanged
+    await classroom.endLesson();
+  });
+  it('passes the word-battle switch to the server when the lesson starts', async () => {
+    const classroom = new RealtimeClassroom(foodCourse);
+    expect(await classroom.startLesson('child', { game: true })).toBe(true);
+    expect(bodies.find((b) => b.action === 'start')).toMatchObject({ game: true });
+    await classroom.endLesson();
+  });
   it('applies a picture choice once and ends the call after the goodbye at completion', async () => {
     const { classroom } = await started();
     const results = vi.fn(); classroom.on('quiz-result', results);
