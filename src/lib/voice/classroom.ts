@@ -60,7 +60,7 @@ export interface Classroom {
   getState(): LessonStateName;
   getResumeInfo(): ResumeInfo | null;
   /** `game` (conversation mode only): the word battle is on, so the teacher is told the game rules for this call. */
-  startLesson(learnerId: string, options?: { fresh?: boolean; game?: boolean }): Promise<boolean>;
+  startLesson(learnerId: string, options?: { fresh?: boolean; game?: boolean; speaker?: boolean }): Promise<boolean>;
   endLesson(): Promise<void>;
   startListening(): Promise<void>;
   stopListening(): Promise<void>;

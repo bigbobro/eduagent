@@ -9,6 +9,12 @@ export const realtimeAssessmentSchema = z.object({
   next_card_id: z.string().nullable(), next_phase: lessonPhaseSchema.nullable(),
 });
 export type RealtimeAssessment = z.infer<typeof realtimeAssessmentSchema>;
+/** What the silent assessor response reports about one child utterance; the app adds the target bound at speech start. */
+export const assessorReportSchema = z.object({
+  result: z.enum(['correct', 'close', 'wrong', 'not_attempt']),
+  heard: z.string().max(1000), evidence: z.string().max(1000),
+  mastered: z.boolean(), next_action: z.enum(['retry', 'review', 'advance', 'skip']),
+});
 export const showCardSchema = z.object({ card_id: z.string().min(1) });
 export const startPracticeSchema = z.object({});
 /** What the browser actually rendered; speech is bound to it when the provider detects speech start. */
@@ -17,7 +23,7 @@ export type PresentedTarget = z.infer<typeof presentedTargetSchema>;
 
 const owner = { sessionId: z.string().min(1), learnerId: z.string().min(1) };
 export const realtimeRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('start'), learnerId: z.string().min(1), courseId: z.string().min(1), fresh: z.boolean().optional(), game: z.boolean().optional() }),
+  z.object({ action: z.literal('start'), learnerId: z.string().min(1), courseId: z.string().min(1), fresh: z.boolean().optional(), game: z.boolean().optional(), speaker: z.boolean().optional() }),
   z.object({ action: z.literal('end'), ...owner }),
   // WebRTC offer; the mock transport has no media peer and sends null.
   z.object({ action: z.literal('connect'), ...owner, sdp: z.string().min(1).max(64_000).nullable() }),

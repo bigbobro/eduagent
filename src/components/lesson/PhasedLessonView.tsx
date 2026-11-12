@@ -7,6 +7,7 @@ import { llmFailureNeedsSettings } from '@/lib/llm-errors';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import type { Classroom } from '@/lib/voice/classroom';
 import { isWordBattleOn, rememberEscapedMonster } from '@/lib/word-battle-pref';
+import { isSpeakerModeOn } from '@/lib/speaker-mode-pref';
 import { BattleSummary } from './battle/BattleSummary';
 import type { BattleState } from './battle/battle-state';
 import { RealtimeClassroom } from '@/lib/voice/realtime-classroom';
@@ -154,7 +155,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     const phased = v2Ref.current;
     const game = mode === 'realtime' && isWordBattleOn();
     setBattle(game); setFighting(false); setCollectedCardIds([]); setSubtitlesOpen(false); setBattleEnd(null); battleNow.current = null;
-    const startedOk = await phased?.startLesson(learnerId, game ? { ...(fresh ? { fresh: true } : {}), game: true } : fresh ? { fresh: true } : undefined);
+    const base = game ? { ...(fresh ? { fresh: true } : {}), game: true } : fresh ? { fresh: true } : undefined;
+    const startedOk = await phased?.startLesson(learnerId, mode === 'realtime' ? { ...base, speaker: isSpeakerModeOn() } : base);
     if (v2Ref.current !== phased) return;
     if (startedOk === false) {
       setStarted(false);

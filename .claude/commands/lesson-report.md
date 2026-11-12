@@ -16,6 +16,14 @@ argument-hint: "[session-id]"
 5. **Write 工具写文件**;在对话里展开报告全文
 6. **主动问**:"要不要拆成 TODO 加到 docs/TODO.md?"
 
+## Realtime 课(桌面 App 的真人课)
+
+真人课在桌面 App 里上,数据在 `~/Library/Application Support/EduAgent/`,不在仓库开发库。不要直接读正在用的库:
+
+1. 把 `eduagent.db*`(含 `-wal`/`-shm`)和 `logs/server.log` 复制到一个临时目录。
+2. 用副本跑脚本:`DATABASE_PATH=<副本>/eduagent.db pnpm -s tsx scripts/lesson-report-data.ts <session-id>`。
+3. Realtime 课没有 ASR,下面"问题诊断"里的"ASR 误识"换成读 `responses` / `responseStats`:被取消的回应(尤其 `emptyCancelled`)、`assessments`(静默评估回应,即 `kind` 为 `assess` 的行:`total` 总数、`failed` 失败数(未完成或报告解析不出结果,会重试一次),`results` 里 `correct` / `close` / `wrong` / `not_attempt` 各几次;老课没有这类行,全为 0。`total` / `completed` / `cancelled` / `emptyCancelled` 只统计老师回应,不含评估行,可与旧课对比;评估行仍在 `responses` 列表里)、`nudges`(沉默提醒次数)、回复等待 `replyMs`(中位数、p90、最大值);再对照副本 `server.log` 里该 session 的 `child speech`、`response ended early`、`reply wait` 行。
+
 ## 报告模板(必须包含这些 section)
 
 ### 标题与基本信息

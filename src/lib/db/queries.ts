@@ -261,3 +261,14 @@ export function getCollectedHistory(courseId: string, learnerId: string): { word
 export function updateRealtimeFeedback(lessonId: string, turnId: string, text: string): void {
   getDb().prepare("UPDATE interaction_logs SET ai_response = ? WHERE lesson_id = ? AND json_extract(model_calls, '$.assessment.turnId') = ?").run(text, lessonId, turnId);
 }
+
+export interface RealtimeResponseRow { kind: string; status: string; text: string; tools: string; replyMs?: number | null }
+export interface RealtimeResponseRecord { id: number; timestamp: string; kind: string; status: string; text: string; tools: string; reply_ms: number | null }
+/** One row per provider response: what the teacher said, which tools it called, how long the child waited. Teacher text only. */
+export function insertRealtimeResponse(lessonId: string, row: RealtimeResponseRow): void {
+  getDb().prepare('INSERT INTO realtime_responses (lesson_id, timestamp, kind, status, text, tools, reply_ms) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(lessonId, new Date().toISOString(), row.kind, row.status, row.text, row.tools, row.replyMs ?? null);
+}
+export function getRealtimeResponses(lessonId: string): RealtimeResponseRecord[] {
+  return getDb().prepare('SELECT id, timestamp, kind, status, text, tools, reply_ms FROM realtime_responses WHERE lesson_id = ? ORDER BY id').all(lessonId) as RealtimeResponseRecord[];
+}

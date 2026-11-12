@@ -69,6 +69,68 @@ describe('natural Realtime classroom', () => {
     await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
     expect(tracks).toHaveLength(1); await classroom.endLesson();
   });
+  describe('speaker mode', () => {
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    async function speakerStarted(speaker?: boolean) {
+      const classroom = new RealtimeClassroom(foodCourse);
+      expect(await classroom.startLesson('child', speaker === undefined ? undefined : { speaker })).toBe(true);
+      return classroom;
+    }
+    it('sends speaker in the start request', async () => {
+      const classroom = await speakerStarted(true);
+      expect(bodies.find((b) => b.action === 'start')?.speaker).toBe(true);
+      await classroom.endLesson();
+    });
+    it('closes the mic while the teacher generates and plays, and reopens it 500 ms after idle', async () => {
+      const classroom = await speakerStarted(true);
+      expect(tracks[0].enabled).toBe(true);
+      provider({ type: 'response.created', response: { id: 'r1', metadata: null } });
+      await vi.waitFor(() => expect(tracks[0].enabled).toBe(false));
+      provider({ type: 'output_audio_buffer.started', response_id: 'r1' });
+      provider({ type: 'response.done', response: { id: 'r1', status: 'completed' } });
+      await vi.waitFor(() => expect(classroom.getState()).toBe('speaking'));
+      await sleep(600); expect(tracks[0].enabled).toBe(false); // still playing: no release timer yet
+      provider({ type: 'output_audio_buffer.stopped', response_id: 'r1' });
+      await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
+      expect(tracks[0].enabled).toBe(false);
+      await sleep(300); expect(tracks[0].enabled).toBe(false);
+      await vi.waitFor(() => expect(tracks[0].enabled).toBe(true));
+      await classroom.endLesson();
+    });
+    it('keeps the mic closed when a new response starts inside the release window', async () => {
+      const classroom = await speakerStarted(true);
+      provider({ type: 'response.created', response: { id: 'r1', metadata: null } });
+      provider({ type: 'response.done', response: { id: 'r1', status: 'completed' } });
+      await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
+      await sleep(300);
+      provider({ type: 'response.created', response: { id: 'r2', metadata: null } });
+      await vi.waitFor(() => expect(classroom.getState()).toBe('thinking'));
+      await sleep(600); expect(tracks[0].enabled).toBe(false);
+      provider({ type: 'response.done', response: { id: 'r2', status: 'completed' } });
+      await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
+      await vi.waitFor(() => expect(tracks[0].enabled).toBe(true));
+      await classroom.endLesson();
+    });
+    it('stays closed while paused after the teacher is idle, and unpausing reopens it', async () => {
+      const classroom = await speakerStarted(true);
+      provider({ type: 'response.created', response: { id: 'r1', metadata: null } });
+      provider({ type: 'response.done', response: { id: 'r1', status: 'completed' } });
+      await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
+      await classroom.setPaused!(true);
+      await sleep(600); expect(tracks[0].enabled).toBe(false); // release timer fired, still paused
+      await classroom.setPaused!(false);
+      expect(tracks[0].enabled).toBe(true);
+      await classroom.endLesson();
+    });
+    it.each([[false], [undefined]])('keeps the mic open while the teacher speaks when speaker is %s', async (speaker) => {
+      const classroom = await speakerStarted(speaker);
+      provider({ type: 'response.created', response: { id: 'r1', metadata: null } });
+      provider({ type: 'output_audio_buffer.started', response_id: 'r1' });
+      await vi.waitFor(() => expect(classroom.getState()).toBe('speaking'));
+      expect(tracks[0].enabled).toBe(true);
+      await classroom.endLesson();
+    });
+  });
   it('shows committed card switches once in order and ignores a stale or repeated revision', async () => {
     const { classroom } = await started();
     const shown: string[] = []; classroom.on('actions', (actions) => shown.push(actions[0].params.card_id));

@@ -1,4 +1,8 @@
 /// <reference types="node" />
+// Usage: DATABASE_PATH=<db copy> pnpm -s tsx scripts/lesson-report-data.ts [sessionId]
+// Without DATABASE_PATH it reads the repo dev DB (./db/eduagent.db). Lessons played in the desktop App live in
+// ~/Library/Application Support/EduAgent/eduagent.db: pass a COPY of that file (with its -wal/-shm) via DATABASE_PATH,
+// never the live file.
 import path from 'path';
 import { summarizeRealtimeUsage } from '../src/lib/realtime/usage';
 import fs from 'fs';
@@ -46,7 +50,22 @@ export interface ReportData {
     ai: string;
     actions: unknown[];
   }>;
+  responses: ResponseRow[];
+  responseStats: ResponseStats;
   eval: EvalScorecard;
+}
+
+export interface ResponseRow { n: number; ts: string; kind: string; status: string; text: string; tools: string; replyMs: number | null }
+export interface ResponseStats {
+  /** `total`, `completed`, `cancelled` and `emptyCancelled` count teacher/app responses only: the silent assessor rows (kind `assess`) are excluded, so they stay comparable with earlier lessons. */
+  total: number; completed: number; cancelled: number;
+  /** Cancelled with no text and no tools: the child interrupted before the teacher said anything. */
+  emptyCancelled: number;
+  /** The silent assessor rows (kind `assess`, one or two per child utterance). `failed` = not completed, or the stored report does not parse to a known `result`; `results` counts the parsed ones. All zeros for lessons recorded before the assessor existed. */
+  assessments: { total: number; failed: number; results: { correct: number; close: number; wrong: number; not_attempt: number } };
+  /** Silence nudges the app made (rows of kind `nudge`). */
+  nudges: number;
+  replyMs: { count: number; median: number | null; p90: number | null; max: number | null };
 }
 
 export interface CourseWord {
@@ -249,6 +268,7 @@ export async function buildReport(
     actions: safeJsonParse(r.actions, []) as unknown[],
   }));
 
+  const responses = readResponses(db, lesson.id);
   const usage = parseTokenUsage(lesson.token_usage);
   const mode = lesson.lesson_mode === 'realtime' ? 'realtime' : 'legacy';
   const realtime = mode === 'realtime' ? summarizeRealtimeUsage((safeJsonParse(lesson.token_usage, {}) as { realtime?: unknown }).realtime) : undefined;
@@ -308,6 +328,8 @@ export async function buildReport(
       ...anomalies,
     },
     interactions,
+    responses,
+    responseStats: buildResponseStats(responses),
     eval: buildEvalScorecard({
       lesson,
       session,
@@ -319,6 +341,41 @@ export async function buildReport(
       wordCards,
       wordPerformanceRows,
     }),
+  };
+}
+
+function readResponses(db: Database, lessonId: string): ResponseRow[] {
+  try {
+    const rows = db.prepare('SELECT timestamp, kind, status, text, tools, reply_ms FROM realtime_responses WHERE lesson_id = ? ORDER BY id ASC').all(lessonId) as
+      Array<{ timestamp: string; kind: string; status: string; text: string; tools: string; reply_ms: number | null }>;
+    return rows.map((r, i) => ({ n: i + 1, ts: r.timestamp, kind: r.kind, status: r.status, text: r.text, tools: r.tools, replyMs: r.reply_ms }));
+  } catch {
+    return []; // DB from before schema v7
+  }
+}
+
+function buildResponseStats(responses: ResponseRow[]): ResponseStats {
+  const waits = responses.flatMap((r) => (r.replyMs === null ? [] : [r.replyMs])).sort((a, b) => a - b);
+  const at = (q: number) => waits[Math.min(waits.length - 1, Math.ceil(q * waits.length) - 1)];
+  const median = waits.length ? (waits.length % 2 ? waits[(waits.length - 1) / 2] : Math.round((waits[waits.length / 2 - 1] + waits[waits.length / 2]) / 2)) : null;
+  const assessor = responses.filter((r) => r.kind === 'assess');
+  const teacher = responses.filter((r) => r.kind !== 'assess');
+  const results = { correct: 0, close: 0, wrong: 0, not_attempt: 0 };
+  let failed = 0;
+  for (const r of assessor) {
+    const report = r.status === 'completed' ? safeJsonParse(r.text, null) : null;
+    const result = report && typeof report === 'object' ? (report as { result?: unknown }).result : undefined;
+    if (typeof result === 'string' && Object.prototype.hasOwnProperty.call(results, result)) results[result as keyof typeof results]++;
+    else failed++;
+  }
+  return {
+    total: teacher.length,
+    completed: teacher.filter((r) => r.status === 'completed').length,
+    cancelled: teacher.filter((r) => r.status === 'cancelled').length,
+    emptyCancelled: teacher.filter((r) => r.status === 'cancelled' && !r.text && !r.tools).length,
+    assessments: { total: assessor.length, failed, results },
+    nudges: responses.filter((r) => r.kind === 'nudge').length,
+    replyMs: { count: waits.length, median, p90: waits.length ? at(0.9) : null, max: waits.length ? waits[waits.length - 1] : null },
   };
 }
 

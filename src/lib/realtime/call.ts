@@ -70,8 +70,8 @@ export function openAiCallFactory(apiKey: string, base = 'https://api.openai.com
       if (!event || typeof event.type !== 'string') { fail('PROVIDER_PROTOCOL'); return; }
       try { onEvent(event); } catch (error) { log.warn('event handler failed', { type: event.type, error: error instanceof Error ? error.message.slice(0, 100) : 'unknown' }); }
     });
-    socket.on('unexpected-response', (_request, res) => { res.resume(); fail(statusCode(res.statusCode ?? 0)); });
-    socket.on('error', () => fail('PROVIDER_CONNECTION'));
+    socket.on('unexpected-response', (_request, res) => { res.resume(); log.warn('sideband rejected', { status: res.statusCode ?? 0 }); fail(statusCode(res.statusCode ?? 0)); });
+    socket.on('error', (error: unknown) => { log.warn('sideband error', { code: String((error as { code?: unknown })?.code ?? (error instanceof Error ? error.name : 'unknown')).slice(0, 60) }); fail('PROVIDER_CONNECTION'); });
     socket.on('close', () => fail('PROVIDER_DISCONNECTED'));
     if (signal.aborted) call.close();
     return { answer, call };

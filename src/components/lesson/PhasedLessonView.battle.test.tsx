@@ -38,7 +38,7 @@ describe('word battle in the Realtime classroom', () => {
   const wrapUp = () => act(() => live.handlers.get('sitting-wrap-up')?.(undefined));
   it('teaches with the normal card first and turns the closing recall game into the battle', async () => {
     const { container } = await start();
-    expect(starts).toEqual([['kid', { game: true }]]);
+    expect(starts).toEqual([['kid', { game: true, speaker: true }]]);
     await waitFor(() => expect(container.querySelector('.p2-stage')).toBeTruthy());
     expect(container.querySelector('.bt-stage')).toBeNull();
     expect(screen.queryByRole('button', { name: '字幕' })).toBeNull(); expect(container.querySelector('.p2-subs-closed')).toBeNull();
@@ -67,7 +67,7 @@ describe('word battle in the Realtime classroom', () => {
   it('leaves the classroom exactly as before when the switch is off', async () => {
     values.set('eduagent.wordBattle', 'off');
     const { container } = await start();
-    expect(starts).toEqual([['kid', undefined]]);
+    expect(starts).toEqual([['kid', { speaker: true }]]);
     await waitFor(() => expect(container.querySelector('.p2-stage')).toBeTruthy());
     wrapUp(); // the server never sends it with the game off; even so, nothing changes
     expect(container.querySelector('.bt-stage')).toBeNull();

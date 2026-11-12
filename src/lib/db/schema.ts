@@ -149,6 +149,25 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 7,
+    name: 'realtime_responses',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS realtime_responses (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lesson_id TEXT NOT NULL REFERENCES lesson_logs(id),
+          timestamp TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          text TEXT NOT NULL DEFAULT '',
+          tools TEXT NOT NULL DEFAULT '',
+          reply_ms INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS realtime_responses_lesson ON realtime_responses(lesson_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {

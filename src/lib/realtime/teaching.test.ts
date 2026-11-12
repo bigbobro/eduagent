@@ -42,6 +42,16 @@ describe('Realtime teaching transactions', () => {
     submitAssessment(session, input(), { ...assessment, heard: 'tentative model perception' });
     expect(session.memory.cardProgress.apple).toBe('cleared');
   });
+  it('accepts a card assessment in the reinforcement phase (the assessor can land just after start_practice)', () => {
+    changePhase(session, 'reinforcement');
+    const receipt = submitAssessment(session, input(), { ...assessment, next_card_id: null });
+    expect(receipt.ok).toBe(true); expect(session.memory.clearedCardIds).toEqual(['apple']); expect(session.currentPhase).toBe('reinforcement');
+  });
+  it('rejects a card assessment outside the interactive and reinforcement phases', () => {
+    const intro = createSession(foodCourse, 'test-learner', 'realtime');
+    expect(() => submitAssessment(intro, { id: 't', targetId: 'apple', kind: 'audio' }, { ...assessment, next_card_id: null })).toThrow('INVALID_TARGET');
+    intro.lifetime.abort(); sessionStore.delete(intro.id);
+  });
   it('does not count off-topic/silence or claim skipped words are mastered', () => {
     submitAssessment(session, input(), { ...assessment, result: 'off_topic', mastered: false, next_action: 'skip' });
     expect(session.memory.wordPerformance.size).toBe(0);

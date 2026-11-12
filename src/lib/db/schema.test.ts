@@ -28,8 +28,9 @@ describe('runMigrations', () => {
       'interaction_logs',
       'word_performance',
       'course_progress',
+      'realtime_responses',
     ]));
-    expect(getSchemaVersion(db)).toBe(6);
+    expect(getSchemaVersion(db)).toBe(7);
     // v2: R-C 权威账本列(NULL = 未追踪)
     const wordPerfCols = db.prepare('PRAGMA table_info(word_performance)').all()
       .map((row) => (row as { name: string }).name);
@@ -58,6 +59,7 @@ describe('runMigrations', () => {
       { version: 4, name: 'course_progress_table' },
       { version: 5, name: 'local_learners' },
       { version: 6, name: 'classroom_mode' },
+      { version: 7, name: 'realtime_responses' },
     ]);
   });
 
@@ -70,7 +72,7 @@ describe('runMigrations', () => {
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(6);
+    expect(getSchemaVersion(db)).toBe(7);
     expect(db.prepare('SELECT COUNT(*) AS count FROM lesson_logs').get()).toEqual({ count: 1 });
   });
 });

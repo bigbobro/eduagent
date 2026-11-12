@@ -22,7 +22,7 @@ export function deleteLearner(id: string): boolean {
   const db = getDb();
   return db.transaction(() => {
     if (!getLearner(id)) return false;
-    for (const table of ['interaction_logs', 'word_performance']) {
+    for (const table of ['interaction_logs', 'word_performance', 'realtime_responses']) {
       db.prepare(`DELETE FROM ${table} WHERE lesson_id IN (SELECT id FROM lesson_logs WHERE learner_id = ?)`).run(id);
     }
     db.prepare('DELETE FROM course_progress WHERE learner_id = ?').run(id);

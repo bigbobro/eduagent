@@ -743,3 +743,43 @@ it('reports Realtime model mastery and usage without falling back to two legacy 
     expect(report.anomalies.ttsUsageNotTracked).toBe(false);
   } finally { db.close(); }
 });
+
+describe('buildReport — realtime responses', () => {
+  it('lists every stored response and summarizes them with the reply wait', async () => {
+    const db = createMemDb();
+    db.exec(`CREATE TABLE realtime_responses (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson_id TEXT NOT NULL, timestamp TEXT NOT NULL, kind TEXT NOT NULL,
+      status TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', tools TEXT NOT NULL DEFAULT '', reply_ms INTEGER)`);
+    seedSession(db, { id: 'rt-1', courseId: 'food', startTime: '2026-11-11T00:00:00.000Z' });
+    const add = db.prepare('INSERT INTO realtime_responses (lesson_id, timestamp, kind, status, text, tools, reply_ms) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    add.run('rt-1', '2026-11-11T00:00:01.000Z', 'opening', 'completed', 'Hi!', '', null);
+    add.run('rt-1', '2026-11-11T00:00:02.000Z', 'speech', 'completed', 'Great!', 'show_card', 1000);
+    add.run('rt-1', '2026-11-11T00:00:03.000Z', 'speech', 'cancelled', '', '', 3000);
+    add.run('rt-1', '2026-11-11T00:00:04.000Z', 'speech', 'cancelled', 'Say', '', 2000);
+    add.run('rt-1', '2026-11-11T00:00:05.000Z', 'speech', 'completed', '', 'show_card', 4000);
+    add.run('rt-1', '2026-11-11T00:00:06.000Z', 'nudge', 'completed', 'Try again?', '', null);
+    const report = (result: string) => JSON.stringify({ result, heard: 'x', evidence: 'x', mastered: false, next_action: 'retry' });
+    add.run('rt-1', '2026-11-11T00:00:07.000Z', 'assess', 'completed', report('correct'), 'record_assessment', null);
+    add.run('rt-1', '2026-11-11T00:00:08.000Z', 'assess', 'completed', report('correct'), 'record_assessment', null);
+    add.run('rt-1', '2026-11-11T00:00:09.000Z', 'assess', 'completed', report('close'), 'record_assessment', null);
+    add.run('rt-1', '2026-11-11T00:00:10.000Z', 'assess', 'completed', report('wrong'), 'record_assessment', null);
+    add.run('rt-1', '2026-11-11T00:00:11.000Z', 'assess', 'completed', report('not_attempt'), 'record_assessment', null);
+    add.run('rt-1', '2026-11-11T00:00:12.000Z', 'assess', 'cancelled', '', '', null); // failed: not completed
+    add.run('rt-1', '2026-11-11T00:00:13.000Z', 'assess', 'completed', '', '', null); // failed: no tool call
+    add.run('rt-1', '2026-11-11T00:00:14.000Z', 'assess', 'completed', '{nope', 'record_assessment', null); // failed: unparseable
+    add.run('rt-1', '2026-11-11T00:00:15.000Z', 'assess', 'completed', JSON.stringify({ result: 'great' }), 'record_assessment', null); // failed: unknown result
+    const r = await buildReport(db, 'rt-1', noopCourseLoader);
+    expect(r.responses).toHaveLength(15);
+    expect(r.responses[1]).toEqual({ n: 2, ts: '2026-11-11T00:00:02.000Z', kind: 'speech', status: 'completed', text: 'Great!', tools: 'show_card', replyMs: 1000 });
+    expect(r.responses[6]).toMatchObject({ kind: 'assess', status: 'completed', tools: 'record_assessment' });
+    // Teacher counts exclude the assessor rows; the assessor has its own summary.
+    expect(r.responseStats).toEqual({ total: 6, completed: 4, cancelled: 2, emptyCancelled: 1,
+      assessments: { total: 9, failed: 4, results: { correct: 2, close: 1, wrong: 1, not_attempt: 1 } }, nudges: 1, replyMs: { count: 4, median: 2500, p90: 4000, max: 4000 } });
+  });
+  it('gives empty responses and null stats for a lesson recorded before the table existed', async () => {
+    const db = createMemDb();
+    seedSession(db, { id: 'old-1', courseId: 'food', startTime: '2026-11-01T00:00:00.000Z' });
+    const r = await buildReport(db, 'old-1', noopCourseLoader);
+    expect(r.responses).toEqual([]);
+    expect(r.responseStats).toMatchObject({ total: 0, assessments: { total: 0, failed: 0, results: { correct: 0, close: 0, wrong: 0, not_attempt: 0 } }, replyMs: { count: 0, median: null, p90: null, max: null } });
+  });
+});

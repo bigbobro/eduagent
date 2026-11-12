@@ -80,6 +80,15 @@ async function main() {
     });
     await page.addInitScript(({ generator }) => {
       const w = window as unknown as Record<string, unknown>;
+      // Live and manual-turn runs test barge-in with synthetic audio, so they need the mic open while the teacher speaks.
+      if (generator) localStorage.setItem('eduagent.speakerMode', 'off');
+      // Mock runs keep speaker mode on (default): sample the mic track against the conversation state.
+      const micSamples: Array<{ state: string; enabled: boolean }> = []; w.__micSamples = micSamples;
+      setInterval(() => {
+        const state = document.querySelector('[data-conversation-state]')?.getAttribute('data-conversation-state');
+        const track = (w.__smokeTracks as MediaStreamTrack[])[0];
+        if (state && track) micSamples.push({ state, enabled: track.enabled });
+      }, 50);
       const tracks: MediaStreamTrack[] = []; w.__smokeTracks = tracks;
       const timeline: Array<{ t: number; state: string }> = []; w.__timeline = timeline;
       new MutationObserver(() => {
@@ -378,6 +387,15 @@ async function main() {
     }
     const trackCount = await page.evaluate(() => (window as unknown as { __smokeTracks: MediaStreamTrack[] }).__smokeTracks.length);
     if (trackCount !== 1) throw new Error(`Expected one microphone capture, got ${trackCount}`);
+    if (!live && !manualTurn) {
+      // Speaker mode (default on): the mic is closed whenever the teacher is speaking, and open again once the teacher is idle.
+      const samples = await page.evaluate(() => (window as unknown as { __micSamples: Array<{ state: string; enabled: boolean }> }).__micSamples);
+      const speaking = samples.filter((sample) => sample.state === 'speaking');
+      if (!speaking.length) throw new Error('Speaker mode check: no speaking state was sampled');
+      if (speaking.some((sample) => sample.enabled)) throw new Error('Speaker mode check: mic was open while the teacher was speaking');
+      if (!samples.some((sample) => sample.state === 'awaiting' && sample.enabled)) throw new Error('Speaker mode check: mic never reopened once the teacher was idle');
+      results.speakerMode = { speakingSamples: speaking.length, micOpenWhileSpeaking: 0 };
+    }
     await page.waitForFunction(() => (window as unknown as { __smokeTracks: MediaStreamTrack[] }).__smokeTracks.every((track) => track.readyState === 'ended'), undefined, { timeout: 10000 });
     if (errors.length) throw new Error(`Page errors: ${errors.join('; ')}`);
     Object.assign(results, { sessionId, trackCount, microphoneStopped: true, requests, progress: await words() });

@@ -9,6 +9,8 @@ import type { ManualTurnVad } from './manual-turn-vad';
 import { parseRealtimeEvent, receiptSchema, type PresentedTarget, type ProviderEvent, type RealtimeEvent } from '@/lib/realtime-protocol';
 
 type Receipt = Extract<RealtimeEvent, { type: 'receipt' }>['receipt'];
+/** The mic reopens this long after the teacher went idle, to let the loudspeaker tail (Bluetooth latency, room echo) die out. */
+const SPEAKER_RELEASE_MS = 500;
 interface Waiter { match: (metadata: Record<string, string>) => boolean; responseId?: string; resolve: () => void }
 interface Run {
   abort: AbortController; learnerId: string; sessionId: string | null; transport: 'webrtc' | 'mock';
@@ -18,6 +20,8 @@ interface Run {
   active: Set<string>; done: Set<string>; transcripts: Map<string, string>;
   waiters: Set<Waiter>; presented: string; failed: (() => Promise<void>) | null;
   pick: { turnId: string; quizId: string; cardId: string } | null; finishing: boolean;
+  // Speaker mode: the mic track is gated while the teacher generates or plays (see syncMic).
+  speaker: boolean; micHold: boolean; micRelease: ReturnType<typeof setTimeout> | null;
   // Manual-turn mode only: the local VAD, the ordered speech-signal chain and the pause window after `end`.
   vad: ManualTurnVad | null; signals: Promise<unknown>; silence: ReturnType<typeof setTimeout> | null;
 }
@@ -41,11 +45,11 @@ export class RealtimeClassroom implements Classroom {
   getState(): LessonStateName { return this.run?.state ?? 'idle'; }
   getResumeInfo(): ResumeInfo | null { return this.resume; }
 
-  async startLesson(learnerId: string, options?: { fresh?: boolean; game?: boolean }): Promise<boolean> {
+  async startLesson(learnerId: string, options?: { fresh?: boolean; game?: boolean; speaker?: boolean }): Promise<boolean> {
     const previous = this.endLesson();
     const run: Run = { abort: new AbortController(), learnerId, sessionId: null, transport: 'webrtc', state: 'greeting', phase: 'intro', cardId: '', revision: -1, resumeShown: false,
       stream: null, pc: null, channel: null, audio: null, paused: false, childSpeaking: false, playing: false, waitingReply: null,
-      active: new Set(), done: new Set(), transcripts: new Map(), waiters: new Set(), presented: '', failed: null, pick: null, finishing: false, vad: null, signals: Promise.resolve(), silence: null };
+      active: new Set(), done: new Set(), transcripts: new Map(), waiters: new Set(), presented: '', failed: null, pick: null, finishing: false, speaker: options?.speaker === true, micHold: false, micRelease: null, vad: null, signals: Promise.resolve(), silence: null };
     this.run = run; this.resume = null;
     this.emit('state', 'greeting'); this.emit('intro-busy-change', true);
     try {
@@ -57,7 +61,7 @@ export class RealtimeClassroom implements Classroom {
       run.sessionId = body.sessionId; run.transport = body.transport === 'mock' ? 'mock' : 'webrtc';
       this.resume = parseResumeInfo(body.resume ? JSON.stringify(body.resume) : null);
       this.apply(run, receiptSchema.parse(body.receipt));
-      // The only microphone capture of the lesson; browser echo cancellation removes the teacher's own playback.
+      // The only microphone capture of the lesson. Echo cancellation alone is not enough on a loudspeaker; speaker mode gates the mic while the teacher speaks.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
       if (!this.current(run)) { stream.getTracks().forEach((track) => track.stop()); return false; }
       run.stream = stream;
@@ -123,6 +127,7 @@ export class RealtimeClassroom implements Classroom {
   private release(run: Run): void {
     if (run.silence) clearTimeout(run.silence);
     run.silence = null; run.vad?.destroy(); run.vad = null;
+    if (run.micRelease) { clearTimeout(run.micRelease); run.micRelease = null; }
     if (run.waitingReply) clearTimeout(run.waitingReply);
     run.waiters.forEach((waiter) => waiter.resolve()); run.waiters.clear();
     try { run.channel?.close(); } catch { /* already closed */ }
@@ -275,7 +280,27 @@ export class RealtimeClassroom implements Classroom {
         if (event.response?.status !== 'completed') this.settle(run, (responseId) => responseId === id);
         break;
     }
+    this.syncMic(run);
     this.state(run, this.derive(run));
+  }
+  /** The only place that sets the mic track's `enabled` during a run. In speaker mode the mic stays closed while the teacher
+   *  generates or plays, and reopens SPEAKER_RELEASE_MS after the teacher went idle. */
+  private syncMic(run: Run): void {
+    const busy = run.active.size > 0 || run.playing;
+    if (!run.speaker) {
+      run.micHold = false;
+      if (run.micRelease) { clearTimeout(run.micRelease); run.micRelease = null; }
+    } else if (busy) {
+      if (run.micRelease) { clearTimeout(run.micRelease); run.micRelease = null; }
+      run.micHold = true;
+    } else if (run.micHold && !run.micRelease) {
+      run.micRelease = setTimeout(() => {
+        run.micRelease = null; run.micHold = false;
+        if (this.current(run)) this.syncMic(run);
+      }, SPEAKER_RELEASE_MS);
+    }
+    const enabled = !run.paused && !run.finishing && !run.micHold;
+    run.stream?.getAudioTracks().forEach((track) => { track.enabled = enabled; });
   }
   /** The child stopped talking: `thinking` until the reply starts (or 8 s pass). */
   private speechStopped(run: Run): void {
@@ -306,7 +331,7 @@ export class RealtimeClassroom implements Classroom {
   private async finish(run: Run): Promise<void> {
     if (run.finishing) return;
     run.finishing = true;
-    run.stream?.getTracks().forEach((track) => { track.enabled = false; });
+    this.syncMic(run);
     if (run.silence) { clearTimeout(run.silence); run.silence = null; }
     run.vad?.destroy(); run.vad = null;
     await this.waitFor(run, (metadata) => metadata.kind === 'goodbye', 20000).promise;
@@ -339,7 +364,7 @@ export class RealtimeClassroom implements Classroom {
   async setPaused(paused: boolean): Promise<void> {
     const run = this.run; if (!run || !this.current(run) || run.paused === paused) return;
     run.paused = paused;
-    run.stream?.getTracks().forEach((track) => { track.enabled = !paused; });
+    this.syncMic(run);
     if (run.silence) { clearTimeout(run.silence); run.silence = null; }
     if (paused) { run.childSpeaking = false; run.vad?.pause(); } else run.vad?.resume();
     if (paused && run.channel?.readyState === 'open') run.channel.send(JSON.stringify({ type: 'output_audio_buffer.clear' }));

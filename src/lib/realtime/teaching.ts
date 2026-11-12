@@ -2,11 +2,14 @@ import { getSession } from '@/lib/agent/session';
 import type { Session } from '@/lib/agent/session-store';
 import { serializeProgress, isCourseComplete } from '@/lib/agent/course-progress';
 import { getDb } from '@/lib/db';
-import { getCollectedHistory, insertInteraction, touchLessonLog, updateRealtimeFeedback, upsertCourseProgress, upsertWordPerformance } from '@/lib/db/queries';
+import { createLogger } from '@/lib/logger';
+import { getCollectedHistory, insertInteraction, insertRealtimeResponse, type RealtimeResponseRow, touchLessonLog, updateRealtimeFeedback, upsertCourseProgress, upsertWordPerformance } from '@/lib/db/queries';
 import { realtimeAssessmentSchema, type RealtimeAssessment, type RealtimeUsage } from '@/lib/realtime-protocol';
 import type { LessonProgressSnapshot } from '@/lib/lesson-protocol';
 import type { PhaseName } from '@/types/course';
 import type { QuizResult } from '@/lib/voice/classroom';
+
+const log = createLogger('realtime-teaching');
 
 export interface TeachingReceipt {
   ok: boolean;
@@ -77,7 +80,8 @@ export function submitAssessment(session: Session, turn: InputTurn, raw: unknown
   if (quiz) {
     if (session.currentPhase !== 'reinforcement' || quiz.type !== 'repeat-after-me') throw new Error('INVALID_TARGET');
     // The conversation binds speech to the card the browser rendered at speech start, which may trail a just-committed switch.
-  } else if (!card || session.currentPhase !== 'interactive') throw new Error('INVALID_TARGET');
+    // The assessor runs next to the teacher, so the last word's report can arrive just after start_practice moved the phase on.
+  } else if (!card || !['interactive', 'reinforcement'].includes(session.currentPhase)) throw new Error('INVALID_TARGET');
   if (assessment.next_card_id && !session.course.cards.some((item) => item.id === assessment.next_card_id)) throw new Error('INVALID_NEXT_CARD');
   if (quiz && assessment.next_card_id) throw new Error('INVALID_NEXT_CARD');
   const phases: PhaseName[] = ['intro', 'interactive', 'reinforcement', 'done'];
@@ -157,6 +161,11 @@ export function recordUsage(session: Session, usage: RealtimeUsage | null): void
 export function saveFeedback(session: Session, turnId: string, text: string): void {
   requireOwner(session.id, session.learnerId);
   updateRealtimeFeedback(session.id, turnId, text);
+}
+
+/** Diagnostic record of one teacher response. No ownership check (a response can end as the session is revoked) and never throws. */
+export function saveResponse(session: Session, row: RealtimeResponseRow): void {
+  try { insertRealtimeResponse(session.id, row); } catch { log.warn('response record failed', { sessionId: session.id }); }
 }
 
 /** An abnormal provider end can hide responses that were never reported; never present that cost as complete. */
