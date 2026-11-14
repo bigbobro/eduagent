@@ -346,17 +346,29 @@ async function main() {
       } else {
         await speak({ kind: 'attempt' }, '');
         await until('attempt saved', async () => ((await words()).attempts[other.english] ?? 0) >= 1, 30000);
-        // After the wrap-up note the offline model answers the next utterance with end_sitting (the tool path); chat until the app ends the sitting.
+        // Recall attempts after the time check show a card and start battle; a following chat ends the sitting.
+        const battle = page.locator('.bt-stage');
         const deadline = Date.now() + 60_000;
-        while (!(await ended()) && Date.now() < deadline) {
-          await quiet('before sitting chat', 30000);
+        while (!(await battle.count()) && !(await ended()) && Date.now() < deadline) {
+          await quiet('before battle card', 30000);
           if (await ended()) break;
-          await speak({ kind: 'chat' }, '');
-          await page.waitForTimeout(1500);
+          await speak({ kind: 'attempt' }, '');
+          await page.waitForTimeout(100);
         }
+        await battle.waitFor({ timeout: 10000 });
+        if (await battle.getAttribute('data-battle-hp') !== '3') throw new Error('Pre-battle practice counted as a hit');
+        await page.screenshot({ path: path.join(out, 'battle-started.png') });
+        await quiet('before battle recall', 30000);
+        await speak({ kind: 'attempt' }, '');
+        await until('battle recall landed', async () => await battle.getAttribute('data-battle-hp') === '1', 3000);
+        await page.screenshot({ path: path.join(out, 'battle-last-hit.png') });
+        results.battle = { started: true, lastHitHp: 1 };
+        await quiet('before sitting end', 30000);
+        if (!(await ended())) await speak({ kind: 'chat' }, '');
       }
       await page.getByText('进度已保存，下次继续', { exact: true }).waitFor({ timeout: 90000 });
       log('sitting end page shown');
+      if (!live) await page.getByRole('region', { name: '单词大战成果' }).waitFor({ timeout: 5000 });
       await page.screenshot({ path: path.join(out, 'sitting-ended.png') });
       if (await page.getByText('课堂完成', { exact: true }).count()) throw new Error('Sitting end page claims the course is complete');
       await until('call ended after sitting', async () => endStatus === 200, 30000);

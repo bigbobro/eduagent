@@ -231,6 +231,24 @@ describe('natural Realtime classroom', () => {
     expect(tracks[0].enabled).toBe(true); // the lesson goes on; only the picture changes
     await classroom.endLesson();
   });
+  it('keeps applying late results after sitting-ended, disables the mic and waits for goodbye playback before releasing it', async () => {
+    const { classroom } = await started();
+    const answers = vi.fn(); classroom.on('answer-result', answers);
+    const ended = vi.fn(); classroom.on('sitting-ended', ended);
+    push({ type: 'sitting-ended' });
+    await vi.waitFor(() => expect(ended).toHaveBeenCalledOnce());
+    expect(tracks[0].enabled).toBe(false); expect(tracks[0].stop).not.toHaveBeenCalled();
+    push({ type: 'receipt', receipt: receipt(7, 'interactive', 'apple', { assessment: { target_id: 'apple', result: 'correct', heard: 'apple', evidence: 'recall', mastered: true, next_action: 'advance', next_card_id: null, next_phase: null } }) });
+    await vi.waitFor(() => expect(answers).toHaveBeenCalledOnce());
+    provider({ type: 'response.created', response: { id: 'bye', metadata: { kind: 'goodbye' } } });
+    provider({ type: 'output_audio_buffer.started', response_id: 'bye' });
+    provider({ type: 'response.done', response: { id: 'bye', status: 'completed' } });
+    await vi.waitFor(() => expect(classroom.getState()).toBe('speaking'));
+    expect(tracks[0].stop).not.toHaveBeenCalled();
+    provider({ type: 'output_audio_buffer.stopped', response_id: 'bye' });
+    await vi.waitFor(() => expect(tracks[0].stop).toHaveBeenCalledOnce());
+    expect(bodies.at(-1)?.action).toBe('end');
+  });
   it('passes the word-battle switch to the server when the lesson starts', async () => {
     const classroom = new RealtimeClassroom(foodCourse);
     expect(await classroom.startLesson('child', { game: true })).toBe(true);

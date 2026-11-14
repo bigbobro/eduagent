@@ -4,6 +4,7 @@ import { actionsCourse } from '@/data/courses/actions';
 import { createSession } from '@/lib/agent/session';
 import { sessionStore, type Session } from '@/lib/agent/session-store';
 import { getDb } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import { summarizeRealtimeUsage } from './usage';
 import { changePhase, type TeachingReceipt } from './teaching';
 import { getCourseProgress } from '@/lib/db/queries';
@@ -48,6 +49,7 @@ const outputs = () => sent.filter((e) => e.type === 'conversation.item.create' &
 /** Teacher and app responses; the assessor's out-of-band requests are listed by assessRequests(). */
 const creates = () => sent.filter((e) => e.type === 'response.create' && e.response.conversation !== 'none');
 const states = () => sent.filter((e) => e.type === 'conversation.item.create' && e.item.type === 'message' && e.item.content[0].text.startsWith('[app] State:')).map((e) => e.item.content[0].text as string);
+const appNotes = () => sent.filter((e) => e.type === 'conversation.item.create' && e.item.type === 'message' && /^\[app\] (Heard:|The child's last 3 messages|The child has now said)/.test(e.item.content[0].text)).map((e) => e.item.content[0].text as string);
 const attempts = (word: string) => session.memory.wordPerformance.get(word)?.attempts ?? 0;
 
 describe('natural conversation input binding and tool execution', () => {
@@ -82,6 +84,7 @@ describe('natural conversation input binding and tool execution', () => {
     const rows = getDb().prepare('SELECT model_calls FROM interaction_logs WHERE lesson_id = ?').all(session.id) as Array<{ model_calls: string }>;
     expect(rows).toHaveLength(1);
     expect(JSON.parse(rows[0].model_calls).assessment.target_id).toBe(quiz.id);
+    expect(getDb().prepare('SELECT tools FROM realtime_responses WHERE lesson_id = ? AND kind = ?').get(session.id, 'assess')).toEqual({ tools: `record_assessment(${quiz.id})` });
     expect(session.memory.clearedCardIds).not.toContain(quiz.cardId);
     assessed('sentence-input'); // the same assessor response reported again
     expect(session.lessonInteractionCount).toBe(1);
@@ -108,6 +111,19 @@ describe('natural conversation input binding and tool execution', () => {
     expect(published.at(-1)?.assessment).toMatchObject({ target_id: 'apple' });
     expect(attempts('apple')).toBe(1); expect(attempts('milk')).toBe(0);
     expect(session.memory.clearedCardIds).toEqual(['apple']); expect(session.memory.currentCardId).toBe('milk');
+    expect(appNotes()).toEqual([`[app] Heard: on the card apple the app judged the child's last answer as correct (heard "i1").`]);
+  });
+  it('assesses and saves the whole sentence when its course sentence card is on screen', () => {
+    const card = foodCourse.cards.find((c) => c.id === 'sentence_apple')!;
+    conversation.setPresented({ kind: 'card', id: card.id });
+    speech('sentence-card');
+    expect(assessRequests()[0].response.instructions).toContain(`card ${card.id}, the English sentence "${card.english}"`);
+    assessed('sentence-card', { heard: card.english, mastered: false });
+    expect(published.at(-1)?.assessment).toMatchObject({ target_id: card.id, heard: card.english, result: 'correct' });
+    const rows = getDb().prepare('SELECT user_input, model_calls FROM interaction_logs WHERE lesson_id = ?').all(session.id) as Array<{ user_input: string; model_calls: string }>;
+    expect(rows).toHaveLength(1); expect(rows[0].user_input).toBe(card.english);
+    expect(JSON.parse(rows[0].model_calls).assessment).toMatchObject({ target_id: card.id, result: 'correct' });
+    expect(appNotes()).toEqual([`[app] Heard: on the card ${card.english} the app judged the child's last answer as correct (heard ${JSON.stringify(card.english)}).`]);
   });
   it('still saves the last word when its assessment lands just after start_practice', () => {
     speech('i1'); created('r1'); done('r1', [call('start_practice', {})]);
@@ -159,6 +175,7 @@ describe('natural conversation input binding and tool execution', () => {
       expect(assessRequests()[1].response.metadata.input).toBe('i1'); expect(assessRequests()[1].event_id).not.toBe(assessRequests()[0].event_id);
       settle('i1', output, status); expect(assessRequests()).toHaveLength(2);
       expect(attempts('apple')).toBe(0); expect(published).toEqual([]);
+      expect(appNotes()).toEqual([]);
       expect(warning).toHaveBeenCalledWith(expect.stringContaining('assessment failed'));
     } finally { warning.mockRestore(); }
   });
@@ -170,6 +187,7 @@ describe('natural conversation input binding and tool execution', () => {
       expect(assessRequests()).toHaveLength(2);
       feed({ type: 'error', error: { code: 'rate_limit_exceeded', event_id: assessRequests()[1].event_id } });
       expect(assessRequests()).toHaveLength(2);
+      expect(appNotes()).toEqual([]);
       expect(warning).toHaveBeenCalledWith(expect.stringContaining('assessment failed'));
     } finally { warning.mockRestore(); }
   });
@@ -222,10 +240,14 @@ describe('natural conversation input binding and tool execution', () => {
     speech('i1');
     assessed('i1', { heard: 'ap-ple' });
     expect(rows()).toHaveLength(1);
-    expect(rows()[0]).toMatchObject({ kind: 'assess', status: 'completed', tools: 'record_assessment' });
+    expect(rows()[0]).toMatchObject({ kind: 'assess', status: 'completed', tools: 'record_assessment(apple)' });
     expect(JSON.parse(rows()[0].text)).toMatchObject({ result: 'correct', heard: 'ap-ple', mastered: true });
     speech('i2'); settle('i2', [], 'cancelled');
     expect(rows()[1]).toMatchObject({ status: 'cancelled', text: '', tools: '' });
+  });
+  it('stores only the tool name for an assessor response without a bound input', () => {
+    done('unbound-assessor', [call('record_assessment', { result: 'not_attempt', heard: 'hi' })], 'completed', { kind: 'assess', input: 'missing' });
+    expect(getDb().prepare('SELECT tools FROM realtime_responses WHERE lesson_id = ?').get(session.id)).toEqual({ tools: 'record_assessment' });
   });
   describe('spoken feedback of an assessed input', () => {
     const say = (response: string, text: string) => feed({ type: 'response.output_audio_transcript.delta', response_id: response, delta: text });
@@ -275,6 +297,32 @@ describe('natural conversation input binding and tool execution', () => {
     expect(assessRequests()[0].response.instructions.endsWith('Screen target when the child spoke: practice question q5, repeat the whole sentence "I can run.".')).toBe(true);
     expect(assessRequests()[0].response.metadata.input).toBe('i2');
   });
+  it('keeps answer correctness separate from recall in both assessor instructions and the tool description', () => {
+    speech('i1');
+    const response = assessRequests()[0].response;
+    expect(response.instructions).toContain('a clear, complete echo right after the tutor\'s model is "correct" with mastered=false');
+    expect(response.instructions).toContain('a clear unaided recall is "correct" with mastered=true');
+    expect(response.instructions).toContain('only a syllable, a missing ending or an unclear word is "close" with mastered=false');
+    expect(response.instructions).toContain('Never lower result because the answer was an echo, a choice or prompted.');
+    expect(response.tools[0].parameters.properties.result.description).toContain('close = recognizable but incomplete or unclear English');
+    expect(response.tools[0].parameters.properties.result.description).toContain('Whether it was an echo or unaided recall never changes result; that belongs in mastered.');
+  });
+  it.each([
+    ['with audio timestamps', 1000, 1600, 600, 4000],
+    ['without audio timestamps', undefined, undefined, 4600, 0],
+    ['without the audio start timestamp', undefined, 1600, 4600, 0],
+    ['without the audio end timestamp', 1000, undefined, 4600, 0],
+    ['when the estimated audio end is later than arrival', 1000, 6000, 5000, 0],
+  ] as const)('logs child speech duration and nonnegative VAD wait %s', (_name, startMs, endMs, durationMs, vadWaitMs) => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => {});
+    try {
+      feed({ type: 'input_audio_buffer.speech_started', item_id: 'i1', audio_start_ms: startMs });
+      clock.mockReturnValue(14_600);
+      feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'i1', audio_end_ms: endMs });
+      expect(info).toHaveBeenCalledWith('child speech', expect.objectContaining({ sessionId: session.id, durationMs, vadWaitMs }));
+    } finally { info.mockRestore(); clock.mockRestore(); }
+  });
   it('stores one row per response with kind, status, text, tools and the reply wait', () => {
     const rows = () => getDb().prepare('SELECT kind, status, text, tools, reply_ms FROM realtime_responses WHERE lesson_id = ? ORDER BY id').all(session.id) as Array<{ kind: string; status: string; text: string; tools: string; reply_ms: number | null }>;
     const say = (id: string, text: string) => feed({ type: 'response.output_audio_transcript.delta', response_id: id, delta: text });
@@ -288,7 +336,22 @@ describe('natural conversation input binding and tool execution', () => {
     speech('w2'); created('r2'); say('r2', 'Say it'); done('r2', [], 'cancelled');
     expect(rows()[1]).toMatchObject({ kind: 'speech', status: 'cancelled', text: 'Say it', tools: '', reply_ms: null });
     speech('w3'); created('r3'); say('r3', 'Well done'); done('r3', [call('show_card', { card_id: 'milk' })]);
-    expect(rows()[2]).toMatchObject({ status: 'completed', text: 'Well done', tools: 'show_card' });
+    expect(rows()[2]).toMatchObject({ status: 'completed', text: 'Well done', tools: 'show_card(milk)' });
+  });
+  it('stores known show_card IDs and masks unknown, missing or malformed arguments, including cancelled tool calls', () => {
+    const toolCalls = [
+      call('show_card', { card_id: 'milk' }),
+      call('show_card', { card_id: 'private-untrusted-text' }),
+      call('show_card', {}),
+      { ...call('show_card', {}), arguments: '{invalid' },
+      { ...call('show_card', {}), arguments: 'null' },
+      call('start_practice', {}), call('end_sitting', {}),
+    ];
+    created('tools'); done('tools', toolCalls, 'cancelled');
+    expect(getDb().prepare('SELECT tools FROM realtime_responses WHERE lesson_id = ?').get(session.id)).toEqual({
+      tools: 'show_card(milk),show_card(?),show_card(?),show_card(?),show_card(?),start_practice,end_sitting',
+    });
+    expect(session.memory.currentCardId).toBe('apple');
   });
   it('never executes tools from a cancelled response and settles a re-reported response only once', () => {
     speech('i1'); created('r1'); done('r1', [call('show_card', { card_id: 'milk' })], 'cancelled');
@@ -363,6 +426,126 @@ describe('natural conversation input binding and tool execution', () => {
     }
     expect(creates().at(-1)?.response.tool_choice).toBe('none');
     vi.useRealTimers();
+  });
+});
+
+describe('app assessment notes to the teacher', () => {
+  const notAttempt = (input: string) => { speech(input); assessed(input, { result: 'not_attempt', mastered: false }); };
+  const mismatches = () => appNotes().filter((text) => text.startsWith("[app] The child's last 3 messages"));
+  it.each(['correct', 'close', 'wrong'])('writes a %s verdict immediately between responses, quoting at most 80 heard characters', (result) => {
+    const heard = 'a"\n'.repeat(30);
+    speech('i1'); assessed('i1', { result, heard, mastered: false });
+    expect(appNotes()).toEqual([`[app] Heard: on the card apple the app judged the child's last answer as ${result} (heard ${JSON.stringify(heard.slice(0, 80))}).`]);
+    const note = sent.find((event) => event.item?.content?.[0]?.text === appNotes()[0]);
+    expect(note?.item).toMatchObject({ type: 'message', role: 'system', content: [{ type: 'input_text' }] });
+    expect(creates()).toEqual([]);
+  });
+  it.each(['completed', 'cancelled'])('holds verdicts until all teacher responses settle (%s), keeping only the latest', (status) => {
+    created('r1'); created('r2');
+    speech('i1'); assessed('i1', { result: 'wrong', mastered: false });
+    speech('i2'); assessed('i2', { result: 'close', mastered: false });
+    expect(appNotes()).toEqual([]);
+    done('r1', [], status); expect(appNotes()).toEqual([]);
+    done('r2', [], status);
+    expect(appNotes()).toEqual([`[app] Heard: on the card apple the app judged the child's last answer as close (heard "i2").`]);
+    created('r3'); done('r3'); expect(appNotes()).toHaveLength(1);
+  });
+  it('writes not_attempt even when state did not change or no attempt was saved', () => {
+    notAttempt('再说一次');
+    expect(appNotes()).toEqual([`[app] Heard: the child's last message was not a try at the screen card apple (heard "再说一次").`]);
+    expect(states()).toEqual([]); expect(published).toEqual([]);
+  });
+  it('does not write verdicts or mismatch reminders for practice question targets', () => {
+    changePhase(session, 'reinforcement'); conversation.setPresented({ kind: 'quiz', id: 'q5' });
+    for (let i = 1; i <= 3; i++) notAttempt(`chat${i}`);
+    speech('sentence'); assessed('sentence', { heard: 'This is an apple.', mastered: false });
+    expect(published.at(-1)?.quiz).toMatchObject({ quizId: 'q5', correct: true });
+    expect(appNotes()).toEqual([]);
+  });
+  it('writes nothing for failed assessments and writes only the successful retry verdict', () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      speech('failed'); settle('failed', [], 'failed'); settle('failed', [], 'failed');
+      expect(appNotes()).toEqual([]);
+      speech('retried'); assessed('retried', { result: 'not_attempt' }, 'cancelled');
+      expect(appNotes()).toEqual([]);
+      assessed('retried', { result: 'close', mastered: false });
+      expect(appNotes()).toEqual([`[app] Heard: on the card apple the app judged the child's last answer as close (heard "retried").`]);
+      notAttempt('chat1'); notAttempt('chat2'); expect(mismatches()).toEqual([]);
+    } finally { warning.mockRestore(); }
+  });
+  it('writes the third consecutive not_attempt reminder once, after the latest verdict, between responses', () => {
+    notAttempt('chat1'); notAttempt('chat2');
+    expect(mismatches()).toEqual([]);
+    created('r1'); notAttempt('chat3'); notAttempt('chat4');
+    expect(mismatches()).toEqual([]); expect(appNotes()).toHaveLength(2);
+    done('r1');
+    expect(appNotes().slice(2)).toEqual([
+      `[app] Heard: the child's last message was not a try at the screen card apple (heard "chat4").`,
+      `[app] The child's last 3 messages were not tries at the screen card apple. If you are practising a different word or one of the course sentences, first put that card on the screen with show_card so the screen matches what you ask; otherwise come back to the screen card.`,
+    ]);
+    notAttempt('chat5'); expect(mismatches()).toHaveLength(1);
+  });
+  it.each(['correct', 'close', 'wrong'])('starts a new not_attempt streak after %s', (result) => {
+    notAttempt('chat1'); notAttempt('chat2'); notAttempt('chat3');
+    speech('try'); assessed('try', { result, mastered: false });
+    notAttempt('chat4'); notAttempt('chat5'); expect(mismatches()).toHaveLength(1);
+    notAttempt('chat6'); expect(mismatches()).toHaveLength(2);
+  });
+  it('starts a new streak when the bound course card changes', () => {
+    notAttempt('apple1'); notAttempt('apple2');
+    conversation.setPresented({ kind: 'card', id: 'milk' });
+    notAttempt('milk1'); notAttempt('milk2'); expect(mismatches()).toEqual([]);
+    notAttempt('milk3'); expect(mismatches()).toHaveLength(1); expect(mismatches()[0]).toContain('screen card milk.');
+    conversation.setPresented({ kind: 'card', id: 'apple' });
+    notAttempt('apple3'); notAttempt('apple4'); expect(mismatches()).toHaveLength(1);
+    notAttempt('apple5'); expect(mismatches()).toHaveLength(2);
+  });
+  it('does not carry a streak into a new call', () => {
+    notAttempt('chat1'); notAttempt('chat2'); conversation.close();
+    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt), sittingEnded: () => {} });
+    conversation.setPresented({ kind: 'card', id: 'apple' });
+    notAttempt('chat3'); expect(mismatches()).toEqual([]);
+    notAttempt('chat4'); notAttempt('chat5'); expect(mismatches()).toHaveLength(1);
+  });
+  it('logs each written app note with only its safe result or streak count', () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => {});
+    try {
+      created('r1'); notAttempt('private speech1'); notAttempt('private speech2'); notAttempt('private speech3');
+      expect(info.mock.calls.filter(([message]) => message === 'app note')).toEqual([]);
+      done('r1');
+      expect(info.mock.calls.filter(([message]) => message === 'app note')).toEqual([
+        ['app note', { module: 'realtime-conversation', sessionId: session.id, kind: 'verdict', result: 'not_attempt' }],
+        ['app note', { module: 'realtime-conversation', sessionId: session.id, kind: 'mismatch', count: 3 }],
+      ]);
+    } finally { info.mockRestore(); }
+  });
+  it('keeps the screen, sentence and verdict rules in the fixed prompt without any session.update', () => {
+    const instructions = () => (conversation.sessionConfig('m') as { instructions: string }).instructions;
+    const fixed = instructions();
+    expect(fixed).toContain('SCREEN FIRST: the app judges every answer against the card on the screen, and the child is looking at that card.');
+    expect(fixed).toContain('Before you ask for anything else (an earlier word to recall, another word from the same situation, a course sentence), put that card on the screen with show_card in that same turn and ask after its result.');
+    expect(fixed).toContain('Never ask for one word while another card is showing.');
+    expect(fixed).toContain('Mentioning other words while you explain or set a scene is fine; asking the child to say them is not.');
+    expect(fixed).toContain('SENTENCES: The course\'s target sentences have their own cards (kind "sentence" in the learning targets).');
+    expect(fixed).toContain('To practise one as a whole sentence, show its sentence card first (see SCREEN FIRST), then model it and invite it.');
+    expect(fixed).toContain('A child who puts the screen word into a sentence of their own is welcome and needs no correction of the rest of that sentence.');
+    expect(fixed).toContain('never ask the child to repeat it in full or to fix its small words.');
+    expect(fixed).toContain('This holds only while words remain: when [app] State shows no words left to pass in the whole course, do not keep recalling them; call start_practice right away, whatever the time.');
+    expect(fixed.indexOf('and bring in the course\'s target sentences.')).toBeLessThan(fixed.indexOf('This holds only while words remain:'));
+    expect(fixed.indexOf('This holds only while words remain:')).toBeLessThan(fixed.indexOf('When an [app] message says the time is nearly up'));
+    expect(fixed).toContain('Show the card of each word you ask them to recall first (see SCREEN FIRST).');
+    expect(fixed.indexOf('Recall answers do not remove a passed word.')).toBeLessThan(fixed.indexOf('Show the card of each word you ask them to recall first (see SCREEN FIRST).'));
+    expect(fixed.indexOf('Show the card of each word you ask them to recall first (see SCREEN FIRST).')).toBeLessThan(fixed.indexOf('SUMMARY:'));
+    expect(fixed).toContain('APP VERDICT: after each thing the child says, the app tells you in an [app] Heard message');
+    expect(fixed).toContain('Never read it aloud or mention it.');
+    expect(fixed.indexOf('NO BOOKKEEPING TALK:')).toBeLessThan(fixed.indexOf('SCREEN FIRST:'));
+    expect(fixed.indexOf('SCREEN FIRST:')).toBeLessThan(fixed.indexOf('SENTENCES:'));
+    expect(fixed.indexOf('SENTENCES:')).toBeLessThan(fixed.indexOf('APP VERDICT:'));
+    expect(fixed.indexOf('APP VERDICT:')).toBeLessThan(fixed.indexOf('TOOL RECOVERY:'));
+    notAttempt('chat1'); notAttempt('chat2'); notAttempt('chat3');
+    speech('try'); assessed('try', { mastered: false });
+    expect(instructions()).toBe(fixed); expect(sent.some((event) => event.type === 'session.update')).toBe(false);
   });
 });
 
@@ -530,8 +713,8 @@ describe('provider auto-interruption', () => {
 });
 
 describe('sitting timing', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => { vi.useFakeTimers(); vi.spyOn(logger, 'info').mockImplementation(() => {}); });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
   it('appends a wrap-up message at the first mark without responding or touching the session', () => {
     open(); minutes(SITTING.wrapUpMs / 60_000 - 1); expect(sent).toEqual([]);
     minutes(1);
@@ -539,11 +722,11 @@ describe('sitting timing', () => {
     expect(notes).toHaveLength(1); expect(notes[0]).toContain('[app]');
     expect(creates()).toHaveLength(0); expect(sent.some((e) => e.type === 'session.update')).toBe(false); expect(sittingEnds).toBe(0);
   });
-  it('with the word battle on, the wrap-up turns the recall game into the battle and tells the browser to show it', () => {
+  it('with the word battle on, waits for the first successful show_card and publishes that card before starting once', () => {
     conversation.close();
-    let wrapUps = 0;
-    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt),
-      sittingEnded: () => { sittingEnds++; }, sittingWrapUp: () => { wrapUps++; } }, undefined, { game: true, silence: NO_NUDGE });
+    let wrapUps = 0; const order: string[] = [];
+    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => { published.push(receipt); order.push('card'); },
+      sittingEnded: () => { sittingEnds++; }, sittingWrapUp: () => { wrapUps++; order.push('battle'); } }, undefined, { game: true, silence: NO_NUDGE });
     conversation.setPresented({ kind: 'card', id: 'apple' }); sent.length = 0;
     open(); minutes(SITTING.wrapUpMs / 60_000 - 1); expect(wrapUps).toBe(0);
     minutes(1);
@@ -551,7 +734,76 @@ describe('sitting timing', () => {
     expect(notes).toHaveLength(1);
     expect(notes[0]).toContain('[app] Time check'); expect(notes[0]).toContain('WORD BATTLE');
     expect(notes[0]).toContain('without saying the English word yourself'); expect(notes[0]).toContain('call end_sitting');
-    expect(wrapUps).toBe(1); expect(creates()).toHaveLength(0); expect(sittingEnds).toBe(0);
+    expect(notes[0]).toContain('in that same turn put the first');
+    expect(notes[0]).not.toContain('already switched');
+    expect(wrapUps).toBe(0); expect(creates()).toHaveLength(0); expect(sittingEnds).toBe(0);
+    speech('before-battle'); assessed('before-battle');
+    expect(wrapUps).toBe(0); order.length = 0;
+    created('invalid'); done('invalid', [call('show_card', { card_id: 'missing' })]);
+    expect(wrapUps).toBe(0);
+    expect(logger.info).not.toHaveBeenCalledWith('battle started', expect.anything());
+    created('first'); done('first', [call('show_card', { card_id: 'milk' })]);
+    expect(order).toEqual(['card', 'battle']); expect(wrapUps).toBe(1);
+    expect(logger.info).toHaveBeenCalledWith('battle started', { module: 'realtime-conversation', sessionId: session.id, elapsedMs: SITTING.wrapUpMs });
+    created('second'); done('second', [call('show_card', { card_id: 'apple' })]);
+    expect(wrapUps).toBe(1);
+    expect(vi.mocked(logger.info).mock.calls.filter(([message]) => message === 'battle started')).toHaveLength(1);
+  });
+  it.each(['tool', 'deadline'] as const)('never starts a battle if %s ends the sitting without showing a card', (by) => {
+    conversation.close(); const wrapUp = vi.fn();
+    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt),
+      sittingEnded: () => { sittingEnds++; }, sittingWrapUp: wrapUp }, undefined, { game: true, silence: NO_NUDGE });
+    open(); minutes(SITTING.wrapUpMs / 60_000);
+    if (by === 'tool') { created('end'); done('end', [call('end_sitting', {})]); }
+    else minutes((SITTING.goodbyeMs - SITTING.wrapUpMs) / 60_000);
+    expect(sittingEnds).toBe(1); expect(wrapUp).not.toHaveBeenCalled();
+    created('late'); done('late', [call('show_card', { card_id: 'milk' })]);
+    expect(wrapUp).not.toHaveBeenCalled(); expect(published).toEqual([]);
+  });
+  describe.each(['tool', 'deadline'] as const)('waiting for the last assessment (%s)', (by) => {
+    let order: string[];
+    beforeEach(() => {
+      conversation.close(); order = [];
+      conversation = new NaturalConversation(session, { send: (event) => {
+        sent.push(event as Record<string, any>);
+        if ((event as any).response?.metadata?.kind === 'goodbye') order.push('goodbye');
+      }, publish: (receipt) => { published.push(receipt); order.push('receipt'); }, sittingEnded: () => { sittingEnds++; order.push('ended'); } },
+      { wrapUpMs: 100, goodbyeMs: 200 }, { silence: NO_NUDGE, assessmentWaitMs: 50 });
+      conversation.setPresented({ kind: 'card', id: 'apple' });
+      open(); vi.advanceTimersByTime(100); speech('last');
+      if (by === 'tool') { created('end'); done('end', [call('end_sitting', {})]); }
+      else vi.advanceTimersByTime(100);
+      expect(sittingEnds).toBe(0); expect(kinds()).toEqual([]);
+    });
+    it('publishes a late hit before sitting-ended and goodbye, without a followup or new teaching', () => {
+      vi.advanceTimersByTime(25); speech('too-late');
+      expect(assessRequests()).toHaveLength(1);
+      created('late-tool'); done('late-tool', [call('show_card', { card_id: 'milk' })]);
+      expect(session.memory.currentCardId).toBe('apple'); expect(kinds()).toEqual([]);
+      assessed('last');
+      expect(order).toEqual(['receipt', 'ended', 'goodbye']);
+      expect(logger.info).toHaveBeenCalledWith('sitting end settled', { module: 'realtime-conversation', sessionId: session.id, waitedMs: 25, pending: 1, timedOut: false });
+      expect(published.at(-1)?.assessment?.mastered).toBe(true);
+      vi.advanceTimersByTime(1000); expect(sittingEnds).toBe(1);
+      expect(vi.mocked(logger.info).mock.calls.filter(([message]) => message === 'sitting end settled')).toHaveLength(1);
+    });
+    it('ends after the injectable bound if the assessment never comes back', () => {
+      vi.advanceTimersByTime(49); expect(sittingEnds).toBe(0);
+      expect(logger.info).not.toHaveBeenCalledWith('sitting end settled', expect.anything());
+      vi.advanceTimersByTime(1); expect(order).toEqual(['ended', 'goodbye']);
+      expect(published).toEqual([]); expect(sittingEnds).toBe(1);
+      expect(logger.info).toHaveBeenCalledWith('sitting end settled', { module: 'realtime-conversation', sessionId: session.id, waitedMs: 50, pending: 1, timedOut: true });
+    });
+    it.each(['not_attempt', 'failed', 'error'] as const)('ends as soon as the assessment settles as %s', (how) => {
+      if (how === 'error') feed({ type: 'error', error: { code: 'rate_limit_exceeded', event_id: assessRequests()[0].event_id } });
+      else if (how === 'failed') settle('last', [], 'failed');
+      else assessed('last', { result: 'not_attempt', mastered: false });
+      expect(order).toEqual(['ended', 'goodbye']); expect(assessRequests()).toHaveLength(1);
+    });
+    it('clears the end wait on close', () => {
+      conversation.close(); vi.advanceTimersByTime(1000);
+      expect(order).toEqual([]); expect(sittingEnds).toBe(0);
+    });
   });
   it('without the word battle the wrap-up note is unchanged and the browser is not told', () => {
     open(); minutes(SITTING.wrapUpMs / 60_000);
@@ -588,6 +840,15 @@ describe('sitting timing', () => {
     feed({ type: 'input_audio_buffer.speech_stopped', item_id: 'chat' }, { type: 'input_audio_buffer.committed', item_id: 'chat' });
     expect(kinds()).toEqual(['goodbye']);
   });
+  it('drops the manual speech turn at the deadline so the goodbye is not blocked by a later ignored end signal', () => {
+    conversation.close();
+    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt),
+      sittingEnded: () => { sittingEnds++; } }, { wrapUpMs: 100, goodbyeMs: 200 }, { manualTurn: true });
+    open(); conversation.childSpeech('start'); vi.advanceTimersByTime(200);
+    expect(sittingEnds).toBe(1); expect(kinds()).toEqual(['goodbye']);
+    conversation.childSpeech('end');
+    expect(kinds()).toEqual(['goodbye']);
+  });
   it('says only the completion goodbye when the course finishes before the marks', () => {
     open(); minutes(3);
     finishCourse();
@@ -615,10 +876,11 @@ describe('sitting timing', () => {
     });
     it('after the wrap-up queues exactly one goodbye, ends the sitting and sends no tool follow-up', () => {
       open(); minutes(SITTING.wrapUpMs / 60_000);
-      speech('i1'); created('r1'); sent.length = 0;
+      speech('i1'); assessed('i1'); created('r1'); sent.length = 0;
       done('r1', [endCall()]);
       expect(outputs()[0]).toMatchObject({ ok: true });
       expect(sittingEnds).toBe(1); expect(kinds()).toEqual(['goodbye']); expect(creates()[0].response.tool_choice).toBe('none');
+      expect(logger.info).toHaveBeenCalledWith('sitting end settled', { module: 'realtime-conversation', sessionId: session.id, waitedMs: 0, pending: 0, timedOut: false });
       created('bye', { ...creates()[0].response.metadata }); done('bye');
       expect(kinds()).toEqual(['goodbye']);
       minutes(30); expect(kinds()).toEqual(['goodbye']); expect(sittingEnds).toBe(1);
@@ -626,7 +888,7 @@ describe('sitting timing', () => {
     });
     it('keeps the goodbye through child speech that starts right after the call', () => {
       open(); minutes(SITTING.wrapUpMs / 60_000);
-      speech('i1'); created('r1'); sent.length = 0;
+      speech('i1'); assessed('i1'); created('r1'); sent.length = 0;
       feed({ type: 'input_audio_buffer.speech_started', item_id: 'late' });
       done('r1', [endCall()]);
       expect(sittingEnds).toBe(1); expect(creates()).toHaveLength(0);
@@ -649,7 +911,7 @@ describe('sitting timing', () => {
     });
     it('leaves the deadline with nothing to do after the tool ended the sitting', () => {
       open(); minutes(SITTING.wrapUpMs / 60_000);
-      speech('i1'); created('r1'); done('r1', [endCall()]);
+      speech('i1'); assessed('i1'); created('r1'); done('r1', [endCall()]);
       created('bye', { ...creates().at(-1)?.response.metadata }); done('bye'); sent.length = 0;
       minutes(SITTING.goodbyeMs / 60_000);
       expect(creates()).toHaveLength(0); expect(sittingEnds).toBe(1);
@@ -670,17 +932,115 @@ describe('sitting timing', () => {
   });
 });
 
+describe('correct echo reminders', () => {
+  const echo = (input: string) => { speech(input); assessed(input, { mastered: false, next_action: 'retry' }); };
+  const echoes = () => appNotes().filter((text) => text.startsWith('[app] The child has now said'));
+  const reminder = (word: string, count: number) => `[app] The child has now said ${word} correctly ${count} times right after your model. Next, ask for it once with a cue that does not contain the English word (the Chinese meaning or a situation) and stop to listen. If they cannot recall it, give one different kind of help and one more chance; if it still does not come, leave this word for now, move on to another word and come back to it later.`;
+  it('reminds at 2, 4 and 6 saved correct echoes without mastering or switching the card', () => {
+    for (let i = 1; i <= 6; i++) {
+      echo(`echo${i}`);
+      expect(echoes()).toEqual(Array.from({ length: Math.floor(i / 2) }, (_, n) => reminder('apple', (n + 1) * 2)));
+    }
+    expect(attempts('apple')).toBe(6); expect(session.memory.clearedCardIds).toEqual([]);
+    expect(session.memory.currentCardId).toBe('apple'); expect(creates()).toEqual([]);
+    expect(sent.some((event) => event.type === 'session.update')).toBe(false);
+  });
+  it.each(['completed', 'cancelled'])('waits for every active teacher response to settle (%s), then writes after the verdict', (status) => {
+    echo('echo1'); created('r1'); created('r2'); echo('echo2');
+    expect(echoes()).toEqual([]);
+    done('r1', [], status); expect(echoes()).toEqual([]);
+    done('r2', [], status);
+    expect(appNotes().slice(-2)).toEqual([
+      `[app] Heard: on the card apple the app judged the child's last answer as correct (heard "echo2").`, reminder('apple', 2),
+    ]);
+    created('r3'); done('r3'); expect(echoes()).toHaveLength(1);
+  });
+  it('keeps only the latest pending echo reminder, even across cards', () => {
+    created('r1');
+    for (let i = 1; i <= 4; i++) echo(`apple${i}`);
+    conversation.setPresented({ kind: 'card', id: 'milk' }); echo('milk1'); echo('milk2');
+    expect(echoes()).toEqual([]); done('r1');
+    expect(echoes()).toEqual([reminder('milk', 2)]);
+  });
+  it('writes verdict, mismatch, then echo, and logs only safe fields when actually written', () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => {});
+    try {
+      created('r1'); echo('private1'); echo('private2');
+      for (let i = 1; i <= 3; i++) { speech(`chat${i}`); assessed(`chat${i}`, { result: 'not_attempt', mastered: false }); }
+      expect(info.mock.calls.filter(([message]) => message === 'app note')).toEqual([]);
+      done('r1');
+      expect(appNotes()).toHaveLength(3);
+      expect(appNotes()[0]).toContain('[app] Heard:'); expect(appNotes()[1]).toContain("The child's last 3 messages");
+      expect(appNotes()[2]).toBe(reminder('apple', 2));
+      expect(sent.find((event) => event.item?.content?.[0]?.text === reminder('apple', 2))?.item).toMatchObject({ type: 'message', role: 'system', content: [{ type: 'input_text' }] });
+      expect(info.mock.calls.filter(([message]) => message === 'app note')).toEqual([
+        ['app note', { module: 'realtime-conversation', sessionId: session.id, kind: 'verdict', result: 'not_attempt' }],
+        ['app note', { module: 'realtime-conversation', sessionId: session.id, kind: 'mismatch', count: 3 }],
+        ['app note', { module: 'realtime-conversation', sessionId: session.id, kind: 'echo', count: 2 }],
+      ]);
+    } finally { info.mockRestore(); }
+  });
+  it('retains separate counts when switching away from a card and back', () => {
+    echo('apple1'); conversation.setPresented({ kind: 'card', id: 'milk' }); echo('milk1');
+    conversation.setPresented({ kind: 'card', id: 'apple' }); echo('apple2');
+    expect(echoes()).toEqual([reminder('apple', 2)]);
+    conversation.setPresented({ kind: 'card', id: 'milk' }); echo('milk2');
+    expect(echoes()).toEqual([reminder('apple', 2), reminder('milk', 2)]);
+  });
+  it('ignores sentence cards, not_attempt, close and wrong without resetting the word count', () => {
+    echo('apple1');
+    const sentence = session.course.cards.find((card) => card.kind === 'sentence')!;
+    conversation.setPresented({ kind: 'card', id: sentence.id }); echo('sentence1'); echo('sentence2');
+    conversation.setPresented({ kind: 'card', id: 'apple' });
+    for (const result of ['not_attempt', 'close', 'wrong']) { speech(result); assessed(result, { result, mastered: false }); }
+    expect(echoes()).toEqual([]); echo('apple2');
+    expect(echoes()).toEqual([reminder('apple', 2)]);
+  });
+  it.each([false, true])('stops after mastery, dropping an unwritten reminder too (pending=%s)', (pending) => {
+    if (pending) created('r1');
+    echo('echo1'); echo('echo2'); speech('recall'); assessed('recall');
+    if (pending) done('r1');
+    echo('echo3'); echo('echo4');
+    expect(echoes()).toEqual(pending ? [] : [reminder('apple', 2)]);
+    expect(session.memory.clearedCardIds).toContain('apple');
+  });
+  it('starts at zero in a new call despite historical wordPerformance and an earlier call echo', () => {
+    session.memory.wordPerformance.set('apple', { attempts: 15, correct: 15, lastAttempt: new Date() });
+    echo('previous-call'); conversation.close();
+    conversation = new NaturalConversation(session, { send: (event) => sent.push(event as Record<string, any>), publish: (receipt) => published.push(receipt), sittingEnded: () => {} });
+    conversation.setPresented({ kind: 'card', id: 'apple' });
+    echo('new1'); expect(echoes()).toEqual([]); echo('new2');
+    expect(echoes()).toEqual([reminder('apple', 2)]); expect(attempts('apple')).toBe(18);
+  });
+  it('counts a duplicated assessment only once and never counts a rejected save', () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      echo('echo1');
+      settle('echo1', [call('record_assessment', { result: 'correct', heard: 'apple', evidence: 'echo', mastered: false, next_action: 'retry' })], 'completed', '_duplicate');
+      speech('rejected'); session.currentPhase = 'done'; assessed('rejected', { mastered: false });
+      session.currentPhase = 'interactive'; expect(echoes()).toEqual([]);
+      echo('echo2'); expect(echoes()).toEqual([reminder('apple', 2)]); expect(attempts('apple')).toBe(2);
+    } finally { warning.mockRestore(); }
+  });
+});
+
 describe('opening note', () => {
   it('lists earlier passed words and asks for recall when resuming', () => {
     session.memory.clearedCardIds = ['apple', 'milk']; sent.length = 0;
     conversation.start(true);
     const note = sent.find((e) => e.type === 'conversation.item.create' && e.item.content[0].text.includes('back to continue'))?.item.content[0].text as string;
-    expect(note).toContain('"apple"'); expect(note).toContain('"milk"'); expect(note.toLowerCase()).toContain('recall');
+    expect(note).toBe('[app] The child is back to continue this course. Screen shows card apple (apple / 苹果). Words passed in earlier sittings: ["apple","milk"]. Greet in one short sentence and, in that same turn, put the first word you will ask them to recall on the screen with show_card; ask for it after the result, in a NEW situation (not the old drill). Recall 2-3 of them this way, one card at a time; hints are fine, a forgotten word is not a failure. Then go on with new teaching.');
+    expect(note.match(/Greet/g)).toHaveLength(1);
   });
   it('has no recall request on a first sitting', () => {
     conversation.start(false);
     const note = sent.find((e) => e.type === 'conversation.item.create' && e.item.content[0].text.startsWith('[app] Lesson started'))?.item.content[0].text as string;
-    expect(note).toBeTruthy(); expect(note.toLowerCase()).not.toContain('recall');
+    expect(note).toBe('[app] Lesson started. Screen shows card apple (apple / 苹果). Greet in one short sentence. Then teach this card.');
+  });
+  it('keeps the existing greeting and teaching cue when resuming without passed words', () => {
+    conversation.start(true);
+    const note = sent.find((e) => e.type === 'conversation.item.create' && e.item.content[0].text.includes('back to continue'))?.item.content[0].text as string;
+    expect(note).toBe('[app] The child is back to continue this course. Screen shows card apple (apple / 苹果). Greet in one short sentence. Then teach this card.');
   });
   it('states remaining words as course-wide and does not demand teaching them all now', () => {
     conversation.setPresented({ kind: 'card', id: 'milk' });
@@ -717,11 +1077,11 @@ describe('experimental manual-turn mode (server VAD off)', () => {
     expect(game).toContain('The battle comes only at the end');
     expect(game.startsWith(text(new NaturalConversation(session, port)))).toBe(true); // appended, the rest is untouched
   });
-  it('turns provider VAD off only in manual mode', () => {
+  it('uses medium provider VAD in auto mode and turns it off in manual mode', () => {
     const config = (c: NaturalConversation) => (c.sessionConfig('m') as { audio: { input: { turn_detection: unknown } } }).audio.input.turn_detection;
     expect(config(conversation)).toBeNull();
     const auto = new NaturalConversation(session, { send: () => {}, publish: () => {}, sittingEnded: () => {} });
-    expect(config(auto)).toMatchObject({ type: 'semantic_vad', interrupt_response: true });
+    expect(config(auto)).toEqual({ type: 'semantic_vad', eagerness: 'medium', create_response: true, interrupt_response: true });
     expect(() => auto.childSpeech('start')).toThrow('NOT_FOUND');
   });
   it('commits and answers immediately when the teacher is idle, binding the item to the target captured at start', () => {

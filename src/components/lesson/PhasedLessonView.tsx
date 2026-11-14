@@ -31,6 +31,9 @@ interface PhasedLessonViewProps {
   onStarted?: () => void;
 }
 
+/** Let the last spell land before taking the end-page snapshot. */
+export const BATTLE_END_DELAY_MS = 1800;
+
 const CLASSROOM_MODES = [
   { id: 'legacy', label: '原有课堂 · 豆包语音' },
   { id: 'realtime', label: 'Realtime 自然对话 · OpenAI' },
@@ -62,7 +65,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   const [battle, setBattle] = useState(false);
   const [collectedCardIds, setCollectedCardIds] = useState<string[]>([]);
   const [subtitlesOpen, setSubtitlesOpen] = useState(false);
-  // The battle is the sitting's closing recall game: it starts when the server says the wrap-up began.
+  // The battle is the sitting's closing recall game: it starts when the server commits the first battle card.
   const [fighting, setFighting] = useState(false);
   const [battleEnd, setBattleEnd] = useState<BattleState | null>(null);
   const battleNow = useRef<BattleState | null>(null);
@@ -79,6 +82,8 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
   useEffect(() => {
     const v2: Classroom = mode === 'realtime' ? new RealtimeClassroom(course) : new LegacyClassroom(course);
     const phased = v2;
+    let battleStarted = false; let currentPhase: PhaseName = 'intro';
+    let ending = false; let endTimer: ReturnType<typeof setTimeout> | null = null;
     // R1 (2026-07-20 session persistence): a resumed session's very first 'phase-change' event
     // IS the resume application itself (PhasedLessonController.applyResumeInfo emits it
     // synchronously before startLesson() resolves — see phased-lesson-controller.ts). Reading
@@ -87,7 +92,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
     // mount one tick early with the still-default card/passedQuizIds (verified by a failing
     // test before this fix: quiz 0 briefly won the race against the resumed passedQuizIds).
     const onPhaseChange = (next: PhaseName) => {
-      setPhase(next);
+      currentPhase = next; setPhase(next);
       if (!resumeAppliedRef.current) {
         const resume = phased.getResumeInfo();
         if (resume?.resumed) {
@@ -114,12 +119,18 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       // Configuration problems need to remain visible long enough to act on them.
       if (mode === 'legacy' && !llmFailureNeedsSettings(err.code)) errorTimerRef.current = setTimeout(() => setLessonError(null), 4000);
     };
-    const onWrapUp = () => setFighting(true);
-    const onSittingEnded = () => {
-      // Keep what the battle looked like when the sitting ended; the untamed monster comes back first next time.
+    const onWrapUp = () => { battleStarted = true; setFighting(true); };
+    const showSittingEnd = () => {
+      // Read after the last answer's React updates and animation; remember the monster actually left on stage.
       const last = battleNow.current; setBattleEnd(last);
       if (last) rememberEscapedMonster(last.monster.kind);
       setSittingEnded(true);
+    };
+    const onSittingEnded = () => {
+      if (ending) return;
+      ending = true;
+      if (battleStarted && currentPhase === 'interactive') endTimer = setTimeout(showSittingEnd, BATTLE_END_DELAY_MS);
+      else showSittingEnd();
     };
     v2Ref.current = v2;
     v2.on('sitting-ended', onSittingEnded);
@@ -139,6 +150,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
       v2.off('error', onError);
       v2.off('sitting-ended', onSittingEnded);
       v2.off('sitting-wrap-up', onWrapUp);
+      if (endTimer) clearTimeout(endTimer);
       if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
       phased.off('phase-change', onPhaseChange);
       phased.off('transition-retry-change', onTransitionRetry);
@@ -263,7 +275,7 @@ export function PhasedLessonView({ course, learnerId, fresh, onStarted }: Phased
         )}
         {started && phase !== 'intro' && phase !== 'done' && !sittingEnded && v2 && <SubtitleLog controller={v2} learnerId={learnerId} />}
         {sittingEnded && phase !== 'done' && (
-          <div role="status" className={battle ? 'p2-retry bt-end' : 'p2-retry'}>{battle && <BattleSummary course={course} collectedCardIds={collectedCardIds} team={battleEnd?.team} escaped={battleEnd?.monster} />}<EmptyState title="今天先学到这里" action={<><Button onClick={handleRestart}>继续上课</Button> <Button variant="glass" onClick={handleLeave}>回到课程</Button></>}>进度已保存，下次继续</EmptyState></div>
+          <div role="status" className={battleEnd ? 'p2-retry bt-end' : 'p2-retry'}>{battleEnd && <BattleSummary course={course} collectedCardIds={collectedCardIds} team={battleEnd?.team} escaped={battleEnd?.monster} />}<EmptyState title="今天先学到这里" action={<><Button onClick={handleRestart}>继续上课</Button> <Button variant="glass" onClick={handleLeave}>回到课程</Button></>}>进度已保存，下次继续</EmptyState></div>
         )}
         {started && !transitionRetry && phase === 'done' && (
           <DoneLesson courseId={course.id} learnerId={learnerId} onAgain={handleRestart} extra={battle ? <BattleSummary course={course} collectedCardIds={collectedCardIds} compact /> : undefined} />
