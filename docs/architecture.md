@@ -508,7 +508,7 @@ Smoke session 可以验证状态机和报告管线,但不能替代真实课样�
       ↓ Write 到 docs/lesson-reports/YYYY-MM-DD-<sid8>.md(已 gitignore)
 
 **职责切分**:
-- **`scripts/lesson-report-data.ts`**(数据层,有单测):基础聚合 + 课程目标词 + anomaly flags(`highAvgInput` / `asrUsageNotTracked` / `ttsUsageNotTracked` / `tokensCorrupted`) + prompt input breakdown 聚合(`trackedTurns`、平均字符、最大 bucket、估算 token share) + Eval v1 scorecard。Eval v1 输出 `sessionHealth`、`costContext`、`teachingLoop`、`agentBehavior`、`nextIterationSignals`,用于量化 session 是否健康、上下文成本是否偏高、目标词覆盖/清除情况、卡住/错位/提前收尾等 Agent 行为风险,以及下一步应该优先做 prompt slimming、教学循环修复、provider tracking 还是数据完整性修复。pure 函数 `buildReport(db, sessionId, courseLoader)`,接受依赖注入。
+- **`scripts/lesson-report-data.ts`**(数据层,有单测):基础聚合 + 课程目标词 + anomaly flags(`highAvgInput` / `asrUsageNotTracked` / `ttsUsageNotTracked` / `tokensCorrupted`) + prompt input breakdown 聚合(`trackedTurns`、平均字符、最大 bucket、估算 token share) + Eval v1 scorecard。Eval v1 输出 `sessionHealth`、`costContext`、`teachingLoop`、`agentBehavior`、`nextIterationSignals`,用于量化 session 是否健康、上下文成本是否偏高、目标词覆盖/清除情况、卡住/错位/提前收尾等 Agent 行为风险,以及下一步应该优先做 prompt slimming、教学循环修复、provider tracking 还是数据完整性修复。Realtime 课另外输出 `childUtterances`（完成且结果可解析的评估回应数，含「不算」，失败重试的失败行不重复计）、`notAttempts`（有效评估序号 `n`、保存时间 `ts`、绑定屏幕目标 `targetId`、模型自述 `heard`；旧无参数工具记录的目标为 `null`）、`targetRuns`（按已保存作答的 `assessment.target_id` 连续分段，含目标、起止作答轮次、长度、correct 数和段内是否过关；课程卡看 mastered，练习题看正确作答；换目标或缺目标时断段，「不算」不进作答记录）。`childUtterances` 不含完全失败或未留存评估的语音；不能用作答数代替它。原有课堂输出保持原样。pure 函数 `buildReport(db, sessionId, courseLoader)`,接受依赖注入。
 - **报告撰写层**:基于 raw `interactions` 判断 ASR 误识 / 话术循环卡死;项目只跟踪数据脚本,本地 agent prompt 不进入 public repo。
 
 **报告范围**:只产出**工程信号**(ASR 误识 / 话术循环 / token / 埋点),教学策略类观察只列不评判。

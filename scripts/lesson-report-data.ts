@@ -52,8 +52,14 @@ export interface ReportData {
   }>;
   responses: ResponseRow[];
   responseStats: ResponseStats;
+  /** Realtime only: usable assessor reports; failed responses retried by the assessor do not add a second utterance. */
+  childUtterances?: number;
+  notAttempts?: Array<{ n: number; ts: string; targetId: string | null; heard: string }>;
+  targetRuns?: TargetRun[];
   eval: EvalScorecard;
 }
+
+interface TargetRun { targetId: string; startTurn: number; endTurn: number; length: number; correct: number; cleared: boolean }
 
 export interface ResponseRow { n: number; ts: string; kind: string; status: string; text: string; tools: string; replyMs: number | null }
 export interface ResponseStats {
@@ -78,6 +84,7 @@ export interface CourseDefinition {
   title: string;
   words: string[];
   wordCards?: CourseWord[];
+  quizIds?: string[];
 }
 
 export type CourseLoader = (courseId: string) => Promise<CourseDefinition | null>;
@@ -147,20 +154,20 @@ interface EvalScorecard {
       startTurn: number;
       endTurn: number;
       length: number;
-    }>;
-    maxStuckRunLength: number;
+    }> | null;
+    maxStuckRunLength: number | null;
   };
   agentBehavior: {
-    speechCardMismatchCount: number;
+    speechCardMismatchCount: number | null;
     speechCardMismatches: Array<{
       turn: number;
       showCardId: string;
       mentionedOtherCardId: string;
-    }>;
+    }> | null;
     prematureClosingCount: number;
     prematureClosingTurns: number[];
     emptyAiResponseTurns: number[];
-    emptyActionTurns: number[];
+    emptyActionTurns: number[] | null;
     guardActivity: {
       rcRejectedCount: number;
       rcSuppressedCount: number;
@@ -271,6 +278,7 @@ export async function buildReport(
   const responses = readResponses(db, lesson.id);
   const usage = parseTokenUsage(lesson.token_usage);
   const mode = lesson.lesson_mode === 'realtime' ? 'realtime' : 'legacy';
+  const diagnostics = mode === 'realtime' ? buildRealtimeDiagnostics(responses, rows, course?.quizIds ?? []) : undefined;
   const realtime = mode === 'realtime' ? summarizeRealtimeUsage((safeJsonParse(lesson.token_usage, {}) as { realtime?: unknown }).realtime) : undefined;
   const modelCalls = rows.map((r) => safeJsonParse(r.model_calls, {}) as ModelCallsRow);
   const inputs = modelCalls.map((mc) => {
@@ -330,6 +338,7 @@ export async function buildReport(
     interactions,
     responses,
     responseStats: buildResponseStats(responses),
+    ...diagnostics,
     eval: buildEvalScorecard({
       lesson,
       session,
@@ -340,6 +349,7 @@ export async function buildReport(
       targetWords,
       wordCards,
       wordPerformanceRows,
+      diagnostics,
     }),
   };
 }
@@ -363,9 +373,8 @@ function buildResponseStats(responses: ResponseRow[]): ResponseStats {
   const results = { correct: 0, close: 0, wrong: 0, not_attempt: 0 };
   let failed = 0;
   for (const r of assessor) {
-    const report = r.status === 'completed' ? safeJsonParse(r.text, null) : null;
-    const result = report && typeof report === 'object' ? (report as { result?: unknown }).result : undefined;
-    if (typeof result === 'string' && Object.prototype.hasOwnProperty.call(results, result)) results[result as keyof typeof results]++;
+    const report = readAssessment(r);
+    if (report) results[report.result]++;
     else failed++;
   }
   return {
@@ -377,6 +386,42 @@ function buildResponseStats(responses: ResponseRow[]): ResponseStats {
     nudges: responses.filter((r) => r.kind === 'nudge').length,
     replyMs: { count: waits.length, median, p90: waits.length ? at(0.9) : null, max: waits.length ? waits[waits.length - 1] : null },
   };
+}
+
+function readAssessment(row: ResponseRow): { result: 'correct' | 'close' | 'wrong' | 'not_attempt'; heard?: string } | null {
+  const report = row.status === 'completed' ? safeJsonParse(row.text, null) : null;
+  if (!report || typeof report !== 'object' || !('result' in report) || typeof report.result !== 'string' || !['correct', 'close', 'wrong', 'not_attempt'].includes(report.result)) return null;
+  return report as { result: 'correct' | 'close' | 'wrong' | 'not_attempt'; heard?: string };
+}
+
+function buildRealtimeDiagnostics(responses: ResponseRow[], rows: InteractionRow[], quizIds: string[]) {
+  const utterances = responses.filter((row) => row.kind === 'assess').flatMap((row) => {
+    const report = readAssessment(row);
+    return report ? [{ row, report }] : [];
+  });
+  const notAttempts = utterances.flatMap(({ row, report }, i) => report.result === 'not_attempt' ? [{
+    n: i + 1,
+    ts: row.ts,
+    // Old rows have only the tool name: do not infer the screen target from nearby teacher tools.
+    targetId: row.tools.match(/(?:^|,)record_assessment\(([^)]+)\)(?:,|$)/)?.[1] ?? null,
+    heard: typeof report.heard === 'string' ? report.heard : '',
+  }] : []);
+  const targetRuns: TargetRun[] = [];
+  let run: TargetRun | undefined;
+  rows.forEach((row, i) => {
+    const assessment = (safeJsonParse(row.model_calls, {}) as ModelCallsRow).assessment;
+    const targetId = assessment?.target_id;
+    if (!targetId) { run = undefined; return; }
+    if (!run || run.targetId !== targetId) {
+      run = { targetId, startTurn: i + 1, endTurn: i + 1, length: 0, correct: 0, cleared: false };
+      targetRuns.push(run);
+    }
+    run.endTurn = i + 1;
+    run.length++;
+    if (assessment.result === 'correct') run.correct++;
+    if (assessment.mastered || (quizIds.includes(targetId) && assessment.result === 'correct')) run.cleared = true;
+  });
+  return { childUtterances: utterances.length, notAttempts, targetRuns };
 }
 
 function safeJsonParse(s: string, fallback: unknown): unknown {
@@ -395,7 +440,7 @@ function buildCourseWordCards(course: CourseDefinition | null, targetWords: stri
 }
 
 interface ModelCallsRow {
-  assessment?: { source?: string; target_id?: string; mastered?: boolean };
+  assessment?: { source?: string; target_id?: string; result?: string; mastered?: boolean };
   // R6 埋点(2026-07-03):session.ts commitTurn 写入的守卫活动。
   guards?: { rcRejected?: string[]; rcSuppressed?: string[]; speechRewrite?: string };
   llm?: {
@@ -525,17 +570,19 @@ function buildEvalScorecard(args: {
   targetWords: string[];
   wordCards: CourseWord[];
   wordPerformanceRows: WordPerformanceRow[];
+  diagnostics?: ReturnType<typeof buildRealtimeDiagnostics>;
 }): EvalScorecard {
   const sessionHealth = buildSessionHealth(args.lesson, args.session, args.tokens, args.anomalies);
   const costContext = buildCostContext(args.tokens, args.modelCalls, args.anomalies);
   const modelMastered = args.session.mode === 'realtime' ? new Set(args.modelCalls.filter((call) => call.assessment?.source === 'model' && call.assessment.mastered).map((call) => normalizeWord(args.wordCards.find((card) => card.id === call.assessment?.target_id)?.english ?? ''))) : undefined;
   const teachingLoop = buildTeachingLoop(args.targetWords, args.wordCards, args.wordPerformanceRows, args.interactions, modelMastered);
-  const agentBehavior = buildAgentBehavior(args.interactions, args.wordCards, teachingLoop.clearRate, args.modelCalls);
+  const agentBehavior = buildAgentBehavior(args.interactions, args.wordCards, teachingLoop.clearRate, args.modelCalls, args.session.mode === 'realtime');
   const nextIterationSignals = buildNextIterationSignals({
     sessionHealth,
     costContext,
     teachingLoop,
     agentBehavior,
+    diagnostics: args.diagnostics,
   });
   return {
     sessionHealth,
@@ -656,7 +703,7 @@ function buildTeachingLoop(
   const totalAttempts = allWords.reduce((sum, word) => sum + word.attempts, 0);
   const totalCorrect = allWords.reduce((sum, word) => sum + word.correct, 0);
   const targetDenominator = scoredWords.length;
-  const stuckCardRuns = findStuckCardRuns(interactions, wordCards);
+  const stuckCardRuns = modelMastered ? null : findStuckCardRuns(interactions, wordCards);
   // 数据源只看尝试过的词:未尝试的词两本账都不会有行,不应把 source 拉成 mixed。
   const attemptedForSource = scoredWords.filter((word) => word.attempted);
   const trackedCount = attemptedForSource.filter((word) => word.rcTracked).length;
@@ -676,7 +723,7 @@ function buildTeachingLoop(
     totalCorrect,
     words: allWords,
     stuckCardRuns,
-    maxStuckRunLength: stuckCardRuns.reduce((max, run) => Math.max(max, run.length), 0),
+    maxStuckRunLength: stuckCardRuns?.reduce((max, run) => Math.max(max, run.length), 0) ?? null,
   };
 }
 
@@ -685,6 +732,7 @@ function buildAgentBehavior(
   wordCards: CourseWord[],
   clearRate: number,
   modelCalls: ModelCallsRow[],
+  realtime = false,
 ): EvalScorecard['agentBehavior'] {
   // R6:守卫活动聚合(session.ts commitTurn 落的 model_calls.guards)。改写发生在
   // 落库前,存量 ai_response 已是改写后文本,只有这里能看到守卫真实拦了多少次。
@@ -705,7 +753,7 @@ function buildAgentBehavior(
     }
   }
   const wordCardsById = new Map(wordCards.map((card) => [card.id, card]));
-  const speechCardMismatches: EvalScorecard['agentBehavior']['speechCardMismatches'] = [];
+  const speechCardMismatches: NonNullable<EvalScorecard['agentBehavior']['speechCardMismatches']> = [];
   const prematureClosingTurns: number[] = [];
   const emptyAiResponseTurns: number[] = [];
   const emptyActionTurns: number[] = [];
@@ -734,12 +782,12 @@ function buildAgentBehavior(
 
   const repeatedSpeechRuns = findRepeatedSpeechRuns(interactions);
   return {
-    speechCardMismatchCount: speechCardMismatches.length,
-    speechCardMismatches,
+    speechCardMismatchCount: realtime ? null : speechCardMismatches.length,
+    speechCardMismatches: realtime ? null : speechCardMismatches,
     prematureClosingCount: prematureClosingTurns.length,
     prematureClosingTurns,
     emptyAiResponseTurns,
-    emptyActionTurns,
+    emptyActionTurns: realtime ? null : emptyActionTurns,
     guardActivity,
     repeatedSpeechRuns,
     maxRepeatedSpeechRunLength: repeatedSpeechRuns.reduce((max, run) => Math.max(max, run.length), 0),
@@ -751,8 +799,9 @@ function buildNextIterationSignals(evalParts: {
   costContext: EvalScorecard['costContext'];
   teachingLoop: EvalScorecard['teachingLoop'];
   agentBehavior: EvalScorecard['agentBehavior'];
+  diagnostics?: ReturnType<typeof buildRealtimeDiagnostics>;
 }): EvalScorecard['nextIterationSignals'] {
-  const { sessionHealth, costContext, teachingLoop, agentBehavior } = evalParts;
+  const { sessionHealth, costContext, teachingLoop, agentBehavior, diagnostics } = evalParts;
   const signals: EvalScorecard['nextIterationSignals'] = [];
   if (sessionHealth.tokensCorrupted) {
     signals.push(signal('token_data_integrity', 'critical', 'token_usage JSON is corrupted', 'tokensCorrupted', true));
@@ -766,26 +815,26 @@ function buildNextIterationSignals(evalParts: {
   if (costContext.llmRequests > 0 && costContext.promptBreakdownCoverageRate < 1) {
     signals.push(signal('prompt_breakdown_missing', 'info', 'Some LLM turns do not have prompt input breakdown data', 'promptBreakdownCoverageRate', costContext.promptBreakdownCoverageRate));
   }
-  if (teachingLoop.targetWordCount > 0 && teachingLoop.coverageRate < 1) {
+  if (!diagnostics && teachingLoop.targetWordCount > 0 && teachingLoop.coverageRate < 1) {
     signals.push(signal('coverage_gap', 'warn', 'Not all target words were attempted in this session', 'coverageRate', teachingLoop.coverageRate));
   }
-  if (teachingLoop.targetWordCount > 0 && teachingLoop.clearRate < 0.8) {
+  if (!diagnostics && teachingLoop.targetWordCount > 0 && teachingLoop.clearRate < 0.8) {
     signals.push(signal('clear_rate_low', 'warn', 'Fewer than 80% of target words reached the two-hit cleared threshold', 'clearRate', teachingLoop.clearRate));
   }
-  if (teachingLoop.maxStuckRunLength >= 3) {
+  if (teachingLoop.maxStuckRunLength !== null && teachingLoop.maxStuckRunLength >= 3) {
     signals.push(signal('teaching_loop_stuck', 'warn', 'A word card stayed active for at least 3 consecutive turns', 'maxStuckRunLength', teachingLoop.maxStuckRunLength));
   }
-  if (teachingLoop.needsReviewWordCount > 0) {
+  if (!diagnostics && teachingLoop.needsReviewWordCount > 0) {
     signals.push(signal('needs_review', 'info', 'At least one word ended with needs_review data', 'needsReviewWordCount', teachingLoop.needsReviewWordCount));
   }
-  if (teachingLoop.targetWordCount > 0 && teachingLoop.clearRateSource !== 'rc') {
+  if (!diagnostics && teachingLoop.targetWordCount > 0 && teachingLoop.clearRateSource !== 'rc') {
     signals.push(signal('clear_rate_source_legacy', 'info', 'clearRate computed (fully or partly) from the legacy LLM-correct ledger; R-C authoritative state absent for some words', 'clearRateSource', teachingLoop.clearRateSource));
   }
   const guardTotal = agentBehavior.guardActivity.rcRejectedCount + agentBehavior.guardActivity.rcSuppressedCount + agentBehavior.guardActivity.speechRewriteCount;
   if (guardTotal > 0) {
     signals.push(signal('guard_activity', 'info', 'Server guards intervened this session (R-C rejects/suppressions or speech rewrites)', 'guardActivityTotal', guardTotal));
   }
-  if (agentBehavior.speechCardMismatchCount > 0) {
+  if (agentBehavior.speechCardMismatchCount !== null && agentBehavior.speechCardMismatchCount > 0) {
     signals.push(signal('speech_card_alignment', 'critical', 'Teacher speech mentioned a different target word than the final show_card', 'speechCardMismatchCount', agentBehavior.speechCardMismatchCount));
   }
   if (agentBehavior.prematureClosingCount > 0) {
@@ -796,6 +845,11 @@ function buildNextIterationSignals(evalParts: {
   }
   if (agentBehavior.maxRepeatedSpeechRunLength >= 3) {
     signals.push(signal('repeated_speech', 'warn', 'Assistant speech repeated exactly for at least 3 consecutive turns', 'maxRepeatedSpeechRunLength', agentBehavior.maxRepeatedSpeechRunLength));
+  }
+  if (diagnostics) {
+    const longest = diagnostics.targetRuns.reduce((max, run) => Math.max(max, run.length), 0);
+    if (longest >= 6) signals.push(signal('long_target_run', 'warn', 'At least 6 consecutive saved attempts were assessed against the same target', 'maxTargetRunLength', longest));
+    if (diagnostics.notAttempts.length) signals.push(signal('not_attempts', 'info', 'Some assessed child utterances were not attempts at the screen target', 'notAttempts', diagnostics.notAttempts.length));
   }
   return signals;
 }
@@ -813,9 +867,9 @@ function signal(
 function findStuckCardRuns(
   interactions: ReportData['interactions'],
   wordCards: CourseWord[],
-): EvalScorecard['teachingLoop']['stuckCardRuns'] {
+): NonNullable<EvalScorecard['teachingLoop']['stuckCardRuns']> {
   const wordCardsById = new Map(wordCards.map((card) => [card.id, card]));
-  const runs: EvalScorecard['teachingLoop']['stuckCardRuns'] = [];
+  const runs: NonNullable<EvalScorecard['teachingLoop']['stuckCardRuns']> = [];
   let currentCardId = '';
   let startTurn = 0;
   let length = 0;
@@ -987,6 +1041,7 @@ export const defaultCourseLoader: CourseLoader = async (courseId) => {
       english: card.english,
       chinese: card.chinese,
     })),
+    quizIds: course.phases.reinforcement.quizzes.map((quiz) => quiz.id),
   };
 };
 

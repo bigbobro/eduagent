@@ -146,6 +146,9 @@ describe('buildReport — basic aggregation', () => {
     expect(r.interactions[0].n).toBe(1);
     expect(r.interactions[0].user).toBe('(开始)');
     expect(r.interactions[0].actions).toEqual([{ tool: 'show_card', params: { card_id: 'apple' } }]);
+    expect(r).not.toHaveProperty('childUtterances');
+    expect(r).not.toHaveProperty('notAttempts');
+    expect(r).not.toHaveProperty('targetRuns');
   });
 
   it('returns the latest session when no id provided', async () => {
@@ -433,7 +436,7 @@ describe('buildReport — Eval v1 scorecard', () => {
       { cardId: 'apple', startTurn: 1, endTurn: 3, length: 3 },
     ]);
     expect(r.eval.agentBehavior.speechCardMismatchCount).toBe(3);
-    expect(r.eval.agentBehavior.speechCardMismatches[0]).toEqual({
+    expect(r.eval.agentBehavior.speechCardMismatches?.[0]).toEqual({
       turn: 1,
       showCardId: 'apple',
       mentionedOtherCardId: 'banana',
@@ -781,5 +784,81 @@ describe('buildReport — realtime responses', () => {
     const r = await buildReport(db, 'old-1', noopCourseLoader);
     expect(r.responses).toEqual([]);
     expect(r.responseStats).toMatchObject({ total: 0, assessments: { total: 0, failed: 0, results: { correct: 0, close: 0, wrong: 0, not_attempt: 0 } }, replyMs: { count: 0, median: null, p90: null, max: null } });
+  });
+});
+
+describe('buildReport — Realtime diagnostics', () => {
+  function realtimeDb() {
+    const db = createMemDb();
+    db.exec(`ALTER TABLE lesson_logs ADD COLUMN lesson_mode TEXT DEFAULT 'legacy';
+      CREATE TABLE realtime_responses (id INTEGER PRIMARY KEY AUTOINCREMENT, lesson_id TEXT NOT NULL, timestamp TEXT NOT NULL, kind TEXT NOT NULL,
+        status TEXT NOT NULL, text TEXT NOT NULL DEFAULT '', tools TEXT NOT NULL DEFAULT '', reply_ms INTEGER)`);
+    return db;
+  }
+
+  it('counts usable child utterances once across a retry, lists old/new not_attempt targets and segments saved attempts by assessment target', async () => {
+    const db = realtimeDb();
+    try {
+      const assessments = [
+        ...Array.from({ length: 6 }, (_, i) => ({ source: 'model', target_id: 'apple', result: i === 2 ? 'close' : 'correct', mastered: i === 5 })),
+        { source: 'model', target_id: 'milk', result: 'wrong', mastered: false },
+        { source: 'model', target_id: 'apple', result: 'correct', mastered: false },
+        { source: 'application', target_id: 'quiz-1', result: 'correct' },
+      ];
+      seedSession(db, { id: 'rt', courseId: 'food', startTime: '2026-11-14T00:00:00.000Z',
+        interactions: assessments.map((assessment) => ({ user: 'x', ai: 'x', modelCalls: { assessment } })) });
+      db.exec("UPDATE lesson_logs SET lesson_mode = 'realtime' WHERE id = 'rt'");
+      seedWordPerformance(db, 'rt', [{ word: 'apple', attempts: 7, correct: 6, needsReview: 1 }]);
+      const add = db.prepare('INSERT INTO realtime_responses (lesson_id, timestamp, kind, status, text, tools) VALUES (?, ?, ?, ?, ?, ?)');
+      add.run('rt', '2026-11-14T00:00:00.000Z', 'speech', 'completed', 'hello', 'show_card');
+      add.run('rt', '2026-11-14T00:00:01.000Z', 'assess', 'failed', '', '');
+      assessments.forEach((assessment, i) => add.run('rt', `2026-11-14T00:00:${String(i + 2).padStart(2, '0')}.000Z`, 'assess', 'completed', JSON.stringify({ ...assessment, heard: 'x' }), `record_assessment(${assessment.target_id})`));
+      add.run('rt', '2026-11-14T00:00:19.000Z', 'assess', 'completed', '{invalid', 'record_assessment(apple)');
+      add.run('rt', '2026-11-14T00:00:20.000Z', 'assess', 'completed', JSON.stringify({ result: 'not_attempt', heard: 'hi' }), 'record_assessment');
+      add.run('rt', '2026-11-14T00:00:21.000Z', 'assess', 'completed', JSON.stringify({ result: 'not_attempt', heard: 'what?' }), 'record_assessment(milk)');
+      const r = await buildReport(db, 'rt', async () => ({ title: 'Food', words: ['apple', 'milk'], quizIds: ['quiz-1'] }));
+      expect(r.childUtterances).toBe(11);
+      expect(r.responseStats.assessments).toMatchObject({ total: 13, failed: 2 });
+      expect(r.notAttempts).toEqual([
+        { n: 10, ts: '2026-11-14T00:00:20.000Z', targetId: null, heard: 'hi' },
+        { n: 11, ts: '2026-11-14T00:00:21.000Z', targetId: 'milk', heard: 'what?' },
+      ]);
+      expect(r.targetRuns).toEqual([
+        { targetId: 'apple', startTurn: 1, endTurn: 6, length: 6, correct: 5, cleared: true },
+        { targetId: 'milk', startTurn: 7, endTurn: 7, length: 1, correct: 0, cleared: false },
+        { targetId: 'apple', startTurn: 8, endTurn: 8, length: 1, correct: 1, cleared: false },
+        { targetId: 'quiz-1', startTurn: 9, endTurn: 9, length: 1, correct: 1, cleared: true },
+      ]);
+      expect(r.eval.teachingLoop).toMatchObject({ stuckCardRuns: null, maxStuckRunLength: null });
+      expect(r.eval.agentBehavior).toMatchObject({ speechCardMismatchCount: null, speechCardMismatches: null, emptyActionTurns: null });
+      expect(r.eval.nextIterationSignals).toEqual(expect.arrayContaining([
+        expect.objectContaining({ key: 'long_target_run', severity: 'warn', value: 6 }),
+        expect.objectContaining({ key: 'not_attempts', severity: 'info', value: 2 }),
+      ]));
+      const keys = r.eval.nextIterationSignals.map((s) => s.key);
+      for (const key of ['coverage_gap', 'clear_rate_low', 'clear_rate_source_legacy', 'needs_review', 'teaching_loop_stuck']) expect(keys).not.toContain(key);
+      expect(r.responses[0].tools).toBe('show_card'); // old tools remain readable
+    } finally { db.close(); }
+  });
+
+  it('breaks a target run at a saved row with no target and reports no Realtime signals below the threshold', async () => {
+    const db = realtimeDb();
+    try {
+      seedSession(db, { id: 'rt', courseId: 'food', startTime: '2026-11-14T00:00:00.000Z', interactions: [
+        { user: 'apple', ai: '', modelCalls: { assessment: { target_id: 'apple', result: 'correct', mastered: false } } },
+        { user: 'old', ai: '' },
+        { user: 'apple', ai: '', modelCalls: { assessment: { target_id: 'apple', result: 'close', mastered: false } } },
+      ] });
+      db.exec("UPDATE lesson_logs SET lesson_mode = 'realtime' WHERE id = 'rt'");
+      const r = await buildReport(db, 'rt', stubFoodLoader);
+      expect(r.childUtterances).toBe(0);
+      expect(r.notAttempts).toEqual([]);
+      expect(r.targetRuns).toEqual([
+        { targetId: 'apple', startTurn: 1, endTurn: 1, length: 1, correct: 1, cleared: false },
+        { targetId: 'apple', startTurn: 3, endTurn: 3, length: 1, correct: 0, cleared: false },
+      ]);
+      expect(r.eval.nextIterationSignals.map((s) => s.key)).not.toEqual(expect.arrayContaining(['long_target_run']));
+      expect(r.eval.nextIterationSignals.map((s) => s.key)).not.toContain('not_attempts');
+    } finally { db.close(); }
   });
 });
