@@ -183,7 +183,7 @@ function createWindow() {
   });
   const contents = mainWindow.webContents;
   contents.setZoomFactor(1);
-  void contents.setVisualZoomLevelLimits(1, 1).catch((err) => log(`zoom limits failed: ${err.message}`));
+  // Electron disables pinch zoom by default; the pre-load setter rejects. Desktop e2e checks scale stays 1.
   contents.on('did-finish-load', () => contents.setZoomFactor(1));
   contents.on('before-input-event', (event, input) => {
     if ((input.meta || input.control) && (['+', '=', '-', '0'].includes(input.key) || ['Equal', 'Minus', 'Digit0', 'NumpadAdd', 'NumpadSubtract', 'Numpad0'].includes(input.code))) {

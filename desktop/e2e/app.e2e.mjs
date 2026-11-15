@@ -12,7 +12,7 @@ const appPath = resolve(process.argv[2] || 'desktop/dist/mac-arm64/EduAgent.app'
 const exe = join(appPath, 'Contents/MacOS/EduAgent');
 const userData = mkdtempSync(join(tmpdir(), 'eduagent-e2e-'));
 const userData2 = mkdtempSync(join(tmpdir(), 'eduagent-e2e-settings-'));
-const evidenceDir = resolve('desktop/dist/evidence');
+const evidenceDir = resolve(process.env.EDUAGENT_E2E_EVIDENCE_DIR || 'desktop/dist/evidence');
 mkdirSync(evidenceDir, { recursive: true });
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -56,6 +56,21 @@ try {
   // 1. 首页(默认端口可能已被本机另一个 EduAgent 占用,app 会换端口,这里不写死)
   await page.waitForURL(/127\.0\.0\.1:\d+\/($|onboarding)/, { timeout: 60000 });
   await page.getByRole('heading', { name: '建第一个孩子档案', exact: true }).waitFor();
+  const zoom = await app.evaluate(async ({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    const attached = contents.debugger.isAttached();
+    if (!attached) contents.debugger.attach('1.3');
+    try {
+      const pinch = async (scaleFactor) => {
+        await contents.debugger.sendCommand('Input.synthesizePinchGesture', { x: 400, y: 300, scaleFactor, relativeSpeed: 800, gestureSourceType: 'mouse' });
+        return contents.executeJavaScript('visualViewport.scale');
+      };
+      return { up: await pinch(2), down: await pinch(0.5), factor: contents.getZoomFactor() };
+    } finally {
+      if (!attached) contents.debugger.detach();
+    }
+  });
+  check('packaged pinch in/out stays at 1', Object.values(zoom).every((value) => Math.abs(value - 1) < 0.00001), JSON.stringify(zoom));
   await createFirstLearner(page, '桌面测试孩子');
   check('home page loads with course list', true, page.url());
 

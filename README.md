@@ -107,7 +107,7 @@ App 图标:`desktop/build-resources/icon-source.png` 是 1024 方形水彩原画
 证据保存在 `desktop/dist/evidence/webp-verification.json`。可选对比图：先安装本地 Python Pillow 依赖，再执行
 `python3 desktop/scripts/compare-webp.py`，输出 `desktop/dist/evidence/webp-compare-*.png`，每门课抽一张，左 PNG、右 WebP。
 
-`app:e2e` 使用临时 userData、假麦克风、VOICE_MOCK 或本地 fake server，不需要真实 Key。
+`app:e2e` 使用临时 userData、假麦克风、VOICE_MOCK 或本地 fake server，不需要真实 Key。截图默认写到 `desktop/dist/evidence`；设 `EDUAGENT_E2E_EVIDENCE_DIR=<目录>` 可改写到别处（例如只想验证现有构建、不改动 `desktop/dist` 时）。
 发布物不得包含 `.env.local`、开发数据库、个人配置或签名私钥。安装与麦克风的系统弹窗仍需真实 Mac 验收。
 按当前发布决定，只提供 Apple 芯片 arm64 版，Intel 版按需再做。将来制作 x64 时需要在 x64 环境重新 `next build` 并完成对应架构的冒烟；当前发布脚本只支持 arm64，不生成 universal 包。
 
