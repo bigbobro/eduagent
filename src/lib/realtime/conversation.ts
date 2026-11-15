@@ -53,11 +53,11 @@ const WRAP_UP_BATTLE = '[app] Time check: this sitting is nearly over. Finish th
 const ASSESSOR = `You are the silent note-taker of a live English lesson between a tutor and a young Chinese-speaking child. You never speak and never answer the child. Judge only the child's most recent spoken message (the last user audio in the conversation) against the screen target named at the end, and call record_assessment exactly once.
 An attempt means the child was trying to say that English target. Use not_attempt for everything else: a question, a request (again, slower, another card), chit-chat, agreement, Chinese without trying the English, an answer about a different word than the screen target (for example a recall of an earlier word), noise or silence, or the tutor's own voice picked up by the microphone.
 Passed (mastered=true) means: in a different situation from the one the tutor just modelled, the child recalled or used the target on their own (a gap to fill, a new cue, their own sentence). An echo or imitation right after the tutor's model is practice only, even when perfect: mastered=false. If the tutor's cue contained the English target, the answer is an echo. A choice between two options is not recall. A practice question (repeat-after-me sentence) is never mastered.
-result and mastered are two separate judgements. result is only about the child's words: a clear, complete echo right after the tutor's model is "correct" with mastered=false; a clear unaided recall is "correct" with mastered=true; only a syllable, a missing ending or an unclear word is "close" with mastered=false. Never lower result because the answer was an echo, a choice or prompted.`;
+result and mastered are two separate judgements. correct = someone familiar with the target can recognize the whole word the child is saying. A child's accent, a slightly different vowel, an omitted final consonant or an omitted r do not lower the result. close = only part of the word was said (only the opening sound, or a syllable missing from a multisyllabic word), or it is unclear whether this is the target word. A complete echo is correct with mastered=false; an unaided recall is correct with mastered=true. Never lower result because the answer was an echo, a choice or prompted.`;
 const ASSESS_TOOL = { type: 'function', name: 'record_assessment', description: 'Record your judgement of the child\'s most recent spoken message against the screen target.',
   parameters: { type: 'object', properties: {
-    result: { type: 'string', enum: ['correct', 'close', 'wrong', 'not_attempt'], description: 'correct = understandable complete English target, alone, in a longer sentence or mixed with Chinese; close = recognizable but incomplete or unclear English; wrong = an attempt without the required English; not_attempt = the child was not trying to say the target. This is about the child\'s words, never about how they sounded. Whether it was an echo or unaided recall never changes result; that belongs in mastered.' },
-    heard: { type: 'string', description: 'Only the sounds or words you think the child said, written as heard (e.g. "gi-ter"); your own report, not a transcription. No commentary, labels or notes about hints here: those go in evidence. Empty string if nothing intelligible was said.' },
+    result: { type: 'string', enum: ['correct', 'close', 'wrong', 'not_attempt'], description: 'correct = someone familiar with the target can recognize the whole word the child is saying. A child\'s accent, a slightly different vowel, an omitted final consonant or an omitted r do not lower the result. close = only part of the word was said (only the opening sound, or a syllable missing from a multisyllabic word), or it is unclear whether this is the target word. wrong = an attempt without the required English; not_attempt = the child was not trying to say the target. Whether it was an echo or unaided recall never changes result; that belongs in mastered.' },
+    heard: { type: 'string', description: 'Write the normal spelling of the word if you recognize it; only write the sounds you heard when you cannot recognize the word. This is your own report, not a transcription. No commentary, labels or notes about hints here: those go in evidence. Empty string if nothing intelligible was said.' },
     evidence: { type: 'string', description: 'One short factual line: which cue the tutor gave, what the child did.' },
     mastered: { type: 'boolean', description: 'Passed for the course so far, not lasting mastery: true only for unaided recall or own use in a different situation than the one just modelled. False for an echo, a choice answer, a practice question and not_attempt.' },
     next_action: { type: 'string', enum: ['retry', 'review', 'advance', 'skip'], description: 'For a practice question the app follows it: advance when the whole sentence was said correctly, skip when the child is clearly stuck after several tries, otherwise retry. For a word card it is only a note (the tutor decides what comes next): retry = needs another try, review = revisit later, advance = ready to move on, skip = set aside; skip is never mastery.' },
@@ -104,6 +104,7 @@ export class NaturalConversation {
   private requests = 0;
   private farewell = false;
   private battlePending = false;
+  private battle = { started: false, attempts: 0, correct: 0, mastered: 0 };
   private sittingEnd: { timer: ReturnType<typeof setTimeout> | null; at: number; pending: number } | null = null;
   private assessmentWaitMs: number;
   private lastState = '';
@@ -114,10 +115,14 @@ export class NaturalConversation {
   // Saved correct echoes in this call only, by word card; switching cards never resets them.
   private echoCounts = new Map<string, number>();
   private echoNote: { text: string; count: number; targetId: string } | null = null;
+  // Consecutive saved non-correct word attempts in this call; not_attempt and card switches leave them intact.
+  private stuckCounts = new Map<string, number>();
+  private stuckNote: { text: string; count: number; targetId: string } | null = null;
   // Sitting clock: unpaused milliseconds so far, the start of the running stretch, and the next milestone timer.
   private sitting = { elapsed: 0, since: null as number | null, timer: null as ReturnType<typeof setTimeout> | null, wrapped: false, ended: false, started: false };
   // Diagnostic only (provider event log); nothing decides on it.
   private playing = false;
+  private teacherHasSpoken = false;
   // Interruption diagnostics (auto mode): when the output buffer started, and the child speech now in progress.
   private playingSince: number | null = null;
   private speechProbe: { at: number; startMs: number | undefined; playing: boolean; active: number; playedMs: number | null } | null = null;
@@ -246,7 +251,7 @@ export class NaturalConversation {
   private finishSitting(force = false): void {
     if (!this.sittingEnd || (!force && this.assessing.size)) return;
     if (this.sittingEnd.timer) clearTimeout(this.sittingEnd.timer);
-    log.info('sitting end settled', { sessionId: this.session.id, waitedMs: Date.now() - this.sittingEnd.at, pending: this.sittingEnd.pending, timedOut: force });
+    log.info('sitting end settled', { sessionId: this.session.id, waitedMs: Date.now() - this.sittingEnd.at, pending: this.sittingEnd.pending, timedOut: force, battleAttempts: this.battle.attempts, battleCorrect: this.battle.correct, battleMastered: this.battle.mastered });
     this.sittingEnd = null;
     // Same path as the completion goodbye, so child speech never drops it. The phase is untouched: progress is already saved and the next call resumes it.
     this.queue.push({ id: this.requestId(), kind: 'goodbye', noTools: true, note: '[app] Today\'s sitting is over and progress is saved. Say one short warm goodbye in Chinese: what we practised today, that we continue next time. Do not say the course is finished.' });
@@ -331,7 +336,7 @@ export class NaturalConversation {
         if (event.item_id) { if (!this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.presented }); this.lastInput = event.item_id; this.assess(event.item_id); }
         break;
       case 'output_audio_buffer.started':
-        this.playing = true; this.playingSince ??= Date.now();
+        this.teacherHasSpoken = true; this.playing = true; this.playingSince ??= Date.now();
         if (!this.manual && this.replySince !== null) {
           const replyMs = Math.max(0, Date.now() - this.replySince); this.replySince = null;
           log.info('reply wait', { sessionId: this.session.id, replyMs });
@@ -412,6 +417,8 @@ export class NaturalConversation {
     const usage = realtimeUsageSchema.safeParse(response.usage);
     recordUsage(this.session, usage.success ? usage.data : null);
     const state = this.responses.get(response.id);
+    // A completed teacher transcript also confirms teaching began if the audio-start event is missing.
+    if (response.status === 'completed' && state?.transcript.trim()) this.teacherHasSpoken = true;
     saveResponse(this.session, { kind: state?.kind ?? 'unknown', status: response.status ?? 'unknown', text: state?.transcript ?? '',
       tools: (response.output ?? []).filter((item) => item.type === 'function_call').map((item) => {
         if (item.name !== 'show_card') return item.name ?? '';
@@ -435,15 +442,17 @@ export class NaturalConversation {
     const calls = (response.output ?? []).filter((item) => item.type === 'function_call');
     if (!calls.length) { this.toolStreak = 0; return; }
     let sittingEnded = false;
+    let onlyShownCards = true;
     for (const call of calls) {
       const result = this.execute(call.name ?? '', call.arguments ?? '');
       if (result.sittingEnded) sittingEnded = true;
+      if (call.name !== 'show_card' || !('ok' in result.output && result.output.ok === true)) onlyShownCards = false;
       if (call.call_id) this.port.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result.output) } });
     }
     this.toolStreak++;
     this.syncState();
     // end_sitting queued the goodbye, which is its follow-up: no extra tool follow-up response.
-    if (!this.childSpeaking && !this.pendingCommit && !sittingEnded && !this.sitting.ended) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, noTools: this.toolStreak >= 3 });
+    if (!this.childSpeaking && !this.pendingCommit && !sittingEnded && !this.sitting.ended) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, noTools: onlyShownCards || this.toolStreak >= 3 });
   }
 
   /**
@@ -452,6 +461,7 @@ export class NaturalConversation {
    * conversation, and neither child speech nor response.cancel stops it (measured 2026-11-11, docs/voice-benchmarks.md).
    */
   private assess(input: string): void {
+    if (!this.teacherHasSpoken) { log.info('assessment before teacher speech ignored', { sessionId: this.session.id }); return; }
     const record = this.inputs.get(input);
     if (!record?.target || record.receipt || this.farewell || this.sitting.ended) return;
     const quiz = record.target.kind === 'quiz' ? this.quiz(record.target.id) : undefined;
@@ -508,12 +518,23 @@ export class NaturalConversation {
       const next_action = report.mastered && report.next_action === 'skip' ? 'advance' : report.next_action;
       const receipt = submitAssessment(this.session, { id: input, targetId: record.target.id, kind: 'audio' }, { ...report, next_action, target_id: record.target.id, next_card_id: null, next_phase: null });
       record.receipt = receipt;
+      if (this.battle.started) {
+        this.battle.attempts++;
+        if (report.result === 'correct') this.battle.correct++;
+        if (report.mastered) this.battle.mastered++;
+      }
       const card = record.target.kind === 'card' ? this.card(record.target.id) : undefined;
       if (card?.kind === 'word' && report.result === 'correct' && !report.mastered) {
         const count = (this.echoCounts.get(card.id) ?? 0) + 1;
         this.echoCounts.set(card.id, count);
-        if (count % 2 === 0 && !this.session.memory.clearedCardIds.includes(card.id)) this.echoNote = { count, targetId: card.id,
-          text: `[app] The child has now said ${card.english} correctly ${count} times right after your model. Next, ask for it once with a cue that does not contain the English word (the Chinese meaning or a situation) and stop to listen. If they cannot recall it, give one different kind of help and one more chance; if it still does not come, leave this word for now, move on to another word and come back to it later.` };
+        if (count % 2 === 1 && !this.sitting.wrapped && !this.session.memory.clearedCardIds.includes(card.id)) this.echoNote = { count, targetId: card.id,
+          text: `[app] The child has now said ${card.english} correctly ${count} times right after your model. Next, do not ask for another echo on this card: ask once with a cue that does not contain the English word (the Chinese meaning or a situation) and stop to listen. Do this only while this card is on screen. If you have already switched cards, finish teaching the card you have, then use show_card to return to this card before asking. If they cannot recall it, give one different kind of help and one more chance; if it still does not come, leave this word for now, move on to another word and come back to it later. Do not tell the child "先停一下" or "待会儿再练"; just show the next card.` };
+      }
+      if (card?.kind === 'word') {
+        const count = report.result === 'correct' ? 0 : (this.stuckCounts.get(card.id) ?? 0) + 1;
+        this.stuckCounts.set(card.id, count);
+        if (count > 0 && count % 4 === 0 && !this.sitting.wrapped) this.stuckNote = { count, targetId: card.id,
+          text: `[app] The child has tried ${card.english} ${count} times in a row without getting it right. Do not ask them to say it again now. Say the correct word naturally once in one sentence and, in that same turn, use show_card to move to another word; return to this word later or next sitting. Do not tell the child "先停一下" or "待会儿再练"; just show the next card.` };
       }
       this.commit(receipt);
       if (record.reply) saveFeedback(this.session, input, record.reply);
@@ -536,7 +557,7 @@ export class NaturalConversation {
         if (this.session.currentPhase !== 'interactive') throw new Error('INVALID_PHASE');
         const receipt = showCard(this.session, card_id); this.commit(receipt);
         if (this.battlePending) {
-          this.battlePending = false;
+          this.battlePending = false; this.battle.started = true;
           log.info('battle started', { sessionId: this.session.id, elapsedMs: this.sitting.elapsed + (this.sitting.since === null ? 0 : Date.now() - this.sitting.since) });
           this.port.sittingWrapUp?.();
         }
@@ -720,7 +741,7 @@ export class NaturalConversation {
   /**
    * Committed lesson state is appended as an [app] message instead of rewriting the instructions: changing the
    * instructions busts the prompt cache for the whole conversation after them. Written only between responses and
-   * only when it changed; a change during a response is written once that response settles. Pending verdicts, mismatch and echo
+   * only when it changed; a change during a response is written once that response settles. Pending verdicts, mismatch, echo and stuck
    * reminders use the same boundary, even when the lesson state is unchanged.
    */
   private syncState(): void {
@@ -736,9 +757,14 @@ export class NaturalConversation {
       log.info('app note', { sessionId: this.session.id, kind: 'mismatch', count: mismatch.count });
     }
     const echo = this.echoNote; this.echoNote = null;
-    if (echo && !this.session.memory.clearedCardIds.includes(echo.targetId)) {
+    if (echo && !this.sitting.wrapped && !this.session.memory.clearedCardIds.includes(echo.targetId)) {
       this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: echo.text }] } });
       log.info('app note', { sessionId: this.session.id, kind: 'echo', count: echo.count });
+    }
+    const stuck = this.stuckNote; this.stuckNote = null;
+    if (stuck && !this.sitting.wrapped && (this.stuckCounts.get(stuck.targetId) ?? 0) >= stuck.count && !this.session.memory.clearedCardIds.includes(stuck.targetId)) {
+      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: stuck.text }] } });
+      log.info('app note', { sessionId: this.session.id, kind: 'stuck', count: stuck.count });
     }
     const s = this.session; const screen = this.presented ?? (s.currentPhase === 'interactive' ? { kind: 'card', id: s.memory.currentCardId } : null);
     const card = screen?.kind === 'card' ? this.card(screen.id) : undefined;
@@ -764,14 +790,14 @@ export class NaturalConversation {
   }
   private instructions(): string {
     const s = this.session;
-    return `You are 麻吉老师, a warm and patient English tutor for a young Chinese-speaking child in a live voice lesson. Speak simple Chinese with clear, unhurried English demonstrations. Make one small teaching move and invite at most one response per turn, then listen. Keep every turn short: one or two short sentences, about five seconds of speech; a scaffold that needs more is split over several turns. The child may talk at any time, including while you speak; answer what they actually said. No professional pronunciation scores.
+    return `You are 麻吉老师, a warm and patient English tutor for a young Chinese-speaking child in a live voice lesson. Talk to the child in Chinese. English is only what the child is learning: the course target words and target sentences, and a short English model around a target word when it helps the meaning. Never use English for praise, transitions, instructions, hints or saying what you will do next. Give clear, unhurried English demonstrations of those targets. Make one small teaching move and invite at most one response per turn, then listen. Keep every turn short: one or two short sentences, about five seconds of speech; a scaffold that needs more is split over several turns. The child may talk at any time, including while you speak; answer what they actually said. No professional pronunciation scores.
 The screen shows one course card or practice question at a time; [app] messages and tool results tell you what is on screen and which words the child has passed. Course: ${JSON.stringify({ title: s.course.title, opening: s.course.teachingHints.opening, sentences: s.course.objectives.sentences })}. Learning targets: ${JSON.stringify(s.course.cards.map(({ id, english, chinese, kind, drillParts }) => ({ id, english, chinese, kind, drillParts })))}. Use these learning targets; brief familiar context and answers to the child's questions are welcome, without adding unrelated learning goals.
 SITTING: The course is taught over several short sittings. This sitting is about 10-15 minutes and covers about 4-6 new words; the rest wait for next time, and progress is saved. Never rush to finish the course. If about 4-6 words have been taught and the app's time check has not arrived yet, do not tell the child the lesson is stopping, do not go idle and do not start many more words: keep working with these same words in new situations, have the child recall them without your model first (a gap to fill, a new cue; a choice between two is not recall), and bring in the course's target sentences. This holds only while words remain: when [app] State shows no words left to pass in the whole course, do not keep recalling them; call start_practice right away, whatever the time. When an [app] message says the time is nearly up, finish the current word, run a short recall game with today's words, then call end_sitting. Do not say goodbye before the app asks you to.
-TEACHING: Build 2-3 related words into one small situation (e.g. at the park: run, jump, walk), chosen on the spot from the words still to pass. Keep the child mostly speaking and doing. Move each word up and down this ladder by how the child responds: understand it from the situation, choose between two ("is the dog running or sleeping?"), echo it, fill a gap ("the dog sees the ball and ... ?"), use it freely or in a short sentence ("I can run!"). If the child succeeds, go up; if stuck or silent, go down one step instead of repeating the same question. Chinese is a help, not a ritual announcement on every card. Once words are familiar, weave in the course's target sentences. Never reuse one fixed praise-then-model-then-repeat template.
+TEACHING: Build 2-3 related words into one small situation (e.g. at the park: run, jump, walk), chosen on the spot from the words still to pass. Keep the child mostly speaking and doing. Move each word up and down this ladder by how the child responds: understand it from the situation, choose between two ("is the dog running or sleeping?"), echo it, fill a gap ("the dog sees the ball and ... ?"), use it freely or in a short sentence ("I can run!"). These examples are written in English only for brevity: ask them in Chinese around the English word ("小狗在 run 还是 sleep？"). If the child succeeds, go up; if stuck or silent, go down one step instead of repeating the same question. Chinese is a help, not a ritual announcement on every card. Once words are familiar, weave in the course's target sentences. Never reuse one fixed praise-then-model-then-repeat template.
 PASSING A WORD: The app listens to every answer itself and keeps the records; you never record, score or save anything. It marks a word as passed when, in a different situation from the one just modelled, the child recalled or used the word on their own (gap or own use); [app] State then lists it as passed. An echo right after your model, even perfect, is practice: ask for the word again in a new situation without handing the answer over. A child who already uses the word independently passes at once; do not drill what they already know. When you ask the child to recall a word, your cue must not contain that English word, not even as "say X": give the situation or the Chinese and stop (e.g. "草丛里跳出一只小猫，它是？"). A cue that contains the word only gets an echo.
 NEW WORDS: a word the child has never said correctly is new to them and is taught before it is asked. Once its card is on the screen, say the English word clearly with its meaning (split a long word with its drillParts) and let the child say it after you; only after they have said it do you ask for it with a cue that does not contain the word. Never open a new word by asking what it is in English: the child cannot know it yet. The show_card result tells you when a card is such a word, and so does "correct":0 in the current word practice of [app] State.
 EACH TURN: Do one thing: one model or one question, then stop and wait; the question or the model itself hands the turn over. Do not close turns with a fixed handover phrase such as 轮到你了, and do not open two turns in a row with the same words (很好 / 太好了 / 没关系). Never narrate what you are about to do ("我们换个方式来试试", "让我想一想", "现在我们来..."): just do it. If the child stays silent, go one step easier (offer two choices, give the first sound, show the situation again), not the same question again. Wait patiently when the child pauses mid-answer.
-FEEDBACK: Be specific and tied to meaning ("the dog is running!"), not generic praise every time. If the child's try is not quite right, say the correct version naturally once and continue, without saying "wrong". If the child answers in Chinese, first confirm the meaning is right, then give the English ("对，就是跑！英文是 run"). After two tries with the same kind of help, change the help (situation, splitting the sound with the card's drillParts, two choices).
+FEEDBACK: Be specific and tied to meaning ("对，小狗在 run！"), not generic praise every time. If the child's try is not quite right, say the correct version naturally once and continue, without saying "wrong". If the child answers in Chinese, first confirm the meaning is right, then give the English ("对，就是跑！英文是 run"). After two tries with the same kind of help, change the help (situation, splitting the sound with the card's drillParts, two choices).
 CHILD TALKS: If the child interrupts, asks something or shares their own story, answer that first, then connect back to the word. If they are tired or bored, offer a choice (another game, a short break) or defer the word without awarding mastery (skip); never push. Do not say goodbye on your own: a parent can end the lesson early, otherwise the app tells you when the sitting ends. The child may speak at any time; when they do, you stop and their words come next: answer what they said, keeping it short (one sentence of guidance). If their input was a try at the English target, respond to the try (see ANSWERING A TRY); if it was only agreement, just continue. You have audio and card metadata, not a camera: never claim to see the child or their room.
 RETURNING: When the child comes back to a course, first help them recall 2-3 words passed before, in a new situation and gently (hints are fine, forgetting is not failure). Recall answers do not remove a passed word. Show the card of each word you ask them to recall first (see SCREEN FIRST).
 SUMMARY: At the end of a sitting, after end_sitting the app asks for the goodbye; say only what we practised today and what comes next time, never "you have learned everything" and never that the course is complete unless the app says so. For sentence practice, teach its meaning and invite the full sentence; use chunks only when needed. Partial sentences still need support. In practice the app moves to the next question by itself once the child has said the whole sentence, and tells you what is on screen: after a try, react in one short sentence, and if it was not the whole sentence yet, help and invite another try.
@@ -780,7 +806,7 @@ ANSWERING A TRY: when the child tried the English target, answer at once in one 
 NO BOOKKEEPING TALK: never tell the child about passing or not passing, counting, scores, attempts, saving, or that practice "doesn't count". Just teach and give the next cue. Never say 目标词 (target word) to the child, and never comment on whether a hint or help was involved; those are your notes, not things to say.
 SCREEN FIRST: the app judges every answer against the card on the screen, and the child is looking at that card. So the answer you ask for must always be the card on the screen. Before you ask for anything else (an earlier word to recall, another word from the same situation, a course sentence), put that card on the screen with show_card in that same turn and ask after its result. Never ask for one word while another card is showing. Mentioning other words while you explain or set a scene is fine; asking the child to say them is not.
 SENTENCES: The course's target sentences have their own cards (kind "sentence" in the learning targets). To practise one as a whole sentence, show its sentence card first (see SCREEN FIRST), then model it and invite it. A child who puts the screen word into a sentence of their own is welcome and needs no correction of the rest of that sentence. A sentence that is not one of the course's target sentences is only a model for meaning: say it once if it helps, and never ask the child to repeat it in full or to fix its small words.
-APP VERDICT: after each thing the child says, the app tells you in an [app] Heard message how it judged that answer against the screen card; it usually arrives just after you have already replied. Never read it aloud or mention it. In your next turn stay consistent with it: do not praise as right an answer it judged wrong or not a try, and do not correct an answer it judged correct. If your last reply said the opposite, simply carry on from the app's verdict without apologising or explaining.
+APP VERDICT: an [app] Heard message describes the child's previous answer, not the new answer you are responding to now; it usually arrives just after you have already replied. Judge the new answer by what you hear yourself. Never read the message aloud or mention it. Use it silently for your next move on that card: if it judged the answer correct, do not ask the child to fix that word again; if it judged it close, wrong or not a try, do not treat the word as done. Do not go back to comment on a card that has already been replaced: never say "刚才那个是 X" or "你刚才说对了". Carry on teaching the card on screen without apologising or explaining any earlier contradiction.
 TOOL RECOVERY: Internal tool errors are not the child's mistake. Never mention system errors, card IDs or tool details to the child. If a tool keeps failing, carry on teaching with what is on screen; if the lesson cannot continue, briefly ask a parent for help.
 Lesson state (phase, what is on screen, words not yet passed, passed words, passed questions) arrives in [app] State messages; the most recent one is current.${this.game ? `
 ${GAME_RULES}` : ''}`;

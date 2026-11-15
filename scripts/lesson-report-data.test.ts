@@ -149,6 +149,7 @@ describe('buildReport — basic aggregation', () => {
     expect(r).not.toHaveProperty('childUtterances');
     expect(r).not.toHaveProperty('notAttempts');
     expect(r).not.toHaveProperty('targetRuns');
+    expect(r.turnQuality).toBeNull();
   });
 
   it('returns the latest session when no id provided', async () => {
@@ -861,4 +862,110 @@ describe('buildReport — Realtime diagnostics', () => {
       expect(r.eval.nextIterationSignals.map((s) => s.key)).not.toContain('not_attempts');
     } finally { db.close(); }
   });
+
+  async function qualityReport(responses: Array<{ text?: string; tools?: string; kind?: string; status?: string }>, interactions: NonNullable<SeedSession['interactions']> = []) {
+    const db = realtimeDb();
+    try {
+      seedSession(db, { id: 'quality', courseId: 'food', startTime: '2026-11-15T00:00:00.000Z', interactions });
+      db.exec("UPDATE lesson_logs SET lesson_mode = 'realtime' WHERE id = 'quality'");
+      const add = db.prepare('INSERT INTO realtime_responses (lesson_id, timestamp, kind, status, text, tools) VALUES (?, ?, ?, ?, ?, ?)');
+      responses.forEach((row, i) => add.run('quality', new Date(Date.UTC(2026, 10, 15, 0, 0, i)).toISOString(), row.kind ?? 'speech', row.status ?? 'completed', row.text ?? '', row.tools ?? ''));
+      return await buildReport(db, 'quality', stubFoodLoader);
+    } finally { db.close(); }
+  }
+
+  it('counts English lead-ins with four words and English-only speech, excluding goodbye and assessor rows', async () => {
+    const r = await qualityReport([
+      { text: 'You’re really close on that sound—let’s shape the middle vowel together.差一点，是 bell，中间是短短的 “e” 音。听我说：bell。你再试一次。' },
+      { text: 'Nice try—let’s keep it simple and steady for this sound.差一点，是 bell。听我说一遍：bell。你再试一次。' },
+      { text: 'You’re very close—let’s try a quick split to help.对，就是小铃铛的那个。听我说一遍，慢慢的：bell。你跟着说一遍，bell。' },
+      { text: 'One two three four。对，apple。' },
+      { text: 'One two three。对，apple。' },
+      { text: 'A complete English sentence.' }, { text: 'OK.' }, { text: '   ' },
+      { kind: 'goodbye', text: 'One final English goodbye.下次我们再来。' },
+      { kind: 'assess', text: 'This is not teacher speech.' },
+    ]);
+    expect(r.turnQuality).toMatchObject({ englishLeading: 5, englishOnly: 2, stoppingTalk: 0 });
+    expect(r.eval.nextIterationSignals).toContainEqual(expect.objectContaining({ key: 'english_leading', severity: 'warn', value: 5 }));
+  });
+
+  it('counts praise and correction disagreements on saved attempts with their own reply and lists the attempt turns', async () => {
+    const lines: Array<[string, string | null]> = [
+      ['You’re very close—let’s try a quick split to help.对，就是小铃铛的那个。听我说一遍，慢慢的：bell。你跟着说一遍，bell。', 'close'],
+      ['很好，再来。', 'wrong'], ['太棒了！', 'correct'], ['差一点，是 apple。', 'correct'],
+      ['不是，再听。', 'correct'], ['很接近了。', 'correct'], ['不是，再听。', 'wrong'],
+      ['对，apple。', null], ['apple。对！', 'close'],
+    ];
+    const r = await qualityReport([], lines.map(([ai, result]) => ({ user: 'fixture', ai, modelCalls: result ? { assessment: { result } } : {} })));
+    expect(r.turnQuality).toMatchObject({ praiseMismatch: 2, praiseMismatchTurns: [1, 2], correctionMismatch: 3, correctionMismatchTurns: [4, 5, 6] });
+    expect(r.eval.nextIterationSignals).toContainEqual(expect.objectContaining({ key: 'praise_mismatch', severity: 'warn', value: 2 }));
+    const one = await qualityReport([], [{ user: 'fixture', ai: '对，apple。', modelCalls: { assessment: { result: 'close' } } }]);
+    expect(one.turnQuality?.praiseMismatch).toBe(1);
+    expect(one.eval.nextIterationSignals.map((signal) => signal.key)).not.toContain('praise_mismatch');
+  });
+
+  it('detects repeated show_card calls across silent and assessor responses but stops at intervening speech', async () => {
+    const r = await qualityReport([
+      { tools: 'show_card(apple)' }, { kind: 'assess', text: '{"result":"correct"}' }, { status: 'cancelled' },
+      { tools: 'show_card(apple)' }, { text: '请看这张卡。' }, { tools: 'show_card(apple)' },
+      { tools: 'show_card(milk)' }, { tools: 'show_card(milk)' },
+    ]);
+    expect(r.turnQuality?.repeatedShowCard).toBe(2);
+    expect(r.eval.nextIterationSignals).toContainEqual(expect.objectContaining({ key: 'repeated_show_card', severity: 'info', value: 2 }));
+    const none = await qualityReport([{ tools: 'show_card(apple)' }, { text: '请看。' }, { tools: 'show_card(apple)' }]);
+    expect(none.turnQuality?.repeatedShowCard).toBe(0);
+    expect(none.eval.nextIterationSignals.map((signal) => signal.key)).not.toContain('repeated_show_card');
+  });
+
+  it('counts stopping talk only when the same response has no show_card and is not a goodbye', async () => {
+    const r = await qualityReport([
+      { text: '现在先停一下。' }, { text: '待会儿再练。' }, { text: '等会儿我们再来。' }, { text: '下次我们再练。' },
+      { text: '先停一下。', tools: 'show_card(apple)' }, { text: '待会儿再练。', tools: 'show_card' },
+      { kind: 'goodbye', text: '下次我们再练。' }, { text: '现在继续。' },
+    ]);
+    expect(r.turnQuality?.stoppingTalk).toBe(4);
+  });
+
+  it('records only each word card first cue after the tool result, with whole-word case-insensitive matching', async () => {
+    const r = await qualityReport([
+      { text: '刚才是 apple。', tools: 'show_card(apple)' },
+      { text: '请看 pineapple。' }, { tools: 'show_card(apple)' }, { text: '这是 apple。' },
+      { text: '先说 milk。', tools: 'show_card(milk)' }, { kind: 'assess', text: 'milk' }, { text: '听我说：MILK。' },
+      { tools: 'show_card(sentence-card)' }, { text: '这是句子。' },
+      { tools: 'show_card(egg)' },
+    ]);
+    expect(r.turnQuality?.firstCues).toEqual([
+      { cardId: 'apple', modelled: false }, { cardId: 'milk', modelled: true }, { cardId: 'egg', modelled: false },
+    ]);
+  });
+
+  it('keeps unknown old card ids null and does not invent mismatches without assessment data', async () => {
+    const r = await qualityReport([{ text: '你好。', tools: 'show_card' }, { tools: 'show_card' }], [{ user: 'fixture', ai: '对！' }]);
+    expect(r.turnQuality).toEqual({ englishLeading: 0, englishOnly: 0, repeatedShowCard: null, praiseMismatch: 0, praiseMismatchTurns: [], correctionMismatch: 0, correctionMismatchTurns: [], stoppingTalk: 0, firstCues: [] });
+    const mixed = await qualityReport([{ tools: 'show_card(apple)' }, { tools: 'show_card(?)' }]);
+    expect(mixed.turnQuality?.repeatedShowCard).toBeNull();
+    expect(r.responseStats.assessments.total).toBe(0);
+    const empty = await qualityReport([]);
+    expect(empty.turnQuality?.repeatedShowCard).toBeNull();
+    expect(empty.eval.nextIterationSignals.map((signal) => signal.key)).not.toEqual(expect.arrayContaining(['english_leading', 'repeated_show_card', 'praise_mismatch']));
+  });
+
+  it('matches the exact Chinese in 2026-11-15 teacher turns 30 and 36 after stripping their different English lead-ins', async () => {
+    const chinese = '差一点，是 bell。听我说一遍：bell。你再试一次。';
+    const r = await qualityReport([], [
+      { user: 'fixture', ai: 'Nice try—let’s keep it simple and steady for this sound.' + chinese },
+      { user: 'fixture', ai: 'Almost there—let me give you one last clear model, then we’ll jump into the battle.' + chinese },
+      { user: 'fixture', ai: chinese },
+      { user: 'fixture', ai: 'Nice try now。' + chinese },
+    ]);
+    expect(r.eval.agentBehavior.repeatedSpeechRuns).toEqual([{ startTurn: 1, endTurn: 3, length: 3, sample: 'Nice try—let’s keep it simple and steady for this sound.' + chinese }]);
+  });
+
+  it('preserves repeated English-only speech when there is no Chinese remainder to compare', async () => {
+    const r = await qualityReport([], [
+      { user: 'fixture', ai: 'Please try the word again.' }, { user: 'fixture', ai: 'Please try the word again.' },
+    ]);
+    expect(r.eval.agentBehavior.repeatedSpeechRuns).toEqual([{ startTurn: 1, endTurn: 2, length: 2, sample: 'Please try the word again.' }]);
+  });
+
 });

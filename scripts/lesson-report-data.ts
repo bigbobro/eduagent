@@ -52,11 +52,24 @@ export interface ReportData {
   }>;
   responses: ResponseRow[];
   responseStats: ResponseStats;
+  turnQuality: TurnQuality | null;
   /** Realtime only: usable assessor reports; failed responses retried by the assessor do not add a second utterance. */
   childUtterances?: number;
   notAttempts?: Array<{ n: number; ts: string; targetId: string | null; heard: string }>;
   targetRuns?: TargetRun[];
   eval: EvalScorecard;
+}
+
+export interface TurnQuality {
+  englishLeading: number;
+  englishOnly: number;
+  repeatedShowCard: number | null;
+  praiseMismatch: number;
+  praiseMismatchTurns: number[];
+  correctionMismatch: number;
+  correctionMismatchTurns: number[];
+  stoppingTalk: number;
+  firstCues: Array<{ cardId: string; modelled: boolean }>;
 }
 
 interface TargetRun { targetId: string; startTurn: number; endTurn: number; length: number; correct: number; cleared: boolean }
@@ -281,6 +294,7 @@ export async function buildReport(
   const diagnostics = mode === 'realtime' ? buildRealtimeDiagnostics(responses, rows, course?.quizIds ?? []) : undefined;
   const realtime = mode === 'realtime' ? summarizeRealtimeUsage((safeJsonParse(lesson.token_usage, {}) as { realtime?: unknown }).realtime) : undefined;
   const modelCalls = rows.map((r) => safeJsonParse(r.model_calls, {}) as ModelCallsRow);
+  const turnQuality = mode === 'realtime' ? buildTurnQuality(responses, interactions, modelCalls, wordCards) : null;
   const inputs = modelCalls.map((mc) => {
     return mc.llm?.inputTokens ?? 0;
   });
@@ -338,6 +352,7 @@ export async function buildReport(
     interactions,
     responses,
     responseStats: buildResponseStats(responses),
+    turnQuality,
     ...diagnostics,
     eval: buildEvalScorecard({
       lesson,
@@ -350,6 +365,7 @@ export async function buildReport(
       wordCards,
       wordPerformanceRows,
       diagnostics,
+      turnQuality,
     }),
   };
 }
@@ -422,6 +438,75 @@ function buildRealtimeDiagnostics(responses: ResponseRow[], rows: InteractionRow
     if (assessment.mastered || (quizIds.includes(targetId) && assessment.result === 'correct')) run.cleared = true;
   });
   return { childUtterances: utterances.length, notAttempts, targetRuns };
+}
+
+/** A leading English sentence needs at least four words before the first Chinese character. */
+function englishLeadEnd(text: string): number | null {
+  const chinese = text.search(/[\u3400-\u9fff]/);
+  const end = chinese < 0 ? text.length : chinese;
+  return (text.slice(0, end).match(/[a-z]+(?:['’][a-z]+)*/gi)?.length ?? 0) >= 4 ? end : null;
+}
+function stripEnglishLead(text: string): string {
+  const end = englishLeadEnd(text);
+  return end === null || end === text.length ? text : text.slice(end);
+}
+function shownCards(tools: string): string[] {
+  return tools.split(',').flatMap((tool) => {
+    const id = tool.match(/^show_card\(([^)]+)\)$/)?.[1];
+    return id && id !== '?' ? [id] : [];
+  });
+}
+function buildTurnQuality(responses: ResponseRow[], interactions: ReportData['interactions'], modelCalls: ModelCallsRow[], wordCards: CourseWord[]): TurnQuality {
+  const teacher = responses.filter((row) => row.kind !== 'assess' && row.kind !== 'goodbye');
+  const spoken = teacher.filter((row) => row.text.trim());
+  const praiseMismatchTurns: number[] = [];
+  const correctionMismatchTurns: number[] = [];
+  interactions.forEach((row, i) => {
+    const result = modelCalls[i].assessment?.result;
+    if (!result || !['correct', 'close', 'wrong'].includes(result)) return;
+    const reply = stripEnglishLead(row.ai).trim();
+    if (result !== 'correct' && /^(对|很好|太棒)/.test(reply)) praiseMismatchTurns.push(row.n);
+    if (result === 'correct' && /^(差一点|不是|很接近)/.test(reply)) correctionMismatchTurns.push(row.n);
+  });
+  let repeatedShowCard = 0;
+  let previousCards: string[] = [];
+  let hasCardIds = false;
+  let missingCardIds = false;
+  const firstCues: TurnQuality['firstCues'] = [];
+  const seen = new Set<string>();
+  let pending: TurnQuality['firstCues'] = [];
+  for (const row of teacher) {
+    const cards = shownCards(row.tools);
+    if (cards.length) hasCardIds = true;
+    if (row.tools.split(',').some((tool) => tool === 'show_card' || tool === 'show_card(?)')) missingCardIds = true;
+    // Text in a show_card response precedes its tool result, so only earlier cards can use it as their first cue.
+    if (row.text.trim()) {
+      for (const cue of pending) {
+        const word = wordCards.find((card) => card.id === cue.cardId)!;
+        cue.modelled = new RegExp(`\\b${escapeRegExp(word.english)}\\b`, 'i').test(row.text);
+      }
+      pending = [];
+    }
+    if (cards.length) {
+      if (cards.some((id) => previousCards.includes(id))) repeatedShowCard++;
+      previousCards = cards;
+      for (const cardId of cards) {
+        if (seen.has(cardId) || !wordCards.some((word) => word.id === cardId)) continue;
+        seen.add(cardId);
+        const cue = { cardId, modelled: false };
+        firstCues.push(cue); pending.push(cue);
+      }
+    } else if (row.text.trim() || row.tools) previousCards = [];
+  }
+  return {
+    englishLeading: spoken.filter((row) => englishLeadEnd(row.text) !== null).length,
+    englishOnly: spoken.filter((row) => !/[\u3400-\u9fff]/.test(row.text)).length,
+    repeatedShowCard: !hasCardIds || missingCardIds ? null : repeatedShowCard,
+    praiseMismatch: praiseMismatchTurns.length, praiseMismatchTurns,
+    correctionMismatch: correctionMismatchTurns.length, correctionMismatchTurns,
+    stoppingTalk: spoken.filter((row) => /先停|待会儿|等会儿|下次我们/.test(row.text) && !row.tools.split(',').some((tool) => /^show_card(?:\(|$)/.test(tool))).length,
+    firstCues,
+  };
 }
 
 function safeJsonParse(s: string, fallback: unknown): unknown {
@@ -571,6 +656,7 @@ function buildEvalScorecard(args: {
   wordCards: CourseWord[];
   wordPerformanceRows: WordPerformanceRow[];
   diagnostics?: ReturnType<typeof buildRealtimeDiagnostics>;
+  turnQuality?: TurnQuality | null;
 }): EvalScorecard {
   const sessionHealth = buildSessionHealth(args.lesson, args.session, args.tokens, args.anomalies);
   const costContext = buildCostContext(args.tokens, args.modelCalls, args.anomalies);
@@ -583,6 +669,7 @@ function buildEvalScorecard(args: {
     teachingLoop,
     agentBehavior,
     diagnostics: args.diagnostics,
+    turnQuality: args.turnQuality,
   });
   return {
     sessionHealth,
@@ -800,8 +887,9 @@ function buildNextIterationSignals(evalParts: {
   teachingLoop: EvalScorecard['teachingLoop'];
   agentBehavior: EvalScorecard['agentBehavior'];
   diagnostics?: ReturnType<typeof buildRealtimeDiagnostics>;
+  turnQuality?: TurnQuality | null;
 }): EvalScorecard['nextIterationSignals'] {
-  const { sessionHealth, costContext, teachingLoop, agentBehavior, diagnostics } = evalParts;
+  const { sessionHealth, costContext, teachingLoop, agentBehavior, diagnostics, turnQuality } = evalParts;
   const signals: EvalScorecard['nextIterationSignals'] = [];
   if (sessionHealth.tokensCorrupted) {
     signals.push(signal('token_data_integrity', 'critical', 'token_usage JSON is corrupted', 'tokensCorrupted', true));
@@ -850,6 +938,11 @@ function buildNextIterationSignals(evalParts: {
     const longest = diagnostics.targetRuns.reduce((max, run) => Math.max(max, run.length), 0);
     if (longest >= 6) signals.push(signal('long_target_run', 'warn', 'At least 6 consecutive saved attempts were assessed against the same target', 'maxTargetRunLength', longest));
     if (diagnostics.notAttempts.length) signals.push(signal('not_attempts', 'info', 'Some assessed child utterances were not attempts at the screen target', 'notAttempts', diagnostics.notAttempts.length));
+  }
+  if (turnQuality) {
+    if (turnQuality.englishLeading > 0) signals.push(signal('english_leading', 'warn', 'Teacher replies have an English lead-in of at least four words', 'englishLeading', turnQuality.englishLeading));
+    if (turnQuality.repeatedShowCard !== null && turnQuality.repeatedShowCard > 0) signals.push(signal('repeated_show_card', 'info', 'Consecutive teacher tool responses show the same card', 'repeatedShowCard', turnQuality.repeatedShowCard));
+    if (turnQuality.praiseMismatch >= 2) signals.push(signal('praise_mismatch', 'warn', 'Teacher praise disagreed with at least two saved non-correct assessments', 'praiseMismatch', turnQuality.praiseMismatch));
   }
   return signals;
 }
@@ -918,7 +1011,7 @@ function findRepeatedSpeechRuns(
   };
 
   for (const interaction of interactions) {
-    const normalized = normalizeSpeech(interaction.ai);
+    const normalized = normalizeSpeech(stripEnglishLead(interaction.ai));
     if (!normalized) {
       flush(interaction.n - 1);
       current = '';

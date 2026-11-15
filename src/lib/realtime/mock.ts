@@ -17,6 +17,7 @@ export class MockRealtimeCall implements RealtimeCall {
   private responses = 0; private items = 0;
   private active: { id: string; metadata: Record<string, string> | null; timers: ReturnType<typeof setTimeout>[] } | null = null;
   private playing: string | null = null;
+  private teacherHasSpoken = false;
   private chain = Promise.resolve();
   private interruptResponse: boolean;
   /** Manual-turn mode (turn_detection null): no automatic VAD/responses; the app commits and creates responses. */
@@ -64,6 +65,11 @@ export class MockRealtimeCall implements RealtimeCall {
     // Manual turns: nothing is detected; the utterance is "heard" when the app commits it and asks for a response.
     if (this.manual) { this.utterance = utterance; return; }
     this.queue(async () => {
+      // A simulated answer belongs after the opening model. Let its first audio event happen instead of cancelling it
+      // before it speaks; the conversation deliberately ignores assessments submitted before that event.
+      while (!this.teacherHasSpoken && this.active && !this.closed) await this.wait();
+      if (this.closed) return;
+      this.heard = utterance;
       const item = `mock_item_${++this.items}`;
       this.emit({ type: 'input_audio_buffer.speech_started', item_id: item });
       if (this.interruptResponse) {
@@ -138,7 +144,10 @@ export class MockRealtimeCall implements RealtimeCall {
     if (this.playing === active.id) { this.emit({ type: 'output_audio_buffer.cleared', response_id: active.id }); this.playing = null; }
     this.emit({ type: 'response.done', response: { id: active.id, status: 'cancelled', metadata: active.metadata, usage, output: [] } });
   }
-  private emit(event: ProviderMessage): void { if (!this.closed) this.options.onEvent(event); }
+  private emit(event: ProviderMessage): void {
+    if (event.type === 'output_audio_buffer.started') this.teacherHasSpoken = true;
+    if (!this.closed) this.options.onEvent(event);
+  }
   private wait(): Promise<void> { return new Promise((resolve) => setTimeout(resolve, this.step)); }
   private queue(work: () => Promise<void>): void { this.chain = this.chain.then(work).catch(() => {}); }
 }

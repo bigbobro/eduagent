@@ -31,9 +31,19 @@ Realtime 课还输出以下字段,不要把 `session.interactionCount` 当作孩
 - `targetRuns`:按 `interaction_logs.model_calls.assessment.target_id` 对连续保存的作答分段。每段的 `targetId`、`startTurn` / `endTurn`(作答记录轮次)、`length`、`correct`、`cleared` 分别表示目标、起止轮次、作答数、正确数、是否在段内过关(课程卡看 `mastered`,练习题看正确作答)。目标改变或某条记录没有目标时断段;「不算」不进作答记录,因此不打断此处连续性。
 - `responses[].tools`:换卡现在留作 `show_card(<课程卡 id>)`,未知卡或坏参数是 `show_card(?)`;评估留作 `record_assessment(<绑定目标 id>)`,无绑定仍是 `record_assessment`。`start_practice` / `end_sitting` 仍只有名字,多个工具逗号分隔。旧的无括号写法仍可读。
 
+`turnQuality` 为 Realtime 的回合质量统计，原有课堂为 `null`：
+
+- `englishLeading`：老师带文字的发言，第一个中文字前有至少 4 个英文单词的条数；全英文发言满足词数时也计入。`englishOnly`：没有中文字的发言条数。都不计告别和评估行。
+- `repeatedShowCard`：相邻换卡回应展示同一卡的次数，中间有带文字的回应或其他工具则断开；静默空回应和评估行不打断。旧记录无卡片 id、含未知卡或没有可识别换卡时为 `null`，不能当作没有重复。
+- `praiseMismatch` / `correctionMismatch`：已保存作答的判定与该作答第一条完整回话相反的次数，轮次见 `praiseMismatchTurns` / `correctionMismatchTurns`，对应 `interactions[].n`。去掉满足 4 词规则的句首英文后，非 correct 却以“对”“很好”“太棒”开头算前者；correct 却以“差一点”“不是”“很接近”开头算后者。缺评估结果的旧作答不臆测；没有评估行时仍可读作答内保存的判定。
+- `stoppingTalk`：包含“先停”“待会儿”“等会儿”“下次我们”，且同一回应没有 show_card 的老师发言数，告别不计。
+- `firstCues`：每张词卡首次 show_card 之后第一条带文字的老师发言是否含目标英文词，列表为 `{ cardId, modelled }`。出卡同一回应工具前的话不算新卡示范，未留存后续发言时为 false；对照本次哪些是新词判断 06 是否生效，不用它推断儿童发音。
+
+重复话术在逐字比较前去掉满足同一 4 词规则的句首英文，保留中文主体；纯英文或无英文前缀的话保持原样。近似重复仍不匹配，用 `long_target_run` 看同词循环。新信号 `english_leading`（warn，条数大于 0）、`repeated_show_card`（info，次数大于 0）、`praise_mismatch`（warn，次数不少于 2）仅用于 Realtime。
+
 Realtime 的 `eval.teachingLoop.stuckCardRuns` / `maxStuckRunLength`、`eval.agentBehavior.speechCardMismatches` / `speechCardMismatchCount` / `emptyActionTurns` 为 `null`,表示依赖 `actions` 的检测不适用,不能写成「检测为零,没有问题」。`coverage_gap`、`clear_rate_low`、`clear_rate_source_legacy`、`needs_review`、`teaching_loop_stuck` 只用于原有课堂,Realtime 的 `nextIterationSignals` 不输出它们。Realtime 改看 `long_target_run`(warn,连续同一目标作答不少于 6 次,值为最长段长度)和 `not_attempts`(info,值为「不算」条数);仅在达到阈值或有记录时出现。
 
-副本日志另查 `battle started`(`elapsedMs`,不含暂停的已上课时长)和 `sitting end settled`(`waitedMs`、结束时在途评估数 `pending`、是否等到超时 `timedOut`),分别对应战斗事件和最终 `sitting-ended` 发出时刻。两条日志只含标识、时间、数量和布尔值,不含话术或转写。
+副本日志另查 `battle started`(`elapsedMs`,不含暂停的已上课时长)和 `sitting end settled`(`waitedMs`、结束时在途评估数 `pending`、是否等到超时 `timedOut`、战斗开始后成功保存的作答 `battleAttempts`、其中 correct 数 `battleCorrect`、mastered 数 `battleMastered`，没有战斗时三项为 0),分别对应战斗事件和最终 `sitting-ended` 发出时刻。两条日志只含标识、时间、数量和布尔值,不含话术或转写。第一笔战斗作答可能是孩子最后一笔教学作答，因为计数从首张战斗卡提交时开始，而该作答的评估可能稍后才保存。
 
 ## 报告模板(必须包含这些 section)
 
