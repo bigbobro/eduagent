@@ -48,6 +48,16 @@ describe('StreamingSpeechExtractor', () => {
     expect(result.state_update).toEqual({ current_word: 'car' });
   });
 
+  it('finalize drops actions that are not well-formed show_card calls instead of passing them downstream', () => {
+    // 2026-11-15 real-LLM smoke: an action without `params` made normalizeActions throw and the turn lost its card change.
+    const ex = new StreamingSpeechExtractor();
+    feedChunks(ex, ['{"speech":"hi","actions":[{"tool":"show_card"},{"tool":"show_card","card_id":"cat"},{"tool":"show_card","params":{"card_id":7}},null,"show_card",{"tool":"play_sound","params":{"card_id":"cat"}},{"tool":"show_card","params":{"card_id":"dog"}}]}']);
+    expect(ex.finalize().actions).toEqual([{ tool: 'show_card', params: { card_id: 'dog' } }]);
+    const notArray = new StreamingSpeechExtractor();
+    feedChunks(notArray, ['{"speech":"hi","actions":{"tool":"show_card","params":{"card_id":"dog"}}}']);
+    expect(notArray.finalize().actions).toEqual([]);
+  });
+
   it('finalize on malformed JSON returns whatever speech was extracted with empty actions', () => {
     const ex = new StreamingSpeechExtractor();
     feedChunks(ex, ['{"speech":"hi","actions":[bad']);

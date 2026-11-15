@@ -1,4 +1,4 @@
-import { AgentResponse } from '@/types/tools';
+import { AgentResponse, ToolAction } from '@/types/tools';
 
 type State =
   | 'LOOKING_FOR_KEY'    // 寻找下一个键
@@ -176,13 +176,24 @@ export class StreamingSpeechExtractor {
     // boundary (skipUntilStringEnd / skipNested only scan the current chunk). The parsed buffer is
     // authoritative; fall back to the streamed value only when JSON.parse failed.
     const speech = typeof parsed?.speech === 'string' ? parsed.speech : this.speech;
+    // The model sometimes emits an action without `params` (seen 2026-11-15: normalizeActions threw on
+    // `params.card_id`, the guard swallowed it and the turn went out with no card change). Keep only
+    // well-formed show_card actions here; the server picks the card anyway, so dropping loses nothing.
+    const rawActions: unknown[] = Array.isArray(parsed?.actions) ? parsed.actions : [];
+    const actions = rawActions.filter(isShowCardAction);
+    if (actions.length !== rawActions.length) console.warn('[extractor] dropped malformed actions', { dropped: rawActions.length - actions.length });
     return {
       speech,
-      actions: parsed?.actions ?? [],
+      actions,
       state_update: parsed?.state_update ?? {},
       malformed: malformed || undefined,
     };
   }
+}
+
+function isShowCardAction(action: unknown): action is ToolAction {
+  const candidate = action as { tool?: unknown; params?: { card_id?: unknown } } | null;
+  return candidate?.tool === 'show_card' && typeof candidate.params?.card_id === 'string';
 }
 
 function decodeSimpleEscape(c: string): string {
