@@ -100,6 +100,16 @@ describe('natural conversation input binding and tool execution', () => {
     expect(outputs()[0]).toMatchObject({ ok: true, displayed_card: 'milk' });
     expect(creates().at(-1)?.response.metadata).toMatchObject({ kind: 'followup', parent: 'r2' });
   });
+  it('tells the teacher to model a word first when the shown card is a word the child has never said correctly', () => {
+    const note = (id: string, card_id: string) => { created(id); done(id, [call('show_card', { card_id })]); return outputs().at(-1).note as string; };
+    expect(note('r1', 'milk')).toContain('never said this word correctly');
+    session.memory.wordPerformance.set('milk', { attempts: 9, correct: 0, lastAttempt: new Date() }); // tried in an earlier sitting, never right
+    expect(note('r2', 'milk')).toContain('never said this word correctly');
+    session.memory.wordPerformance.set('milk', { attempts: 10, correct: 1, lastAttempt: new Date() });
+    expect(note('r3', 'milk')).toBe('The screen now shows this card.');
+    expect(note('r4', 'sentence_apple')).toBe('The screen now shows this card.');
+    expect(conversation.sessionConfig('m')).toMatchObject({ instructions: expect.stringContaining('NEW WORDS: a word the child has never said correctly') });
+  });
   it('saves the assessment against the card rendered at speech start even when the teacher moved the server card first', () => {
     conversation.setPresented({ kind: 'card', id: 'apple' });
     feed({ type: 'input_audio_buffer.speech_started', item_id: 'i1' });
@@ -744,6 +754,7 @@ describe('sitting timing', () => {
     expect(logger.info).not.toHaveBeenCalledWith('battle started', expect.anything());
     created('first'); done('first', [call('show_card', { card_id: 'milk' })]);
     expect(order).toEqual(['card', 'battle']); expect(wrapUps).toBe(1);
+    expect(outputs().at(-1).note).toBe('The screen now shows this card.'); // battle cards are recall: no model-first note for a never-said word
     expect(logger.info).toHaveBeenCalledWith('battle started', { module: 'realtime-conversation', sessionId: session.id, elapsedMs: SITTING.wrapUpMs });
     created('second'); done('second', [call('show_card', { card_id: 'apple' })]);
     expect(wrapUps).toBe(1);
