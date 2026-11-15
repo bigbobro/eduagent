@@ -1,4 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { animalsCourse } from '@/data/courses/animals';
+import { parseLessonEvent } from '@/lib/lesson-protocol';
+import { createMemory, initializeCardProgress } from './memory';
+import { runPipeline } from './guards';
+import { closingGuard } from './guards/closing-guard';
+import { prematureClosingGuard } from './guards/premature-closing-guard';
+import { normalizeActions } from './guards/normalize-actions';
+import { speechCardAlign } from './guards/speech-card-align';
 import { StreamingSpeechExtractor, sanitizeSpeech } from './speech-extractor';
 
 function feedChunks(extractor: StreamingSpeechExtractor, chunks: string[]): void {
@@ -96,6 +104,84 @@ describe('StreamingSpeechExtractor', () => {
     const ex = new StreamingSpeechExtractor();
     feedChunks(ex, ['{"x":"a\\', '"b","speech":"ZZZ"}']);
     expect(ex.finalize().speech).toBe('ZZZ');
+  });
+});
+
+describe('extractor to client actions contract', () => {
+  const assessment = { card_id: 'cat', result: 'correct', should_advance: false, evidence: 'fixture evidence' };
+  const action = { tool: 'show_card', params: { card_id: 'cat' } };
+  const extract = (state: unknown, actions: unknown = [action]) => {
+    const ex = new StreamingSpeechExtractor();
+    ex.feed(JSON.stringify({ speech: '我们说 cat。', actions, state_update: state }));
+    return ex.finalize();
+  };
+  const clientEvent = (actions: unknown, state: unknown) => parseLessonEvent('actions', JSON.stringify({ type: 'actions', actions, state_update: state }));
+
+  it.each([
+    { name: 'assessment null', state: { current_word: 'cat', attempt_assessment: null }, expected: { current_word: 'cat' } },
+    { name: 'missing evidence', state: { current_word: 'cat', attempt_assessment: { card_id: 'cat', result: 'correct', should_advance: false } }, expected: { current_word: 'cat' } },
+    { name: 'result partial', state: { current_word: 'cat', attempt_assessment: { ...assessment, result: 'partial' } }, expected: { current_word: 'cat' } },
+    { name: 'current_word null', state: { current_word: null, attempt_assessment: assessment }, expected: { attempt_assessment: assessment } },
+    { name: 'current_word number', state: { current_word: 42, attempt_assessment: assessment }, expected: { attempt_assessment: assessment } },
+    { name: 'state_update string', state: 'private fixture', expected: {} },
+    { name: 'state_update array', state: ['private fixture'], expected: {} },
+    { name: 'state_update null', state: null, expected: {} },
+  ])('keeps the event and valid sibling fields when $name is malformed', ({ state, expected }) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = extract(state);
+      expect(result.speech).toBe('我们说 cat。'); expect(result.malformed).toBeUndefined();
+      expect(result.actions).toEqual([action]); expect(result.state_update).toEqual(expected);
+      // This is the actions payload yielded by session.ts, parsed by the real browser contract.
+      expect(clientEvent(result.actions, result.state_update)).toEqual({ type: 'actions', actions: [action], state_update: expected });
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally { warn.mockRestore(); }
+  });
+
+  it('preserves a well-formed assessment and actions without warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const state = { current_word: 'cat', attempt_assessment: assessment };
+      const result = extract(state);
+      expect(result.state_update).toEqual(state); expect(result.actions).toEqual([action]);
+      expect(clientEvent(result.actions, result.state_update)).toEqual({ type: 'actions', actions: [action], state_update: state });
+      expect(warn).not.toHaveBeenCalled();
+    } finally { warn.mockRestore(); }
+  });
+
+  it('strips unknown keys using the client contract and logs only fixed field names and counts once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = extract({ current_word: 'cat', attempt_assessment: { ...assessment, private_key: 'private evidence' }, phase: 'done', private_key: 'private state' },
+        [{ ...action, private_key: 'private action', params: { card_id: 'cat', private_key: 'private params' } }, { tool: 'show_card' }]);
+      const state = { current_word: 'cat', attempt_assessment: assessment };
+      expect(result.state_update).toEqual(state); expect(result.actions).toEqual([action]);
+      expect(clientEvent(result.actions, result.state_update)).toEqual({ type: 'actions', actions: [action], state_update: state });
+      expect(warn.mock.calls).toEqual([['[extractor] dropped malformed fields', {
+        'actions.extra_keys': 2, actions: 1, 'state_update.extra_keys': 2, 'state_update.attempt_assessment.extra_keys': 1,
+      }]]);
+    } finally { warn.mockRestore(); }
+  });
+
+  it('forces the next card through the full guard pipeline despite malformed action and state in one response', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const result = extract({ current_word: 42, attempt_assessment: null }, [{ tool: 'show_card' }]);
+      const memory = initializeCardProgress(createMemory(), animalsCourse);
+      memory.currentCardId = 'cat'; memory.currentWord = 'cat';
+      memory.cardProgress.cat = 'attempted'; memory.cardCorrectCount.cat = 1;
+      const final = runPipeline({ speech: result.speech, actions: result.actions, stateUpdate: result.state_update,
+        memory, course: animalsCourse, asrText: 'Cat.', currentPhase: 'interactive' },
+      [closingGuard, prematureClosingGuard, normalizeActions, speechCardAlign]);
+      expect(final.forceCardId).toBe('dog');
+      expect(final.actions).toEqual([{ tool: 'show_card', params: { card_id: 'dog' } }]);
+      expect(clientEvent(final.actions, final.stateUpdate)).toEqual({ type: 'actions', actions: final.actions, state_update: {} });
+      expect(error).not.toHaveBeenCalled();
+      expect(warn.mock.calls.filter(([message]) => message === '[extractor] dropped malformed fields')).toEqual([
+        ['[extractor] dropped malformed fields', { actions: 1, 'state_update.current_word': 1, 'state_update.attempt_assessment': 1 }],
+      ]);
+    } finally { warn.mockRestore(); error.mockRestore(); }
   });
 });
 

@@ -41,8 +41,8 @@ const progressSchema = z.object({
   collectedCardIds: z.array(z.string()).optional(),
 });
 export type LessonProgressSnapshot = z.infer<typeof progressSchema>;
-const toolActionSchema = z.object({ tool: z.literal('show_card'), params: z.object({ card_id: z.string() }) }) satisfies z.ZodType<ToolAction>;
-const stateUpdateSchema = z.object({
+export const toolActionSchema = z.object({ tool: z.literal('show_card'), params: z.object({ card_id: z.string() }) }) satisfies z.ZodType<ToolAction>;
+export const stateUpdateSchema = z.object({
   current_word: z.string().optional(),
   attempt_assessment: z.object({ card_id: z.string(), result: z.enum(['correct', 'close', 'wrong', 'off_topic']), should_advance: z.boolean(), evidence: z.string() }).optional(),
 }) satisfies z.ZodType<AgentResponse['state_update']>;

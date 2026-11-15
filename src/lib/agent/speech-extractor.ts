@@ -1,4 +1,5 @@
-import { AgentResponse, ToolAction } from '@/types/tools';
+import type { AgentResponse, ToolAction } from '@/types/tools';
+import { stateUpdateSchema, toolActionSchema } from '@/lib/lesson-protocol';
 
 type State =
   | 'LOOKING_FOR_KEY'    // 寻找下一个键
@@ -176,24 +177,46 @@ export class StreamingSpeechExtractor {
     // boundary (skipUntilStringEnd / skipNested only scan the current chunk). The parsed buffer is
     // authoritative; fall back to the streamed value only when JSON.parse failed.
     const speech = typeof parsed?.speech === 'string' ? parsed.speech : this.speech;
-    // The model sometimes emits an action without `params` (seen 2026-11-15: normalizeActions threw on
-    // `params.card_id`, the guard swallowed it and the turn went out with no card change). Keep only
-    // well-formed show_card actions here; the server picks the card anyway, so dropping loses nothing.
+    // Validate at the LLM boundary with the browser's transport contract. Drop only bad fields/items so
+    // the guards can still choose the card and the browser can accept the resulting actions event.
+    const dropped: Record<string, number> = {};
+    const drop = (field: string, count = 1) => { if (count > 0) dropped[field] = (dropped[field] ?? 0) + count; };
     const rawActions: unknown[] = Array.isArray(parsed?.actions) ? parsed.actions : [];
-    const actions = rawActions.filter(isShowCardAction);
-    if (actions.length !== rawActions.length) console.warn('[extractor] dropped malformed actions', { dropped: rawActions.length - actions.length });
+    if (parsed?.actions !== undefined && !Array.isArray(parsed.actions)) drop('actions');
+    const actions = rawActions.flatMap((action) => {
+      const checked = toolActionSchema.safeParse(action);
+      if (!checked.success) { drop('actions'); return []; }
+      const raw = action as ToolAction; // the shared schema just validated the shape
+      drop('actions.extra_keys', countExtraKeys(raw, checked.data) + countExtraKeys(raw.params, checked.data.params));
+      return [checked.data];
+    });
+    const state_update: AgentResponse['state_update'] = {};
+    const rawState = parsed?.state_update;
+    if (rawState && typeof rawState === 'object' && !Array.isArray(rawState)) {
+      drop('state_update.extra_keys', countExtraKeys(rawState, stateUpdateSchema.shape));
+      const word = stateUpdateSchema.shape.current_word.safeParse(rawState.current_word);
+      if (!word.success) drop('state_update.current_word');
+      else if (word.data !== undefined) state_update.current_word = word.data;
+      const assessment = stateUpdateSchema.shape.attempt_assessment.safeParse(rawState.attempt_assessment);
+      if (!assessment.success) drop('state_update.attempt_assessment');
+      else if (assessment.data !== undefined) {
+        state_update.attempt_assessment = assessment.data;
+        drop('state_update.attempt_assessment.extra_keys', countExtraKeys(rawState.attempt_assessment, assessment.data));
+      }
+    } else if (rawState !== undefined) drop('state_update');
+    if (Object.keys(dropped).length) console.warn('[extractor] dropped malformed fields', dropped);
     return {
       speech,
       actions,
-      state_update: parsed?.state_update ?? {},
+      state_update,
       malformed: malformed || undefined,
     };
   }
 }
 
-function isShowCardAction(action: unknown): action is ToolAction {
-  const candidate = action as { tool?: unknown; params?: { card_id?: unknown } } | null;
-  return candidate?.tool === 'show_card' && typeof candidate.params?.card_id === 'string';
+/** Count stripped keys without logging their model-supplied names or values. */
+function countExtraKeys(raw: object, allowed: object): number {
+  return Object.keys(raw).filter((key) => !Object.prototype.hasOwnProperty.call(allowed, key)).length;
 }
 
 function decodeSimpleEscape(c: string): string {

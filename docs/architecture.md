@@ -366,7 +366,7 @@ guard 抛异常时:`console.error('[guard]', guard.name, 'failed:', err)`,并用
 
 | 决策 | 选择 | 为什么 |
 |------|------|--------|
-| 流式 JSON 提取 | `SpeechExtractor` 状态机解析单个 LLM 响应;`finalize()` 在整段 JSON 可解析时优先用解析出的 `speech` | 节省一次 LLM 调用;约 100 行。skip 助手只扫当前 chunk,值跨 SSE chunk 边界会丢流式 speech,故 finalize 以完整 buffer 为权威。`feed()` 只累积 buffer 与 `this.speech`(供 `JSON.parse` 失败时兜底),不再产出无人消费的流式 speech delta(原 `FeedResult`/`speechDelta`/`complete` 已删)。`finalize()` 只保留形状正确的动作(`tool` 为 `show_card` 且 `params.card_id` 是字符串),其余丢弃并记一行 warn(只记丢弃个数);`actions` 不是数组时视为空。2026-11-15 真实 LLM 冒烟里模型返回了不带 `params` 的动作,`normalizeAssistantActions` 读 `params.card_id` 抛异常,被 guard 兜住后这一轮没有任何切卡动作(孩子说对第二次、画面却没换卡);服务端本来就自己决定切哪张卡,丢弃坏动作不丢信息 |
+| 流式 JSON 提取 | `SpeechExtractor` 状态机解析单个 LLM 响应;`finalize()` 在整段 JSON 可解析时优先用解析出的 `speech` | 节省一次 LLM 调用;约 100 行。skip 助手只扫当前 chunk,值跨 SSE chunk 边界会丢流式 speech,故 finalize 以完整 buffer 为权威。`feed()` 只累积 buffer 与 `this.speech`(供 `JSON.parse` 失败时兜底),不再产出无人消费的流式 speech delta(原 `FeedResult`/`speechDelta`/`complete` 已删)。`finalize()` 与浏览器 `parseLessonEvent` 共用 `lesson-protocol.ts` 的 `toolActionSchema` 和 `stateUpdateSchema`：动作逐项校验，只保留合法 show_card；state_update 逐字段保留字符串 current_word 和完整合法的 attempt_assessment，坏字段与非对象状态丢弃，不牺牲合法同级字段。未知键按客户端既有 z.object 规则剥离，不放宽客户端校验。存在丢弃时只记一条 `[extractor] dropped malformed fields` warn，字段为固定字段名及丢弃数量，不含模型内容；非数组 actions 视为空。2026-11-15 真实 LLM 冒烟里模型返回了不带 `params` 的动作,`normalizeAssistantActions` 读 `params.card_id` 抛异常,被 guard 兜住后冒烟只看到这一轮没有切卡；实际浏览器还会拒绝含坏动作的整条 actions 事件并使该轮报错，含坏 state_update 也会丢掉同事件内服务端强制的 show_card。入口校验后 guards 仍按既有规则决定切卡 |
 | TTS 音色 | 固定 `seed-tts-2.0-standard` + Tina老师2.0 + 缓存 | 稳定性优先,避免 expressive 抽卡;开场白 / 提示语 100% 一致 |
 | 不做客户端切句 | LLM token 直接透传 TTS | 豆包文档建议"更自然、情绪更饱满" |
 | 回声抑制 | 浏览器 getUserMedia 三标志位 | 简单,无服务端 DSP |
