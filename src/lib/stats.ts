@@ -4,8 +4,7 @@ import type { Course } from '@/types/course';
 import type { StatsSnapshot, SessionSummary } from '@/types/progress';
 import { getLessonTimings, getRecentLessons, getLessonWordPerfCount } from './db/queries';
 
-function dateKey(iso: string): string {
-  const d = new Date(iso);
+function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -19,26 +18,23 @@ export function buildStatsSnapshot(db: Database, learnerId: string): StatsSnapsh
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const days: Array<{ date: string; minutes: number }> = [];
+  const dailyMs = new Map<string, number>();
   for (let i = 90; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    days.push({
-      date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-      minutes: 0,
-    });
+    dailyMs.set(dateKey(d), 0);
   }
-  const byKey = new Map(days.map((d) => [d.date, d]));
 
   let totalMs = 0;
   for (const r of rows) {
     const ms = durationMs(r.startTime, r.endTime);
     totalMs += ms;
-    const k = dateKey(r.startTime);
-    const slot = byKey.get(k);
-    if (slot) slot.minutes += Math.round(ms / 60_000);
+    const date = dateKey(new Date(r.startTime));
+    const dayMs = dailyMs.get(date);
+    if (dayMs !== undefined) dailyMs.set(date, dayMs + ms);
   }
 
+  const days = Array.from(dailyMs, ([date, ms]) => ({ date, minutes: Math.round(ms / 60_000) }));
   return {
     totalMinutes: Math.round(totalMs / 60_000),
     totalSessions: rows.length,
