@@ -73,7 +73,6 @@ export function RecordsPage({ name, progress, stats, sessions, error, onRetry, o
   const words = progress.courses.flatMap(course => course.words);
   const practice = words.filter(word => word.attempts > 0 && word.masteryStars <= 1).slice(0, 5);
   const days = stats.lastDays ?? stats.last7Days;
-  const months = Array.from(new Set(days.map(day => Number(day.date.slice(5, 7)))));
   const learnedWords = words.filter(word => word.masteryStars >= 2).length;
   const recentMinutes = stats.last7Days.reduce((sum, day) => sum + day.minutes, 0);
   const hours = Math.floor(stats.totalMinutes / 60);
@@ -95,7 +94,7 @@ export function RecordsPage({ name, progress, stats, sessions, error, onRetry, o
           最近 13 周
           <small>颜色越深,那天学得越久</small>
         </h2>
-        <Heatmap days={days} months={months} />
+        <Heatmap days={days} />
       </section>
       <section className="records-panel">
         <h2>
