@@ -25,6 +25,11 @@ export function courseGroup(status?: CourseProgress): '接着学' | '学完了' 
   if (status?.hasResume || (status?.timesStarted ?? 0) > 0) return '接着学';
   return '新课';
 }
+// Only a resumable breakpoint is continued; a completed course restarts as a review (isResumableProgress).
+function startLabel(status?: CourseProgress): string {
+  if (status?.completed) return '从头复习';
+  return status?.hasResume ? '继续上课' : '开始上课';
+}
 function courseName(title: string) {
   const split = title.search(/[A-Za-z]/);
   return split < 0 ? { zh: title, en: '' } : { zh: title.slice(0, split).trim(), en: title.slice(split) };
@@ -65,7 +70,7 @@ export function CourseHome({ courses, progress, learnerId, error, onRetry, onCou
   return <div className="home-layout"><nav className="home-side" aria-label="课程列表">{groups.map(group => <section key={group.label} aria-label={group.label}><h2>{group.label} · {group.courses.length}</h2>{group.courses.map(item => {
     const title = courseName(item.title);
     return <button type="button" key={item.id} className="home-course" aria-label={item.title} aria-pressed={item.id === course.id} onClick={() => { setSelected(item.id); try { localStorage.setItem(selectionKey(learnerId), item.id); } catch { /* Selection remains usable without storage. */ } }}><span><b>{title.zh}</b><small>{title.en}</small></span><ProgressBar label={`${item.title}进度`} value={statuses.get(item.id)?.progressPercent ?? 0} /></button>;
-  })}</section>)}</nav><main className="home-detail"><header className="home-hero"><div className="home-heading"><Tag tone={group === '学完了' ? 'mint' : group === '新课' ? 'grey' : 'purple'}>{group === '学完了' ? '已学完' : group}</Tag><h1>{name.zh}<span>{name.en}</span></h1><p>{course.description}</p><div className="home-progress"><ProgressBar label="单词掌握进度" value={words.length ? learned / words.length * 100 : 0} /><span>已会 {learned} 个 · 还剩 {words.length - learned} 个{last && ` · 上次 ${last}`}</span></div></div><div className="home-actions">{status?.hasResume === true && !status.completed && <Button size="lg" variant="glass" onClick={() => onCourseStart(course.id, { fresh: true })}>从头复习</Button>}<Button size="lg" onClick={() => onCourseStart(course.id)}>{group === '新课' ? '开始上课' : '继续上课'}</Button></div></header><div className="home-wall" aria-label="本课单词">{words.map(word => {
+  })}</section>)}</nav><main className="home-detail"><header className="home-hero"><div className="home-heading"><Tag tone={group === '学完了' ? 'mint' : group === '新课' ? 'grey' : 'purple'}>{group === '学完了' ? '已学完' : group}</Tag><h1>{name.zh}<span>{name.en}</span></h1><p>{course.description}</p><div className="home-progress"><ProgressBar label="单词掌握进度" value={words.length ? learned / words.length * 100 : 0} /><span>已会 {learned} 个 · 还剩 {words.length - learned} 个{last && ` · 上次 ${last}`}</span></div></div><div className="home-actions">{status?.hasResume === true && !status.completed && <Button size="lg" variant="glass" onClick={() => onCourseStart(course.id, { fresh: true })}>从头复习</Button>}<Button size="lg" onClick={() => onCourseStart(course.id)}>{startLabel(status)}</Button></div></header><div className="home-wall" aria-label="本课单词">{words.map(word => {
     const result = mastery.get(word.english);
     const stars = result?.masteryStars ?? 0;
     return (
