@@ -6,7 +6,7 @@ import { useLearningRecords } from '@/components/records/useLearningRecords';
 
 export default function Page() {
   const router = useRouter();
-  const { data, error, reload } = useLearningRecords();
+  const { data, error, reload } = useLearningRecords({ includeStats: true });
   return (
     <RecordsPage
       key={data?.learnerId}

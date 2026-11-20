@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import type { CourseProgress, StatsSnapshot } from '@/types/progress';
-import { heatCellSize } from './Heatmap';
+import { heatCellSize, heatMonthLabels } from './Heatmap';
 import { RecordsPage } from './RecordsPage';
 
 const words = [0, 1, 2, 3].map(stars => ({
@@ -132,5 +132,43 @@ describe('heatCellSize', () => {
     expect(side * 13 + 5 * 12).toBeLessThanOrEqual(180);
     expect(side * 7 + 5 * 6).toBeLessThanOrEqual(90);
     expect(heatCellSize(0, 100)).toBe(0);
+  });
+});
+
+describe('heatMonthLabels', () => {
+  function daysFrom(start: string, count: number) {
+    return Array.from({ length: count }, (_, index) => {
+      const date = new Date(`${start}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + index);
+      return { date: date.toISOString().slice(0, 10), minutes: 0 };
+    });
+  }
+
+  it('places labels at the week containing the first day, including mid-week boundaries', () => {
+    expect(heatMonthLabels(daysFrom('2026-08-22', 91), 44)).toEqual([
+      { month: '2026-09', label: '9 月', column: 1 },
+      { month: '2026-10', label: '10 月', column: 5 },
+      { month: '2026-11', label: '11 月', column: 10 },
+    ]);
+  });
+
+  it('requires two columns and enough space before the next label for a partial first month', () => {
+    const days = daysFrom('2026-08-22', 91);
+    expect(heatMonthLabels(days, 20).map(label => label.month)).toEqual(['2026-09', '2026-10', '2026-11']);
+    expect(heatMonthLabels(days, 44)[0].month).toBe('2026-09');
+    const twoColumns = daysFrom('2026-08-15', 91);
+    expect(heatMonthLabels(twoColumns, 13)[0].month).toBe('2026-08');
+    expect(heatMonthLabels(twoColumns, 12)[0].month).toBe('2026-09');
+    expect(heatMonthLabels(daysFrom('2026-08-30', 30), 44)[0].month).toBe('2026-09');
+    expect(heatMonthLabels(daysFrom('2026-08-01', 40), 20)[0].month).toBe('2026-08');
+  });
+
+  it('handles empty data, unmeasured cells, a single month and year boundaries', () => {
+    expect(heatMonthLabels([], 20)).toEqual([]);
+    expect(heatMonthLabels(daysFrom('2026-08-22', 91), 0)[0].month).toBe('2026-09');
+    expect(heatMonthLabels(daysFrom('2026-08-22', 3), 20)).toHaveLength(1);
+    expect(heatMonthLabels(daysFrom('2026-12-01', 40), 20)[1]).toEqual({
+      month: '2027-01', label: '1 月', column: 4,
+    });
   });
 });

@@ -70,8 +70,10 @@
 }
 
 .records-months {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: repeat(13, minmax(0, 1fr));
+  gap: 5px;
+  white-space: nowrap;
   align-self: center;
   width: 100%;
   font-size: 12px;

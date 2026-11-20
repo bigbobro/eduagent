@@ -588,6 +588,8 @@ fetch /api/stats?learnerId      → RecordsPage 总时长/课次、lastDays 91 �
 voice WS / SSE        → 上课页(PhasedLessonController 包装 LessonController)
 ```
 
+`useLearningRecords` 并行读取进度和课次；只有学习记录页显式启用统计请求。下课页不受统计接口故障影响，进度或课次请求失败仍显示可重试的错误。
+
 `/api/progress` / `/api/sessions` / `/api/stats` 是只读业务接口,但会在查询前调用 `ensureDatabaseInitialized()` 跑 SQLite migrations。这样 fresh checkout 或临时 `DATABASE_PATH` 不需要先跑一节课或命中 `/api/chat`。当前 migrations:v8 以 `CREATE INDEX IF NOT EXISTS` 为新旧库添加 `word_performance_lesson ON word_performance(lesson_id)`,避免 `buildSessionList` 逐课统计时全表扫描;统计仅按 `lesson_id` 等值筛选且无排序,单列索引避免额外覆盖列的写入开销。v5 加本地孩子归属与复合断点主键(见上文);v4 加断点表;v1 创建 `lesson_logs` / `interaction_logs` / `word_performance`;v2(2026-07-04)给 `word_performance` 增 `rc_correct` / `rc_cleared`(R-C 权威账本,ALTER 前查 PRAGMA 幂等);v3(2026-07-04)给 `lesson_logs` 增 `ended_gracefully INTEGER DEFAULT 0`(同一 ALTER-前-查-PRAGMA 幂等约定),只由 `finishLessonLog` 置 1,`touchLessonLog` 不碰它。已有本地 DB 若缺少 marker,会幂等补写而不删除课堂数据。
 
 **课堂结算是增量的**:`lesson_logs.end_time` 现在由 `touchLessonLog()` 在**每一轮提交时**写(`commitTurn` 的消息轮 + `recordQuizAnswer` 的 quiz 轮),而不是只靠优雅结课的 `finishLessonLog()`(`action:'end'`)。这样关 tab / 刷新 / 崩溃 / 断网都不会让 `end_time` 永久 NULL —— 否则 `stats.durationMs` 会把整节课时长算成 0。**R1(2026-07-04)**:`touchLessonLog()` 现在同时传 `tokenUsage` 参数、每轮把 `session.tokenUsage` 序列化落库——此前 `token_usage` 只有 `finishLessonLog()` 写,非优雅结束的课永远是 `{}`(报告假报 0 req/asr/tts "not tracked")。但这也意味着 `token_usage` 非空**不再能**当"是否优雅结束"的判据(现在每轮都非空);新增的 `ended_gracefully` 列专门只由 `finishLessonLog()` 置 1,`lesson-report-data.ts` 的 `sessionHealth.endedGracefully` 读这一列。`finishLessonLog()` 保留为优雅结课的最终 flush(`token_usage` + `ended_gracefully=1`)。`end_time IS NULL` 不被任何地方当"进行中"标志,所以课中写它是安全的。
@@ -637,7 +639,7 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 `CourseHome` 使用 232px 可滚动纯文字课程侧栏，按 completed / hasResume / timesStarted 分为接着学、学完了、新课；全部注册课程可选。右侧显示课程事实、单词掌握比例、最近练习时间和 6×2 图片墙。已会按当前词卡 masteryStars ≥ 2 计算，不使用 API 的 3 星 masteredWords 或会话 clearedCardIds；上次取 lastPracticed 最大有效值，按本地日历显示今天/昨天/日期与时间，未上过不显示。单词图片随格子高度 cover，英文单行省略，卡片不响应点击。
 
-显式选课保存为 `eduagent.selectedCourse.<learnerId>`，无有效记忆时优先接着学首课；切换孩子重新挂载并读取该孩子的进度，取消旧请求结果。多档案未选时显示具名选择面板，无档案保持设置建档入口。课程/进度未完成读取显示骨架，任一读取失败显示可重试错误，空目录单独显示空状态。新课按钮为开始上课，上过为继续上课，均复用既有 learnerId 路由和续课能力。没有跳过有效断点的现有入口，因此不提供从头复习按钮，也不改 controller；已完成课程原有 start 自动开启复习的行为保持。
+显式选课保存为 `eduagent.selectedCourse.<learnerId>`，无有效记忆时优先接着学首课；切换孩子重新挂载并读取该孩子的进度，取消旧请求结果。多档案未选时显示具名选择面板，无档案保持设置建档入口。课程/进度未完成读取显示骨架，任一读取失败显示可重试错误，空目录单独显示空状态。主按钮按断点取名：有可续断点为继续上课，已完成课程为从头复习（原有 start 不恢复已完成断点，自动开启复习），其余（新课、只听过开场白）为开始上课，均复用既有 learnerId 路由和续课能力。有可续断点的课另有次按钮从头复习（`fresh=1`，见 §3.1b）。
 
 原生菜单监听根 Menu 的 menu-will-show：Electron 45 的 Cocoa controller 在应用子菜单打开时向根 model 发事件。与加载/导航/聚焦刷新共用固定本地读取，无新增 IPC。macOS tracking 期间结构重建会延迟到菜单关闭，所以额外观察当前 renderer 的固定 /api/learners 请求完成事件，提前同步同页档案和选择变化；只读 Node fetch 不经过该 session，不产生循环。异步读取失败保留旧菜单供下次恢复。
 
@@ -645,7 +647,7 @@ G 设计令牌与原 CC 令牌共存；中文与界面标题使用系统字体�
 
 `/records` 合并原先的单词本和家长页，主工具栏及原生 nav:records / Cmd+2 指向它。`/journal`、`/parents` 路由和旧组件已移除。学习记录只列 timesStarted > 0 的课程，以最近课次和词级 lastPracticed 降序排列。点课程条打开居中玻璃浮层（Esc、遮罩、关闭按钮可关，焦点进入后回到该行，遮罩下 `.shell-content` 与课程列表不滚动），墙为 6 列，复用首页 `HomeWordCard`（图片、中英、三段掌握、≥2 星打勾、未练淡化）。热力图为包含今天的滚动 91 天（13 列、7 行），格子边长取可用宽高减去间距后的较小值并居中，不随窗口压成扁矩形；使用本地日期，按每日 0 / 1–9 / 10–19 / >=20 分钟四档紫色。只展示现有时长、课次、会说单词、最近课次与 attempts > 0 且 masteryStars <= 1 的待练词，不显示占位准确率、连续天数等指标。
 
-`buildStatsSnapshot` / `/api/stats` 向后兼容新增 `lastDays: { date, minutes }[]`，始终 91 条且按日期升序补零；`last7Days` 保留原有聚合语义，等于 lastDays 最后七条。累计总数包含窗口外课次，日期按 startTime 的本地日期归属、每课次分钟先四舍五入，维持旧行为，不改 schema。
+`buildStatsSnapshot` / `/api/stats` 返回 `lastDays: { date, minutes }[]`，始终 91 条且按日期升序补零；`last7Days` 等于 `lastDays` 最后七条。课次按 `startTime` 的本地日期归属，每天先累加课次时长，再四舍五入为分钟。累计总时长包含窗口外课次，独立累加后四舍五入。
 
 下课页不再自动跳转；两列六行逐词表按持久 masteryStars 呈现（3 很好、2 好、1 再练练、0 没练到）。标题与今天学会数量使用 >=2 星，与首页一致；时长取 `/api/sessions?limit=50` 中本课最近课次，无课次时不造时长。建议下一课排除当前课与已学会全部词的课，优先有断点，其次未上过的新课；带最多四张未掌握词图。课堂内继续使用原 handleRestart，独立路由进入本课；现有控制器自动恢复有效断点，不新增强制清除断点行为。独立路由使用主工具栏替代旧 52px 留位，课堂内保留课堂工具栏。数据加载失败显示重试，孩子切换与重试忽略过期请求，不把失败当零值。
 
@@ -766,6 +768,8 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 ---
 
 ## 18. Realtime 自然对话课堂(2026-10-29)
+
+开通 Realtime 通话时，HTTP 429 的结构化错误 `error.code` 或 `error.type` 为 `insufficient_quota` 则保留为 `REALTIME_INSUFFICIENT_QUOTA`，课堂提示到 OpenAI 控制台检查余额和账单；其他 429（含空或无法解析的正文）仍为 `REALTIME_RATE_LIMITED`。不回显或记录提供方错误正文。
 
 上文豆包 WS 与文本 agent 时序属于原有模式，原有课堂仍按住说话。Realtime 模式在 `RealtimeClassroom`（`interaction = 'conversation'`）内实现同一 Classroom 接口，开课后自然全双工：常开麦、提供方自动划轮、外放模式关闭时孩子随时插话。首版的按住说话＋HTTP 整段上传 PCM＋服务端串行 turn 已被替换，不保留为第三种子模式。
 

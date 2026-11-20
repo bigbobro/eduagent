@@ -26,6 +26,7 @@ interface Run {
   vad: ManualTurnVad | null; signals: Promise<unknown>; silence: ReturnType<typeof setTimeout> | null;
 }
 const FATAL_MESSAGE = '实时连接已断开，请重新进入课堂，从已保存的进度继续。';
+const QUOTA_MESSAGE = 'OpenAI 额度不足，请到 OpenAI 控制台检查余额和账单后再试。';
 
 /** Natural Realtime classroom: one always-open microphone over WebRTC; the server sideband owns tools and saving. */
 export class RealtimeClassroom implements Classroom {
@@ -207,7 +208,7 @@ export class RealtimeClassroom implements Classroom {
   private fatal(run: Run, code: string): void {
     if (!this.current(run)) return;
     const settings = /AUTH|QUOTA|MODEL_UNAVAILABLE/.test(code);
-    this.emit('error', { code: settings ? code : 'SESSION_EXPIRED', message: settings ? '请到设置检查 OpenAI 密钥、模型权限或额度。' : FATAL_MESSAGE });
+    this.emit('error', { code: settings ? code : 'SESSION_EXPIRED', message: code === 'REALTIME_INSUFFICIENT_QUOTA' ? QUOTA_MESSAGE : settings ? '请到设置检查 OpenAI 密钥、模型权限或额度。' : FATAL_MESSAGE });
     this.state(run, 'idle');
     void this.endLesson();
   }
@@ -343,6 +344,7 @@ export class RealtimeClassroom implements Classroom {
     const settings = /NOT_CONFIGURED|AUTH|QUOTA|BALANCE|MODEL_UNAVAILABLE/.test(code);
     this.emit('error', { code, message: code === 'INVALID_COURSE_PROGRESS' ? invalidProgressMessage : code === 'SESSION_EXPIRED' ? FATAL_MESSAGE
       : code === 'MICROPHONE_UNAVAILABLE' ? '没有拿到麦克风，请检查麦克风权限后重新进入课堂。'
+      : code === 'REALTIME_INSUFFICIENT_QUOTA' ? QUOTA_MESSAGE
       : settings ? '请到设置检查 OpenAI 密钥、模型权限或额度。' : '实时老师暂时没连上，可以重试这一步或退出后继续。' });
   }
   /** App-side actions keep a retry closure; a provider/stream failure instead ends the run. */

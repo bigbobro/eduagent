@@ -21,13 +21,15 @@ describe('record requests', () => {
         ? new Promise(resolve => pending.push(() => resolve(new Response(JSON.stringify(url.includes('/sessions') ? [] : { owner: 'a' })))))
         : Promise.resolve(new Response(JSON.stringify(url.includes('/sessions') ? [] : { owner: 'b' })))
     )));
-    const { result } = renderHook(() => useLearningRecords());
+    const { result } = renderHook(() => useLearningRecords({ includeStats: true }));
     await waitFor(() => expect(pending).toHaveLength(3));
     act(() => {
       profiles.current = 'b';
       window.dispatchEvent(new Event('eduagent:learner-change'));
     });
     await waitFor(() => expect(result.current.data?.learnerId).toBe('b'));
+    expect(fetch).toHaveBeenCalledWith('/api/stats?learnerId=b');
+    expect(result.current.data?.stats).toEqual({ owner: 'b' });
     await act(async () => {
       pending.forEach(finish => finish());
     });
@@ -40,7 +42,7 @@ describe('record requests', () => {
       fail ? '{}' : JSON.stringify(url.includes('/sessions') ? [] : {}),
       { status: fail ? 503 : 200 },
     )));
-    const { result } = renderHook(() => useLearningRecords('b'));
+    const { result } = renderHook(() => useLearningRecords({ learnerId: 'b' }));
     await waitFor(() => expect(result.current.error).toBe(true));
     expect(result.current.data).toBeNull();
     fail = false;

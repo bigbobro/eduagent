@@ -54,6 +54,25 @@ describe('buildStatsSnapshot', () => {
     const threeDaysAgo = s.last7Days[3];
     expect(threeDaysAgo.minutes).toBe(60);
   });
+
+  it.each([
+    { count: 3, seconds: 24 },
+    { count: 2, seconds: 40 },
+  ])('rounds $count same-day lessons of $seconds seconds to one minute', ({ count, seconds }) => {
+    const db = makeDb();
+    const insert = db.prepare('INSERT INTO lesson_logs (id, course_id, start_time, end_time) VALUES (?, ?, ?, ?)');
+    for (let i = 0; i < count; i++) {
+      const start = new Date(2026, 4, 13, 9, i);
+      const end = new Date(start.getTime() + seconds * 1_000);
+      insert.run(`l${i}`, 'food', start.toISOString(), end.toISOString());
+    }
+
+    const stats = buildStatsSnapshot(db, 'test-learner');
+    const today = { date: '2026-05-13', minutes: 1 };
+    expect(stats.totalMinutes).toBe(1);
+    expect(stats.last7Days.at(-1)).toEqual(today);
+    expect(stats.lastDays?.at(-1)).toEqual(today);
+  });
 });
 
 describe('buildSessionList', () => {
