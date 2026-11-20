@@ -1,6 +1,7 @@
 import Database from './sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getSchemaVersion, runMigrations } from './schema';
+import { buildSessionList } from '../stats';
 
 function tableNames(db: Database): string[] {
   return db.prepare(
@@ -30,7 +31,10 @@ describe('runMigrations', () => {
       'course_progress',
       'realtime_responses',
     ]));
-    expect(getSchemaVersion(db)).toBe(7);
+    expect(getSchemaVersion(db)).toBe(8);
+    expect(db.prepare('PRAGMA index_info(word_performance_lesson)').all()).toEqual([
+      { seqno: 0, cid: 1, name: 'lesson_id' },
+    ]);
     // v2: R-C 权威账本列(NULL = 未追踪)
     const wordPerfCols = db.prepare('PRAGMA table_info(word_performance)').all()
       .map((row) => (row as { name: string }).name);
@@ -60,6 +64,7 @@ describe('runMigrations', () => {
       { version: 5, name: 'local_learners' },
       { version: 6, name: 'classroom_mode' },
       { version: 7, name: 'realtime_responses' },
+      { version: 8, name: 'word_performance_lesson_index' },
     ]);
   });
 
@@ -72,7 +77,48 @@ describe('runMigrations', () => {
 
     runMigrations(db);
 
-    expect(getSchemaVersion(db)).toBe(7);
+    expect(getSchemaVersion(db)).toBe(8);
     expect(db.prepare('SELECT COUNT(*) AS count FROM lesson_logs').get()).toEqual({ count: 1 });
+  });
+
+  it('indexes a populated pre-index database without changing session summaries', () => {
+    db.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+      CREATE TABLE lesson_logs (
+        id TEXT PRIMARY KEY, course_id TEXT NOT NULL, start_time TEXT NOT NULL,
+        end_time TEXT, interaction_count INTEGER DEFAULT 0, token_usage TEXT DEFAULT '{}',
+        ended_gracefully INTEGER DEFAULT 0, learner_id TEXT, lesson_mode TEXT NOT NULL DEFAULT 'legacy'
+      );
+      CREATE TABLE word_performance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, lesson_id TEXT NOT NULL, word TEXT NOT NULL,
+        attempts INTEGER DEFAULT 0, correct INTEGER DEFAULT 0, needs_review INTEGER DEFAULT 0,
+        rc_correct INTEGER, rc_cleared INTEGER, FOREIGN KEY (lesson_id) REFERENCES lesson_logs(id)
+      );
+      INSERT INTO lesson_logs (id, course_id, start_time, learner_id) VALUES
+        ('populated', 'food', '2026-05-01', 'learner'),
+        ('empty', 'unknown', '2026-05-02', 'learner'),
+        ('other', 'food', '2026-05-03', 'other-learner');
+      INSERT INTO word_performance (lesson_id, word, attempts, correct) VALUES
+        ('populated', 'apple', 5, 3), ('populated', 'milk', 5, 2),
+        ('populated', 'bread', 0, 0), ('other', 'apple', 1, 1);
+    `);
+    for (let version = 1; version <= 7; version++) {
+      db.prepare('INSERT INTO schema_migrations VALUES (?, ?, ?)').run(version, 'previous', '2026-05-01');
+    }
+    expect(db.prepare('PRAGMA index_list(word_performance)').all()).toEqual([]);
+    const before = buildSessionList(db, [], 'learner');
+    expect(before.map(({ lessonId, wordsAttempted, wordsMastered }) => ({ lessonId, wordsAttempted, wordsMastered }))).toEqual([
+      { lessonId: 'empty', wordsAttempted: 0, wordsMastered: 0 },
+      { lessonId: 'populated', wordsAttempted: 3, wordsMastered: 1 },
+    ]);
+
+    runMigrations(db);
+
+    expect(getSchemaVersion(db)).toBe(8);
+    expect(db.prepare('PRAGMA index_info(word_performance_lesson)').all()).toEqual([
+      { seqno: 0, cid: 1, name: 'lesson_id' },
+    ]);
+    expect(buildSessionList(db, [], 'learner')).toEqual(before);
+    expect(buildSessionList(db, [], 'missing-learner')).toEqual([]);
   });
 });
