@@ -168,6 +168,13 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    name: 'word_performance_lesson_index',
+    up(db) {
+      db.exec('CREATE INDEX IF NOT EXISTS word_performance_lesson ON word_performance(lesson_id)');
+    },
+  },
 ];
 
 export function runMigrations(db: Database): void {
