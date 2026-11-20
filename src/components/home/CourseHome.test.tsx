@@ -40,12 +40,20 @@ describe('CourseHome', () => {
     render(<CourseHome {...props} />);
     expect(screen.getByRole('button', { name: animalsCourse.title })).toHaveAttribute('aria-pressed', 'true');
   });
-  it('ignores a remembered course removed from the catalog and labels completed courses', () => {
+  it('ignores a remembered course removed from the catalog and offers a review for completed courses', () => {
     localStorage.setItem('eduagent.selectedCourse.a', 'missing');
     render(<CourseHome {...props} />);
     fireEvent.click(screen.getByRole('button', { name: colorsCourse.title }));
     expect(screen.getByText('已学完')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '继续上课' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '继续上课' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '从头复习' }));
+    expect(props.onCourseStart).toHaveBeenCalledWith('colors');
+  });
+  it('offers a plain start for a started course without a resumable breakpoint', () => {
+    render(<CourseHome {...props} progress={[{ ...progress, hasResume: false, progressPercent: 0 }]} />);
+    expect(screen.getByRole('heading', { name: '接着学 · 1' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '开始上课' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '继续上课' })).toBeNull();
     expect(screen.queryByRole('button', { name: '从头复习' })).toBeNull();
   });
   it('offers a fresh review only for courses with a resumable breakpoint', () => {
