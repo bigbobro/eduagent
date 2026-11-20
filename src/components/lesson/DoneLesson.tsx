@@ -20,7 +20,7 @@ export function DoneLesson({
   extra?: React.ReactNode;
 }) {
   const router = useRouter();
-  const { data, error, reload } = useLearningRecords(learnerId);
+  const { data, error, reload } = useLearningRecords({ learnerId });
   const course = data?.progress.courses.find(item => item.courseId === courseId);
   const url = (id: string) => `/lesson/${id}?learnerId=${encodeURIComponent(data?.learnerId ?? '')}`;
 

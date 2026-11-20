@@ -4,6 +4,7 @@ import type { ProgressSnapshot } from '@/types/progress';
 import { LessonDoneClient } from './LessonDoneClient';
 
 const routerPush = vi.hoisted(() => vi.fn());
+let unavailableEndpoint: string | undefined;
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/lesson/food/done',
@@ -34,9 +35,11 @@ const progress: ProgressSnapshot = {
 
 describe('LessonDoneClient', () => {
   beforeEach(() => {
+    unavailableEndpoint = undefined;
     routerPush.mockClear();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/learners') return Promise.resolve(new Response(JSON.stringify([{ id: 'test-learner', name: '宝宝' }])));
+      if (url.startsWith(`/api/${unavailableEndpoint}?`)) return new Response(null, { status: 503 });
       if (url.startsWith('/api/sessions')) return new Response('[]');
       if (url.startsWith('/api/stats')) return new Response(JSON.stringify({ totalSessions:1,totalMinutes:15,last7Days:[] }));
       if (url !== '/api/progress?learnerId=test-learner') throw new Error(`unexpected fetch: ${url}`);
@@ -54,5 +57,20 @@ describe('LessonDoneClient', () => {
     expect(await screen.findByRole('heading', { name: '食物课,过关 2 个词' })).toBeTruthy();
     expect(fetch).not.toHaveBeenCalledWith('/api/courses');
     expect(fetch).toHaveBeenCalledWith('/api/progress?learnerId=test-learner');
+  });
+
+  it('celebrates lesson completion without requesting aggregate stats', async () => {
+    unavailableEndpoint = 'stats';
+    render(<LessonDoneClient courseId="food" />);
+
+    expect(await screen.findByRole('heading', { name: '食物课,过关 2 个词' })).toBeTruthy();
+    expect(fetch).not.toHaveBeenCalledWith(expect.stringMatching(/^\/api\/stats\?/));
+  });
+
+  it.each(['progress', 'sessions'])('shows an error if %s is unavailable', async endpoint => {
+    unavailableEndpoint = endpoint;
+    render(<LessonDoneClient courseId="food" />);
+
+    expect(await screen.findByRole('heading', { name: '暂时读不到课堂记录' })).toBeTruthy();
   });
 });
