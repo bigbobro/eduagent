@@ -146,17 +146,19 @@ describe('heatMonthLabels', () => {
 
   it('places labels at the week containing the first day, including mid-week boundaries', () => {
     expect(heatMonthLabels(daysFrom('2026-08-22', 91), 44)).toEqual([
-      { month: '2026-08', label: '8 月', column: 0 },
       { month: '2026-09', label: '9 月', column: 1 },
       { month: '2026-10', label: '10 月', column: 5 },
       { month: '2026-11', label: '11 月', column: 10 },
     ]);
   });
 
-  it('omits a partial first month only when its label would overlap the next', () => {
+  it('requires two columns and enough space before the next label for a partial first month', () => {
     const days = daysFrom('2026-08-22', 91);
     expect(heatMonthLabels(days, 20).map(label => label.month)).toEqual(['2026-09', '2026-10', '2026-11']);
-    expect(heatMonthLabels(days, 31)[0].month).toBe('2026-08');
+    expect(heatMonthLabels(days, 44)[0].month).toBe('2026-09');
+    const twoColumns = daysFrom('2026-08-15', 91);
+    expect(heatMonthLabels(twoColumns, 13)[0].month).toBe('2026-08');
+    expect(heatMonthLabels(twoColumns, 12)[0].month).toBe('2026-09');
     expect(heatMonthLabels(daysFrom('2026-08-30', 30), 44)[0].month).toBe('2026-09');
     expect(heatMonthLabels(daysFrom('2026-08-01', 40), 20)[0].month).toBe('2026-08');
   });

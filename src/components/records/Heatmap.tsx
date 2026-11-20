@@ -31,7 +31,7 @@ export function heatMonthLabels(days: HeatDay[], cell: number) {
     return [{ month, label: `${Number(month.slice(5))} 月`, column: Math.floor(index / 7) }];
   });
   if (labels.length > 1 && days[0].date.slice(8) !== '01'
-    && labels[1].column * (cell + GAP) < MONTH_LABEL_WIDTH) {
+    && (labels[1].column < 2 || labels[1].column * (cell + GAP) < MONTH_LABEL_WIDTH)) {
     return labels.slice(1);
   }
   return labels;
