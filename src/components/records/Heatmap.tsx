@@ -22,7 +22,22 @@ interface HeatDay {
   minutes: number;
 }
 
-export function Heatmap({ days, months }: { days: HeatDay[]; months: number[] }) {
+const MONTH_LABEL_WIDTH = 36;
+
+export function heatMonthLabels(days: HeatDay[], cell: number) {
+  const labels = days.flatMap((day, index) => {
+    const month = day.date.slice(0, 7);
+    if (index > 0 && month === days[index - 1].date.slice(0, 7)) return [];
+    return [{ month, label: `${Number(month.slice(5))} 月`, column: Math.floor(index / 7) }];
+  });
+  if (labels.length > 1 && days[0].date.slice(8) !== '01'
+    && labels[1].column * (cell + GAP) < MONTH_LABEL_WIDTH) {
+    return labels.slice(1);
+  }
+  return labels;
+}
+
+export function Heatmap({ days }: { days: HeatDay[] }) {
   const slotRef = useRef<HTMLDivElement>(null);
   const [cell, setCell] = useState(0);
 
@@ -59,7 +74,9 @@ export function Heatmap({ days, months }: { days: HeatDay[]; months: number[] })
         </div>
       </div>
       <div className="records-months" style={width ? { width } : undefined}>
-        {months.map(month => <span key={month}>{month} 月</span>)}
+        {heatMonthLabels(days, cell).map(({ month, label, column }) => (
+          <span key={month} style={{ gridColumn: column + 1, width: MONTH_LABEL_WIDTH }}>{label}</span>
+        ))}
       </div>
     </>
   );
