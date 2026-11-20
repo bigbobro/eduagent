@@ -34,7 +34,13 @@ export function openAiCallFactory(apiKey: string, base = 'https://api.openai.com
     form.set('sdp', sdp); form.set('session', JSON.stringify(session));
     const response = await fetch(`${base}/v1/realtime/calls`, { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: form,
       signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]) });
-    if (!response.ok) { await response.body?.cancel().catch(() => {}); throw new Error(statusCode(response.status)); }
+    if (!response.ok) {
+      if (response.status === 429) {
+        const problem = await response.json().catch(() => null);
+        if (problem?.error?.code === 'insufficient_quota' || problem?.error?.type === 'insufficient_quota') throw new Error('REALTIME_INSUFFICIENT_QUOTA');
+      } else await response.body?.cancel().catch(() => {});
+      throw new Error(statusCode(response.status));
+    }
     const callId = response.headers.get('location')?.split('/').pop() ?? '';
     const answer = await response.text();
     if (!/^rtc_[A-Za-z0-9_-]{1,200}$/.test(callId) || !answer || answer.length > 64_000) throw new Error('PROVIDER_PROTOCOL');

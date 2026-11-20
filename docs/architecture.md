@@ -767,6 +767,8 @@ WebSocket 实验将 24 kHz PCM 直接送入 Realtime，比较单次语音回应�
 
 ## 18. Realtime 自然对话课堂(2026-10-29)
 
+开通 Realtime 通话时，HTTP 429 的结构化错误 `error.code` 或 `error.type` 为 `insufficient_quota` 则保留为 `REALTIME_INSUFFICIENT_QUOTA`，课堂提示到 OpenAI 控制台检查余额和账单；其他 429（含空或无法解析的正文）仍为 `REALTIME_RATE_LIMITED`。不回显或记录提供方错误正文。
+
 上文豆包 WS 与文本 agent 时序属于原有模式，原有课堂仍按住说话。Realtime 模式在 `RealtimeClassroom`（`interaction = 'conversation'`）内实现同一 Classroom 接口，开课后自然全双工：常开麦、提供方自动划轮、外放模式关闭时孩子随时插话。首版的按住说话＋HTTP 整段上传 PCM＋服务端串行 turn 已被替换，不保留为第三种子模式。
 
 传输：浏览器 `getUserMedia`（echoCancellation/noiseSuppression/autoGainControl）只取一条麦克风轨道，直接加入 `RTCPeerConnection`，老师语音由远端轨道经 `<audio>` 播放，回声由浏览器 WebRTC AEC 处理，不经 worklet／PcmPlayer。浏览器把 SDP offer 交给 `POST /api/realtime {action:'connect'}`；服务端 `realtime/call.ts` 用官方 unified interface（multipart `sdp`+`session`）调用 `/v1/realtime/calls`，长期密钥不出服务端，再以 Location 中的 `rtc_` call id 打开 sideband `wss://api.openai.com/v1/realtime?call_id=…`。connect 返回一条长期 SSE：首个事件为 SDP answer，之后是事务回执与转发的会话状态事件（speech_started/stopped、response.created/done、转写 delta、output_audio_buffer.started/stopped/cleared）。数据通道 `oai-events` 仅用于暂停时发 `output_audio_buffer.clear`。不引入新 SDK，不用 GPT-Live，模型仍为 `gpt-realtime-2.1`。
