@@ -46,6 +46,19 @@ async function provider() {
 }
 
 describe('WebRTC unified call with server sideband', () => {
+  it.each([
+    ['quota code', '{"error":{"code":"insufficient_quota"}}', 'REALTIME_INSUFFICIENT_QUOTA'],
+    ['quota type', '{"error":{"type":"insufficient_quota"}}', 'REALTIME_INSUFFICIENT_QUOTA'],
+    ['rate limit', '{"error":{"code":"rate_limit_exceeded"}}', 'REALTIME_RATE_LIMITED'],
+    ['empty body', '', 'REALTIME_RATE_LIMITED'],
+    ['malformed body', '<html>unavailable</html>', 'REALTIME_RATE_LIMITED'],
+    ['null error', '{"error":null}', 'REALTIME_RATE_LIMITED'],
+  ])('classifies a rejected 429 call: %s', async (_name, body, code) => {
+    const http = createServer((_req, res) => { res.writeHead(429); res.end(body); });
+    servers.push(http); http.listen(0, '127.0.0.1'); await once(http, 'listening');
+    const factory = openAiCallFactory('test-key', `http://127.0.0.1:${(http.address() as { port: number }).port}`, 'ws://127.0.0.1:1');
+    await expect(factory({ sdp: 'v=0', session: {}, signal: new AbortController().signal, onEvent: () => {}, onClose: () => {} })).rejects.toThrow(code);
+  });
   it('posts the offer with server-side session, attaches the sideband to the call and hangs up on close', async () => {
     const { calls, sockets, factory } = await provider();
     const events: string[] = []; const closes: string[] = [];

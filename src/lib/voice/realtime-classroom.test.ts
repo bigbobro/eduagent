@@ -44,6 +44,15 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 const provider = (event: object) => push({ type: 'provider', event });
+it('shows a billing hint when the call cannot connect because quota is exhausted', async () => {
+  const classroom = new RealtimeClassroom(foodCourse);
+  const errors = vi.fn(); classroom.on('error', errors);
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ sessionId: 'session-1', resume: null, receipt: receipt(0, 'intro'), transport: 'mock' })));
+  fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'REALTIME_INSUFFICIENT_QUOTA' }), { status: 502 }));
+  expect(await classroom.startLesson('child')).toBe(false);
+  expect(errors).toHaveBeenCalledWith({ code: 'REALTIME_INSUFFICIENT_QUOTA', message: 'OpenAI 额度不足，请到 OpenAI 控制台检查余额和账单后再试。' });
+});
+
 async function started() {
   const classroom = new RealtimeClassroom(foodCourse);
   const states: string[] = []; classroom.on('state', (s) => states.push(s));
