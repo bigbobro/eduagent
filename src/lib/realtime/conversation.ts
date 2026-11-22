@@ -2,6 +2,7 @@ import { createLogger } from '@/lib/logger';
 import type { Session } from '@/lib/agent/session-store';
 import { assessorReportSchema, realtimeUsageSchema, showCardSchema, type PresentedTarget, type ProviderEvent } from '@/lib/realtime-protocol';
 import { MANUAL_TURN } from './manual-turn';
+import { createAppNoteRules } from './app-notes';
 import { beginResponseUsage, changePhase, recordUsage, saveFeedback, saveResponse, showCard, submitAssessment, submitPick, type TeachingReceipt } from './teaching';
 
 const log = createLogger('realtime-conversation');
@@ -108,16 +109,8 @@ export class NaturalConversation {
   private sittingEnd: { timer: ReturnType<typeof setTimeout> | null; at: number; pending: number } | null = null;
   private assessmentWaitMs: number;
   private lastState = '';
-  // App notes share syncState's between-response boundary. Keep the latest pending note of each kind separately.
-  private verdict: { text: string; result: ReturnType<typeof assessorReportSchema.parse>['result'] } | null = null;
-  private mismatch = { targetId: '', count: 0 };
-  private mismatchNote: { text: string; count: number } | null = null;
-  // Saved correct echoes in this call only, by word card; switching cards never resets them.
-  private echoCounts = new Map<string, number>();
-  private echoNote: { text: string; count: number; targetId: string } | null = null;
-  // Consecutive saved non-correct word attempts in this call; not_attempt and card switches leave them intact.
-  private stuckCounts = new Map<string, number>();
-  private stuckNote: { text: string; count: number; targetId: string } | null = null;
+  // App notes share syncState's between-response boundary; rule order is verdict, mismatch, echo, stuck.
+  private noteRules = createAppNoteRules();
   // Sitting clock: unpaused milliseconds so far, the start of the running stretch, and the next milestone timer.
   private sitting = { elapsed: 0, since: null as number | null, timer: null as ReturnType<typeof setTimeout> | null, wrapped: false, ended: false, started: false };
   // Diagnostic only (provider event log); nothing decides on it.
@@ -502,15 +495,7 @@ export class NaturalConversation {
     const ms = pending ? Date.now() - pending.at : null;
     if (!record.receipt && record.target.kind === 'card') {
       const card = this.card(record.target.id);
-      if (card) {
-        const heard = JSON.stringify(report.heard.slice(0, 80));
-        this.verdict = { result: report.result, text: report.result === 'not_attempt'
-          ? `[app] Heard: the child's last message was not a try at the screen card ${card.english} (heard ${heard}).`
-          : `[app] Heard: on the card ${card.english} the app judged the child's last answer as ${report.result} (heard ${heard}).` };
-        if (this.mismatch.targetId !== card.id || report.result !== 'not_attempt') this.mismatch = { targetId: card.id, count: 0 };
-        if (report.result === 'not_attempt' && ++this.mismatch.count === 3) this.mismatchNote = { count: this.mismatch.count,
-          text: `[app] The child's last 3 messages were not tries at the screen card ${card.english}. If you are practising a different word or one of the course sentences, first put that card on the screen with show_card so the screen matches what you ask; otherwise come back to the screen card.` };
-      }
+      if (card) for (const rule of this.noteRules) rule.report?.(card, report);
     }
     if (report.result === 'not_attempt' || record.receipt) { log.info('assessment', { sessionId: this.session.id, result: report.result, mastered: false, saved: false, ms }); return; }
     try {
@@ -524,17 +509,9 @@ export class NaturalConversation {
         if (report.mastered) this.battle.mastered++;
       }
       const card = record.target.kind === 'card' ? this.card(record.target.id) : undefined;
-      if (card?.kind === 'word' && report.result === 'correct' && !report.mastered) {
-        const count = (this.echoCounts.get(card.id) ?? 0) + 1;
-        this.echoCounts.set(card.id, count);
-        if (count % 2 === 1 && !this.sitting.wrapped && !this.session.memory.clearedCardIds.includes(card.id)) this.echoNote = { count, targetId: card.id,
-          text: `[app] The child has now said ${card.english} correctly ${count} times right after your model. Next, do not ask for another echo on this card: ask once with a cue that does not contain the English word (the Chinese meaning or a situation) and stop to listen. Do this only while this card is on screen. If you have already switched cards, finish teaching the card you have, then use show_card to return to this card before asking. If they cannot recall it, give one different kind of help and one more chance; if it still does not come, leave this word for now, move on to another word and come back to it later. Do not tell the child "先停一下" or "待会儿再练"; just show the next card.` };
-      }
-      if (card?.kind === 'word') {
-        const count = report.result === 'correct' ? 0 : (this.stuckCounts.get(card.id) ?? 0) + 1;
-        this.stuckCounts.set(card.id, count);
-        if (count > 0 && count % 4 === 0 && !this.sitting.wrapped) this.stuckNote = { count, targetId: card.id,
-          text: `[app] The child has tried ${card.english} ${count} times in a row without getting it right. Do not ask them to say it again now. Say the correct word naturally once in one sentence and, in that same turn, use show_card to move to another word; return to this word later or next sitting. Do not tell the child "先停一下" or "待会儿再练"; just show the next card.` };
+      if (card) {
+        const context = { wrapped: this.sitting.wrapped, clearedCardIds: this.session.memory.clearedCardIds };
+        for (const rule of this.noteRules) rule.saved?.(card, report, context);
       }
       this.commit(receipt);
       if (record.reply) saveFeedback(this.session, input, record.reply);
@@ -746,25 +723,11 @@ export class NaturalConversation {
    */
   private syncState(): void {
     if (this.active.size) return;
-    const verdict = this.verdict; this.verdict = null;
-    if (verdict) {
-      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: verdict.text }] } });
-      log.info('app note', { sessionId: this.session.id, kind: 'verdict', result: verdict.result });
-    }
-    const mismatch = this.mismatchNote; this.mismatchNote = null;
-    if (mismatch) {
-      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: mismatch.text }] } });
-      log.info('app note', { sessionId: this.session.id, kind: 'mismatch', count: mismatch.count });
-    }
-    const echo = this.echoNote; this.echoNote = null;
-    if (echo && !this.sitting.wrapped && !this.session.memory.clearedCardIds.includes(echo.targetId)) {
-      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: echo.text }] } });
-      log.info('app note', { sessionId: this.session.id, kind: 'echo', count: echo.count });
-    }
-    const stuck = this.stuckNote; this.stuckNote = null;
-    if (stuck && !this.sitting.wrapped && (this.stuckCounts.get(stuck.targetId) ?? 0) >= stuck.count && !this.session.memory.clearedCardIds.includes(stuck.targetId)) {
-      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: stuck.text }] } });
-      log.info('app note', { sessionId: this.session.id, kind: 'stuck', count: stuck.count });
+    for (const rule of this.noteRules) {
+      const note = rule.take({ wrapped: this.sitting.wrapped, clearedCardIds: this.session.memory.clearedCardIds });
+      if (!note) continue;
+      this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: note.text }] } });
+      log.info('app note', { sessionId: this.session.id, kind: note.kind, ...note.log });
     }
     const s = this.session; const screen = this.presented ?? (s.currentPhase === 'interactive' ? { kind: 'card', id: s.memory.currentCardId } : null);
     const card = screen?.kind === 'card' ? this.card(screen.id) : undefined;
