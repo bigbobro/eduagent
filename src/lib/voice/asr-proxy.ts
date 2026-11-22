@@ -14,6 +14,7 @@ import {
 import { createWsTeardown } from './ws-teardown';
 import { doubaoAuthHeaders, resolveDoubaoAuthMode } from './doubao-auth';
 import { doubaoAsrWsUrl } from './doubao-endpoints';
+import { safeParse } from './safe-parse';
 
 
 const wss = new WebSocketServer({ noServer: true });
@@ -368,10 +369,6 @@ export function bridge(clientWs: WsClient, session: AsrSessionInfo, options: Asr
   });
 
   clientWs.on('error', () => closeAll());
-}
-
-function safeParse(s: string): any {
-  try { return JSON.parse(s); } catch { return null; }
 }
 
 // ─── Mock(VOICE_MOCK=true)─────────────────────────────────────────────

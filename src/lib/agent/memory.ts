@@ -74,7 +74,7 @@ export function addUserMessage(memory: LessonMemory, content: string): LessonMem
 }
 
 
-export function markWordCorrect(memory: LessonMemory, word: string): LessonMemory {
+function markWord(memory: LessonMemory, word: string, correct: boolean): LessonMemory {
   const wordPerf = new Map(memory.wordPerformance);
   const existing = wordPerf.get(word) || {
     attempts: 0,
@@ -83,43 +83,24 @@ export function markWordCorrect(memory: LessonMemory, word: string): LessonMemor
   };
   wordPerf.set(word, {
     attempts: existing.attempts + 1,
-    correct: existing.correct + 1,
+    correct: existing.correct + (correct ? 1 : 0),
     lastAttempt: new Date(),
   });
 
-  const wordsLearned = memory.wordsLearned.includes(word)
-    ? memory.wordsLearned
-    : [...memory.wordsLearned, word];
-
+  const key = correct ? 'wordsLearned' : 'wordsToReview';
   return {
     ...memory,
     wordPerformance: wordPerf,
-    wordsLearned,
+    [key]: memory[key].includes(word) ? memory[key] : [...memory[key], word],
   };
 }
 
+export function markWordCorrect(memory: LessonMemory, word: string): LessonMemory {
+  return markWord(memory, word, true);
+}
+
 export function markWordIncorrect(memory: LessonMemory, word: string): LessonMemory {
-  const wordPerf = new Map(memory.wordPerformance);
-  const existing = wordPerf.get(word) || {
-    attempts: 0,
-    correct: 0,
-    lastAttempt: new Date(),
-  };
-  wordPerf.set(word, {
-    attempts: existing.attempts + 1,
-    correct: existing.correct,
-    lastAttempt: new Date(),
-  });
-
-  const wordsToReview = memory.wordsToReview.includes(word)
-    ? memory.wordsToReview
-    : [...memory.wordsToReview, word];
-
-  return {
-    ...memory,
-    wordPerformance: wordPerf,
-    wordsToReview,
-  };
+  return markWord(memory, word, false);
 }
 
 export function getMessagesForLLM(memory: LessonMemory): { role: string; content: string }[] {

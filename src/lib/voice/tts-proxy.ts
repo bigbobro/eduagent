@@ -11,6 +11,7 @@ import { createWsTeardown } from './ws-teardown';
 import { DEFAULT_TTS_SPEAKER } from '../config';
 import { doubaoAuthHeaders, resolveDoubaoAuthMode } from './doubao-auth';
 import { doubaoTtsWsUrl } from './doubao-endpoints';
+import { safeParse } from './safe-parse';
 
 
 const wss = new WebSocketServer({ noServer: true });
@@ -203,10 +204,6 @@ export function bridge(clientWs: WsClient, options: TtsBridgeOptions = {}): void
   });
 
   clientWs.on('error', () => closeAll());
-}
-
-function safeParse(s: string): any {
-  try { return JSON.parse(s); } catch { return null; }
 }
 
 // ─── Mock(VOICE_MOCK=true)─────────────────────────────────────────────

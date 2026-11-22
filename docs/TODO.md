@@ -49,7 +49,7 @@
 - **Next.js 15 升级** · 🅿️ park(2026-07-20) — 14.x 的 high CVE 只在 15.x 修;单用户纯本地无外部可达面,恢复条件 = 对外发布 / 多用户。届时当独立任务做(custom server + framer-motion transpile)。
 - **课堂文字记录的保留策略** · 🅿️ park(2026-07-20,2026-11-11 更新) — 旧模式每轮把 ASR 原文写进 SQLite;Realtime 模式写模型自述的"听到"和老师每个回应的文字(`realtime_responses`,2026-11-11 起)。删除孩子档案会连带删掉这些记录,但没有保留期限,也没有"保留档案、只清历史"的入口。
 - **其它** · P3 — 无 CSP / Permissions-Policy;SQLite 无备份 / 损坏恢复;错误只进本地日志无遥测;`/api/chat` 无 rate-limit。
-- **P3 维护性**(改到对应文件时顺手清) — 手写 emitter ×4、`safeParse` ×2、`markWordCorrect/Incorrect` 重复、assistant-history-as-prose、`buildPromptInput` 每轮算两次。(2026-11-11 按代码核对过,仍成立。)
+- **P3 维护性**(改到对应文件时顺手清) — 手写 emitter ×4、assistant-history-as-prose。(2026-11-11 按代码核对过,仍成立。)
 
 ## 旧模式(豆包 + LLM 按住说话)待观察
 
