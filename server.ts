@@ -59,33 +59,52 @@ async function main() {
   const server = createServer((req, res) => {
     handle(req, res);
   });
+  const connections = new Set<Socket>();
+  server.on('connection', (socket) => {
+    connections.add(socket);
+    socket.once('close', () => connections.delete(socket));
+  });
 
   let shuttingDown = false;
   const shutdown = (signal: NodeJS.Signals) => {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info('Shutdown requested', { signal });
-    const forceExit = setTimeout(() => {
-      log.error('Shutdown timed out', { signal });
-      process.exit(1);
-    }, 2000);
-    forceExit.unref();
-    server.close((closeError) => {
-      clearTimeout(forceExit);
-      if (closeError) {
-        log.error('Failed to stop HTTP server', { signal }, closeError);
-        process.exit(1);
-        return;
-      }
+    let finished = false;
+    let grace: ReturnType<typeof setTimeout> | null = null;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+    const finish = (deadlineReached: boolean, closeError?: Error) => {
+      if (finished) return;
+      finished = true;
+      if (grace) clearTimeout(grace);
+      if (deadline) clearTimeout(deadline);
+      let failed = false;
       try {
         checkpointAndCloseDb();
-        log.info('Shutdown complete', { signal });
-        process.exit(0);
       } catch (err) {
         log.error('Failed to checkpoint and close database', { signal }, err instanceof Error ? err : new Error(String(err)));
-        process.exit(1);
+        failed = true;
       }
-    });
+      if (closeError) {
+        log.error('Failed to stop HTTP server', { signal }, closeError);
+        failed = true;
+      }
+      if (!failed) {
+        if (deadlineReached) log.warn('Shutdown deadline reached with connections still open', { signal, remainingConnections: connections.size });
+        log.info('Shutdown complete', { signal, deadline: deadlineReached });
+      }
+      process.exit(failed ? 1 : 0);
+    };
+    server.close((closeError) => finish(false, closeError));
+    server.closeIdleConnections();
+    grace = setTimeout(() => {
+      server.closeAllConnections();
+      // Upgraded WebSockets are no longer tracked by closeAllConnections.
+      connections.forEach((socket) => socket.destroy());
+    }, 400);
+    grace.unref();
+    deadline = setTimeout(() => finish(true), 1000);
+    deadline.unref();
   };
   process.once('SIGTERM', () => shutdown('SIGTERM'));
   process.once('SIGINT', () => shutdown('SIGINT'));
