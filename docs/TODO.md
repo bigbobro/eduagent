@@ -45,7 +45,7 @@
 > 以下条目从归档原文搬来,只保留当时标为未完成或 park 的项;文中的行号和描述停留在 2026-06/07,动手前先按内容重新定位并核实是否仍成立。
 
 - **logger 迁移收尾** · medium — 结构化 logger 调用方仍少；`session.ts`、voice 等模块仍有 hand-written console 日志，按模块逐步迁移并保持可诊断性。
-- **graceful shutdown / session 淘汰** · low — `server.ts` 没有 SIGTERM/SIGINT handler(WAL 不 checkpoint);in-memory session 无淘汰。实证(2026-11-11):App 退出后 `eduagent.db-wal` 仍有 4 MB 未合并,主库只有 139 KB;数据没丢,但复制或备份必须连 `-wal`/`-shm` 一起拿。
+- **session 淘汰** · low — in-memory session 无淘汰。
 - **Next.js 15 升级** · 🅿️ park(2026-07-20) — 14.x 的 high CVE 只在 15.x 修;单用户纯本地无外部可达面,恢复条件 = 对外发布 / 多用户。届时当独立任务做(custom server + framer-motion transpile)。
 - **课堂文字记录的保留策略** · 🅿️ park(2026-07-20,2026-11-11 更新) — 旧模式每轮把 ASR 原文写进 SQLite;Realtime 模式写模型自述的"听到"和老师每个回应的文字(`realtime_responses`,2026-11-11 起)。删除孩子档案会连带删掉这些记录,但没有保留期限,也没有"保留档案、只清历史"的入口。
 - **其它** · P3 — 无 CSP / Permissions-Policy;SQLite 无备份 / 损坏恢复;错误只进本地日志无遥测;`/api/chat` 无 rate-limit。

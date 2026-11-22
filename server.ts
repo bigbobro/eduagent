@@ -21,6 +21,7 @@ import { getConfig, isConfigured } from './src/lib/config';
 import { createLogger } from './src/lib/logger';
 import { guardUpgrade } from './src/lib/voice/upgrade-guard';
 import { applySettingsToEnv } from './src/lib/settings/store';
+import { checkpointAndCloseDb } from './src/lib/db';
 
 // App 模式:settings.json -> process.env(与 .env.local 同一机制),必须先于 getConfig()。
 applySettingsToEnv();
@@ -58,6 +59,36 @@ async function main() {
   const server = createServer((req, res) => {
     handle(req, res);
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info('Shutdown requested', { signal });
+    const forceExit = setTimeout(() => {
+      log.error('Shutdown timed out', { signal });
+      process.exit(1);
+    }, 2000);
+    forceExit.unref();
+    server.close((closeError) => {
+      clearTimeout(forceExit);
+      if (closeError) {
+        log.error('Failed to stop HTTP server', { signal }, closeError);
+        process.exit(1);
+        return;
+      }
+      try {
+        checkpointAndCloseDb();
+        log.info('Shutdown complete', { signal });
+        process.exit(0);
+      } catch (err) {
+        log.error('Failed to checkpoint and close database', { signal }, err instanceof Error ? err : new Error(String(err)));
+        process.exit(1);
+      }
+    });
+  };
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const url = req.url || '';

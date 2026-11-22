@@ -39,6 +39,8 @@
 
 **为什么自定义 Next.js server**:Next.js App Router 不支持 WebSocket `upgrade` 事件。`server.ts` 接管 HTTP server,把 `/api/voice/asr` 与 `/api/voice/tts` 的 upgrade 请求转给对应 proxy 模块,其它请求让 Next.js 处理。upgrade 前先按 `isAllowedWsOrigin`(loopback + 配置端口白名单,`src/lib/voice/ws-origin.ts`)校验 `Origin`,拒绝跨站 WS 劫持(CSWSH,会盗用服务端豆包凭据);缺失 `Origin` 的非浏览器客户端放行。
 
+`server.ts` 收到 SIGTERM / SIGINT 后只执行一次 graceful shutdown：停止接收新连接，待已有连接结束后对 SQLite 执行 `wal_checkpoint(TRUNCATE)` 并关闭 singleton，记录开始、完成和错误日志；2 秒未完成则强制退出。DB singleton 通过 `globalThis` 共享，因为自定义入口和 Next route bundle 会各自加载一份 `src/lib/db` 模块。Electron `before-quit` 的 `utilityProcess.kill()` 默认发送 SIGTERM，因此桌面退出走同一路径；`tsx watch` 重启时子进程也正常退出，不进入桌面崩溃恢复。
+
 ---
 
 ## 2. 模块清单与职责
