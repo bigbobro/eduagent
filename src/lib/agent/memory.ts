@@ -1,7 +1,9 @@
 import { LessonMemory, Message, InterestSignal, WordPerf, LessonPhase, CardProgressState } from '@/types/session';
 import { AgentResponse, ToolAction } from '@/types/tools';
 import { Course, WordCard } from '@/types/course';
+import { createLogger } from '@/lib/logger';
 
+const log = createLogger('normalize');
 const MAX_HISTORY = 12;
 
 // F3 escape valve (2026-07-03): consecutive failures on one card before it is parked
@@ -293,7 +295,7 @@ export function normalizeAssistantActions(
 
   // diagnostic snapshot — keep tight, one line.
   const clearedList = Object.entries(assessedMemory.cardProgress).filter(([, v]) => v === 'cleared').map(([k]) => k);
-  console.log('[normalize] snapshot', JSON.stringify({
+  log.debug('snapshot', {
     currentCardId,
     forceCardId,
     mode,
@@ -302,8 +304,7 @@ export function normalizeAssistantActions(
     ...(parkedCardIds.length ? { parked: parkedCardIds, parkRetried: parkRetryCardIds } : {}),
     ...(allWordsCleared ? { allWordsCleared } : {}),
     llmActions: response.actions.map((a) => `${a.tool}:${a.params.card_id}`),
-    asrText: rawAsrText,
-  }));
+  });
 
   // Filter LLM actions: allow only show_card → forceCardId (or its sentence_* sibling).
   const acceptedSentenceId = forceCardId ? `sentence_${forceCardId}` : '';
