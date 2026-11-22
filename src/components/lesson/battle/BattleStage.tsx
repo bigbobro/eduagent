@@ -65,8 +65,12 @@ export function BattleStage({ course, card, cardState, answers, initialCollected
     // Opening: the monster hops in and snatches the cards off the spell card.
     if (!pausedRef.current) { playBattleSfx('enter', 0.1); playBattleSfx('steal', 0.9); }
     const done = setTimeout(() => setOpening(false), 2400);
-    const timers = hurtTimers.current;
-    return () => { clearTimeout(done); timers.forEach(clearTimeout); };
+    const timers = hurtTimers;
+    return () => {
+      clearTimeout(done);
+      // Hits replace the ref's array, so read the latest timers at cleanup time.
+      timers.current.forEach(clearTimeout);
+    };
   }, []);
   useEffect(() => { onBattleChange?.(battle); }, [battle, onBattleChange]);
   useEffect(() => {

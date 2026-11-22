@@ -13,7 +13,7 @@ function controller(interaction: 'conversation' | 'push-to-talk'): any {
 }
 const answer = (cardId: string, revision: number, extra: Partial<AnswerResult> = {}): AnswerResult => ({ cardId, via: 'voice', result: 'correct', mastered: false, revision, ...extra });
 const stage = (container: HTMLElement) => container.querySelector<HTMLElement>('.bt-stage')!;
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('word battle scene', () => {
   it('replaces the lesson card layout only in the conversation classroom with the battle on', () => {
@@ -44,6 +44,16 @@ describe('word battle scene', () => {
     expect(card.querySelector('.p2-word')?.className).toContain('bt-known');
     expect(screen.queryByRole('img', { name: '用英语说出来' })).toBeNull();
     expect(card.querySelectorAll('.bt-parts span')).toHaveLength(foodCourse.cards.find((x) => x.id === 'banana')!.drillParts.length);
+  });
+  it('clears hurt timers on unmount after a hit', () => {
+    vi.useFakeTimers();
+    const c = controller('conversation');
+    const view = render(<LessonMandalaV2 course={foodCourse} controller={c} battle initialCardId="banana" />);
+    act(() => c.handlers.get('answer-result')?.(answer('banana', 1)));
+    expect(vi.getTimerCount()).toBeGreaterThan(1);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => { vi.advanceTimersByTime(2000); });
   });
   it('fights with the words learned first: the monster snatches today\'s cards and recall wins them back', () => {
     const c = controller('conversation');
