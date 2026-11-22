@@ -1,3 +1,4 @@
+// Smoke gate test: comment-only change, do not merge.
 import { WebSocket } from 'ws';
 import { createLogger } from '@/lib/logger';
 import type { ProviderMessage } from './conversation';
