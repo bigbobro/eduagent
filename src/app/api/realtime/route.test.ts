@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { POST } from './route';
 import { resetConfig, isConfigured, isRealtimeConfigured } from '@/lib/config';
-import { realtimeClassrooms } from '@/lib/realtime/classroom-session';
+import { RealtimeClassroomSession, realtimeClassrooms } from '@/lib/realtime/classroom-session';
 import { sessionStore } from '@/lib/agent/session-store';
 beforeEach(() => {
   vi.stubEnv('VOICE_MOCK', 'false'); vi.stubEnv('PORT', '3000');
@@ -51,6 +51,14 @@ it('keeps the offline speech control unavailable when connected to the real prov
 it('rejects a foreign browser before starting a provider session', async () => {
   expect((await POST(request({ action: 'start', courseId: 'animals', learnerId: 'test-learner' }, 'http://evil.example'))).status).toBe(403);
   expect(realtimeClassrooms.size).toBe(0);
+});
+it('maps insufficient realtime quota to a provider bad-gateway response', async () => {
+  vi.stubEnv('VOICE_MOCK', 'true'); resetConfig();
+  const body = await (await POST(request({ action: 'start', courseId: 'animals', learnerId: 'test-learner', fresh: true }))).json();
+  const connect = vi.spyOn(RealtimeClassroomSession.prototype, 'connect').mockRejectedValueOnce(new Error('REALTIME_INSUFFICIENT_QUOTA'));
+  const response = await POST(request({ action: 'connect', sessionId: body.sessionId, learnerId: 'test-learner', sdp: null }));
+  expect(response.status).toBe(502); expect((await response.json()).code).toBe('REALTIME_INSUFFICIENT_QUOTA');
+  connect.mockRestore();
 });
 it('bounds request size even without a declared Content-Length', async () => {
   const req = new Request('http://localhost:3000/api/realtime', { method: 'POST', headers: { Origin: 'http://localhost:3000' }, body: 'x'.repeat(100_001) });

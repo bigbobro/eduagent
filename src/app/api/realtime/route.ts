@@ -59,7 +59,7 @@ export async function POST(req: Request) {
     const code = errorCode(error);
     log.warn('request failed', { action: body.action, code });
     const status = code === 'NOT_FOUND' ? 404 : ['SESSION_EXPIRED', 'CALL_EXISTS', 'INVALID_INPUT_ASSOCIATION', 'INVALID_TARGET', 'INVALID_PHASE'].includes(code) ? 409
-      : /AUTH|MODEL_UNAVAILABLE|RATE_LIMITED|PROVIDER/.test(code) ? 502 : 500;
+      : /AUTH|MODEL_UNAVAILABLE|RATE_LIMITED|PROVIDER|REALTIME_INSUFFICIENT_QUOTA/.test(code) ? 502 : 500;
     return NextResponse.json({ code, error: '课堂暂时无法继续，请重试。' }, { status });
   }
 }
