@@ -15,7 +15,9 @@
 - 输入降噪(`audio.input.noise_reduction`):外放模式见效前不做;要做先核对官方文档的参数名和取值。
 - 打包:2026-11-22 版本 0.2.1 在 open-connection shutdown 修复后从 `main` 的 `bd114e9` 重新构建 `desktop/dist/EduAgent-0.2.1-arm64.dmg`;打包版 e2e 65/65 通过,`app:verify-images` 通过(40 门课、640 个引用、480 张唯一图片,HTTP 200 + image/webp + WebP 文件头 + Chromium 解码)。已覆盖安装到 /Applications,安装后 CDHash `b6936b778efee9b86f9dc350084e6a93605d7188` 与构建一致;启动确认版本 0.2.1、麦克风授权仍为 granted、本地服务 ready,home 窗口打开时优雅退出记录 `Shutdown complete` 而非超时,server code 0 且 `eduagent.db-wal` 删除。**安装时丢了数据**:第一次覆盖安装把旧版 App 移进了废纸篓,本机的腾讯柠檬清理弹出卸载提示,点了"卸载"后它删掉了废纸篓里的 App 和整个 `~/Library/Application Support/EduAgent`(孩子的课堂数据库和档案、设置页里填的 Key、放在同目录 `backups/` 里的全部旧备份、日志),没有其他副本,用户决定不重建。现在的数据目录是安装后新建的空目录,其中的 `backups/eduagent-2026-11-22-before-0.2.1-rebuild.db` 是空库的副本,不含课堂数据;上课前需要在设置页重新填 Key、重建孩子档案。以后覆盖安装不把 App 移进废纸篓,备份放到数据目录之外,安装前后核对档案数和课次数。废纸篓里还留着 `EduAgent-0.2.1-replaced-20261122-093509.app`,柠檬弹清理窗口时不要点。未创建 GitHub Release;公开 Release 仍为 2026-10-25 的 v0.1.0,对外发布前需重新验收。
 
-## 多模态反馈:词的声音、动作和画面(2026-11-11 提出,未开始)
+## 多模态反馈:词的声音、动作和画面(2026-11-11 提出,2026-11-23 素材已生成,课堂代码未开始)
+
+进度:2026-11-23 用 `scripts/word-sounds.mjs`(ElevenLabs)生成乐器课 8 个词的声音,在 `public/sounds/words/instruments/`(piano、guitar、drum、violin、flute、trumpet、bell、harp,各 3 秒以内)。课堂还没有接入这些文件;声音像不像只做了时长和响度检查,要在真人课上确认。
 
 起因:2026-11-11 乐器课里老师只有语音和词卡,情境只有"这是 X 还是 Y";独立回忆最弱(收尾战斗 5 个词只有 1 个无提示说出)。方向是每个词用最贴合它的一种表现,没有就不硬配。动手前先单独写方案;前置条件是外放模式在下一节真人课验证通过。
 
