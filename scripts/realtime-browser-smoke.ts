@@ -78,17 +78,30 @@ async function main() {
       if (body.action === 'start') sessionId = (await response.json().catch(() => ({}))).sessionId ?? '';
       if (body.action === 'end') endStatus = response.status();
     });
+    const soundFiles: Record<string, number> = {};
+    page.on('response', (response) => { const url = new URL(response.url()); if (url.pathname.startsWith('/sounds/words/')) soundFiles[url.pathname] = response.status(); });
     await page.addInitScript(({ generator }) => {
       const w = window as unknown as Record<string, unknown>;
       // Live and manual-turn runs test barge-in with synthetic audio, so they need the mic open while the teacher speaks.
       if (generator) localStorage.setItem('eduagent.speakerMode', 'off');
       // Mock runs keep speaker mode on (default): sample the mic track against the conversation state.
-      const micSamples: Array<{ state: string; enabled: boolean }> = []; w.__micSamples = micSamples;
+      const micSamples: Array<{ state: string; enabled: boolean; cue: string | null }> = []; w.__micSamples = micSamples;
+      // The current card is the last hero (a leaving card may still animate out before it). No named helper functions in
+      // this init script: tsx wraps them in a `__name` call that does not exist in the page.
       setInterval(() => {
         const state = document.querySelector('[data-conversation-state]')?.getAttribute('data-conversation-state');
         const track = (w.__smokeTracks as MediaStreamTrack[])[0];
-        if (state && track) micSamples.push({ state, enabled: track.enabled });
+        if (state && track) micSamples.push({ state, enabled: track.enabled, cue: Array.from(document.querySelectorAll('[data-picture-card-size="hero"]')).at(-1)?.getAttribute('data-sound-cue') ?? null });
       }, 50);
+      // Word-card sounds: every change of the current card's sound cue and hidden-English flag.
+      const cards: Array<{ t: number; cardId: string; cue: string | null; hidden: boolean }> = []; w.__cardTimeline = cards;
+      new MutationObserver(() => {
+        const card = Array.from(document.querySelectorAll('[data-picture-card-size="hero"]')).at(-1); const cardId = card?.getAttribute('data-card-id');
+        if (!card || !cardId) return;
+        const entry = { t: Date.now(), cardId, cue: card.getAttribute('data-sound-cue'), hidden: card.getAttribute('data-word-hidden') === 'true' };
+        const last = cards.at(-1);
+        if (!last || last.cardId !== entry.cardId || last.cue !== entry.cue || last.hidden !== entry.hidden) cards.push(entry);
+      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-sound-cue', 'data-word-hidden', 'data-card-id'] });
       const tracks: MediaStreamTrack[] = []; w.__smokeTracks = tracks;
       const timeline: Array<{ t: number; state: string }> = []; w.__timeline = timeline;
       new MutationObserver(() => {
@@ -146,7 +159,8 @@ async function main() {
       let since = Date.now(); const deadline = Date.now() + ms;
       while (Date.now() < deadline) {
         if (await page.getByText('课堂完成', { exact: true }).count() || await page.getByText('进度已保存，下次继续', { exact: true }).count()) return;
-        if (await state() !== 'awaiting') since = Date.now();
+        // A word-card sound waiting or playing is not quiet: the mic is closed until it ends.
+        if (await state() !== 'awaiting' || await page.locator('[data-sound-cue="waiting"], [data-sound-cue="playing"]').count()) since = Date.now();
         if (Date.now() - since > 1500) { log(`quiet: ${label}`); return; }
         await page.waitForTimeout(100);
       }
@@ -172,6 +186,20 @@ async function main() {
       }
     };
     const cardOf = (english: string | null) => course.cards.find((c) => c.english === english);
+    const soundCourse = course.cards.some((c) => c.soundUrl);
+    const soundQuizzes: Array<{ cardId: string; englishVisible: boolean; pictureVisible: boolean; chineseVisible: boolean; revealed?: boolean }> = [];
+    /** Sound quiz on screen: picture and Chinese visible, English not. Answered after this by the caller. */
+    const checkSoundQuiz = async () => {
+      const secret = page.locator('[data-picture-card-size="hero"][data-word-hidden="true"]').last();
+      if (!(await secret.count())) return null;
+      const cardId = (await secret.getAttribute('data-card-id')) ?? '';
+      const check: (typeof soundQuizzes)[number] = { cardId, englishVisible: await secret.locator('.p2-word').isVisible(), pictureVisible: await secret.locator('.p2-pic img').isVisible(),
+        chineseVisible: await secret.locator('.p2-zh').isVisible() };
+      if (check.englishVisible || !check.pictureVisible || !check.chineseVisible) throw new Error(`Sound quiz screen wrong: ${JSON.stringify(check)}`);
+      await page.screenshot({ path: path.join(out, `sound-quiz-${cardId}.png`) });
+      soundQuizzes.push(check); log(`sound quiz on ${cardId}: picture shown, English hidden`);
+      return check;
+    };
 
     // Card switch on request, with no attempt counted for the interrupted card.
     if (live) {
@@ -315,7 +343,14 @@ async function main() {
         if (!sentence && !card) { await page.waitForTimeout(300); continue; }
         await quiet('before answer');
         if (await hero() !== shown) continue;
+        const quiz = await checkSoundQuiz();
         await speak({ kind: 'attempt' }, sentence ? clip(`sentence_${sentence.id}`, sentence.targetText, 'Samantha') : wordClip(card!.id));
+        if (quiz && !live) {
+          // The mock answers correctly: the English comes back on the same card.
+          const revealed = page.locator(`[data-picture-card-size="hero"][data-card-id="${quiz.cardId}"]:not([data-word-hidden]) .p2-word`).last();
+          await until(`sound quiz ${quiz.cardId} revealed`, async () => await revealed.isVisible().catch(() => false), 30000);
+          quiz.revealed = true;
+        }
         await page.waitForTimeout(800); await quiet('after answer');
       }
       await page.getByText('课堂完成', { exact: true }).waitFor({ timeout: 30000 });
@@ -408,6 +443,27 @@ async function main() {
       if (!samples.some((sample) => sample.state === 'awaiting' && sample.enabled)) throw new Error('Speaker mode check: mic never reopened once the teacher was idle');
       results.speakerMode = { speakingSamples: speaking.length, micOpenWhileSpeaking: 0 };
     }
+    if (soundCourse) {
+      const timeline = await page.evaluate(() => (window as unknown as { __cardTimeline: Array<{ t: number; cardId: string; cue: string | null; hidden: boolean }> }).__cardTimeline);
+      const samples = await page.evaluate(() => (window as unknown as { __micSamples: Array<{ state: string; enabled: boolean; cue: string | null }> }).__micSamples);
+      // Per card: the order its cue values appeared in.
+      const cueOrder: Record<string, string[]> = {};
+      for (const entry of timeline) if (entry.cue && cueOrder[entry.cardId]?.at(-1) !== entry.cue) (cueOrder[entry.cardId] ??= []).push(entry.cue);
+      const playing = samples.filter((sample) => sample.cue === 'playing');
+      results.sound = { cueOrder, playingSamples: playing.length, soundFiles, soundQuizzes };
+      if (!live && !manualTurn && args.includes('--full')) {
+        const full = Object.entries(cueOrder).filter(([, order]) => order.join(',').includes('waiting,playing,done'));
+        if (!full.length) throw new Error(`Sound cue never went waiting, playing, done: ${JSON.stringify(cueOrder)}`);
+        if (!playing.length) throw new Error('Sound cue check: no playing sample');
+        if (playing.some((sample) => sample.enabled)) throw new Error('Sound cue check: mic was open while a card sound played');
+        if (playing.some((sample) => sample.state === 'speaking')) throw new Error('Sound cue check: the teacher spoke over a card sound');
+        if (!Object.values(soundFiles).length || Object.values(soundFiles).some((status) => status !== 200 && status !== 304)) throw new Error(`Sound files not served: ${JSON.stringify(soundFiles)}`);
+        if (!soundQuizzes.length) throw new Error('No sound quiz was shown');
+        if (soundQuizzes.some((quiz) => !quiz.revealed)) throw new Error('A sound quiz was not revealed after the correct answer');
+        if (!timeline.some((entry) => entry.hidden) || !timeline.some((entry, i) => i > 0 && timeline[i - 1].hidden && !entry.hidden && entry.cardId === timeline[i - 1].cardId)) throw new Error('Sound quiz hide/reveal not seen on the card');
+        log(`sound cues: ${full.map(([id]) => id).join(', ')}; ${playing.length} playing samples, mic closed; sound quiz ${soundQuizzes.map((q) => q.cardId).join(', ')} hidden then revealed`);
+      }
+    } else if (await page.locator('[data-sound-cue]').count()) throw new Error('A course without word sounds showed a sound cue');
     await page.waitForFunction(() => (window as unknown as { __smokeTracks: MediaStreamTrack[] }).__smokeTracks.every((track) => track.readyState === 'ended'), undefined, { timeout: 10000 });
     if (errors.length) throw new Error(`Page errors: ${errors.join('; ')}`);
     Object.assign(results, { sessionId, trackCount, microphoneStopped: true, requests, progress: await words() });

@@ -92,3 +92,22 @@ it('runs the controlled offline provider through the same conversation path', as
   await expect.poll(() => classroom.session.memory.clearedCardIds, { timeout: 3000 }).toEqual(['apple']);
   expect(events.some((e) => e.type === 'receipt' && e.receipt.assessment?.target_id === 'apple')).toBe(true);
 });
+
+it('uses a taught instrument once for a mock sound quiz and saves the next answer', async () => {
+  vi.stubEnv('VOICE_MOCK', 'true'); resetConfig();
+  const classroom = new RealtimeClassroomSession('instruments', 'test-learner', true); active.push(classroom);
+  const events: RealtimeEvent[] = [];
+  await classroom.connect(null, (e) => events.push(e));
+  const askCount = () => events.filter((e) => e.type === 'receipt' && e.receipt.cue === 'sound-quiz').length;
+  classroom.presented({ kind: 'card', id: 'piano' });
+  classroom.mockSpeech({ kind: 'attempt' });
+  await expect.poll(() => events.some((e) => e.type === 'receipt' && e.receipt.cue === 'sound')).toBe(true);
+  classroom.presented({ kind: 'card', id: classroom.session.memory.currentCardId });
+  classroom.mockSpeech({ kind: 'attempt' });
+  await expect.poll(askCount).toBe(1);
+  expect(classroom.session.memory.currentCardId).toBe('piano');
+  classroom.presented({ kind: 'card', id: 'piano' });
+  classroom.mockSpeech({ kind: 'attempt' });
+  await expect.poll(() => classroom.session.memory.wordPerformance.get('piano')?.attempts).toBe(2);
+  expect(askCount()).toBe(1);
+});

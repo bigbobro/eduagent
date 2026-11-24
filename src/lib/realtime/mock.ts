@@ -31,6 +31,8 @@ export class MockRealtimeCall implements RealtimeCall {
   /** Set once the app has sent the wrap-up time check; the next child utterance then makes the model call end_sitting. */
   private wrapUp = false;
   private battle = false;
+  private soundQuizAsked = false;
+  private awaitingSoundAnswer = false;
   constructor(private session: Session, private options: Pick<CallOptions, 'onEvent'> & { session?: object }, private step = 40) {
     // Same switch as the real provider (the app sets it true): with false, speech neither cancels the response nor clears audio.
     const detection = (options.session as { audio?: { input?: { turn_detection?: { interrupt_response?: boolean } } } } | undefined)?.audio?.input?.turn_detection;
@@ -96,6 +98,9 @@ export class MockRealtimeCall implements RealtimeCall {
     if (utterance.kind === 'chat') return undefined;
     if (utterance.kind === 'request') return { name: 'show_card', arguments: JSON.stringify({ card_id: utterance.cardId }) };
     if (this.session.currentPhase === 'interactive') {
+      if (this.awaitingSoundAnswer) { this.awaitingSoundAnswer = false; return undefined; }
+      const taught = !this.soundQuizAsked && this.session.course.cards.find((c) => c.soundUrl && (memory.wordPerformance.get(c.english)?.attempts ?? 0) > 0);
+      if (taught) return { name: 'play_sound', arguments: JSON.stringify({ card_id: taught.id }) };
       const next = this.session.course.cards.find((card) => card.kind === 'word' && card.id !== memory.currentCardId && !memory.clearedCardIds.includes(card.id));
       return next ? { name: 'show_card', arguments: JSON.stringify({ card_id: next.id }) } : { name: 'start_practice', arguments: '{}' };
     }
@@ -124,7 +129,7 @@ export class MockRealtimeCall implements RealtimeCall {
     this.active = active;
     const later = (ms: number, fn: () => void) => active.timers.push(setTimeout(() => { if (!this.closed) fn(); }, ms));
     later(0, () => this.emit({ type: 'response.created', response: { id, status: 'in_progress', metadata } }));
-    if (call) {
+    if (call && call.name !== 'play_sound') {
       later(this.step, () => {
         this.active = null;
         this.emit({ type: 'response.done', response: { id, status: 'completed', metadata, usage, output: [{ type: 'function_call', name: call.name, call_id: `mock_call_${id}`, arguments: call.arguments }] } });
@@ -134,9 +139,17 @@ export class MockRealtimeCall implements RealtimeCall {
     later(this.step, () => {
       this.playing = id;
       this.emit({ type: 'output_audio_buffer.started', response_id: id });
-      this.emit({ type: 'response.output_audio_transcript.delta', response_id: id, delta: '离线测试示范。' });
+      this.emit({ type: 'response.output_audio_transcript.delta', response_id: id, delta: call ? '听，这是什么？' : '离线测试示范。' });
     });
-    later(this.step * 2, () => { this.active = null; this.emit({ type: 'response.done', response: { id, status: 'completed', metadata, usage, output: [{ type: 'message' }] } }); });
+    later(this.step * 2, () => {
+      this.active = null;
+      const output: NonNullable<ProviderMessage['response']>['output'] = [{ type: 'message' }];
+      if (call) {
+        this.soundQuizAsked = true; this.awaitingSoundAnswer = true;
+        output.push({ type: 'function_call', name: call.name, call_id: `mock_call_${id}`, arguments: call.arguments });
+      }
+      this.emit({ type: 'response.done', response: { id, status: 'completed', metadata, usage, output } });
+    });
     later(this.manual ? Math.max(this.step * 4, MockRealtimeCall.MANUAL_PLAY_MS) : this.step * 4, () => { if (this.playing === id) { this.playing = null; this.emit({ type: 'output_audio_buffer.stopped', response_id: id }); } });
   }
   private cancel(): void {

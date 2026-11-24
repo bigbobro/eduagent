@@ -40,6 +40,16 @@ Each regular 3-6 year old theme course must define:
   transcript can reasonably represent the English target, for example
   `pie` -> `派`. Do not populate it from every Chinese translation; saying
   `蛋糕` should not automatically clear `cake`.
+- `soundUrl`: optional, word cards only, Realtime classroom only. Set it only
+  when one recognisable sound points to this one word (an instrument, an animal
+  call): `bell`, `drum`. Leave it unset for words a sound cannot single out
+  (`music`, `song`, `sing`, `sound`, colours, shapes, food). The path is
+  `/sounds/words/<courseId>/<cardId>.mp3`, mono, at most 3 s, made with
+  `scripts/word-sounds.mjs` (same loudness processing as the battle effects).
+  A sound the user cannot recognise after listening is not used. With a sound,
+  the card plays it once when it first appears in a call and the teacher can use
+  it as a sound quiz (picture plus sound, English hidden); see architecture.md
+  §12 and §18. `validateCourse` checks the path and that the file exists.
 - `objectives.sentences`: exactly 4 real child-sayable short sentences, not
   abstract templates. Each sentence must use one target word from the course's
   12 word cards.
@@ -139,6 +149,7 @@ or base64 pasted into chat. `pnpm course:image-audit` does not cover this folder
 | Quiz references unknown card id | Fix data; do not hide with type assertions |
 | Home only shows a subset of courses | Update home UI/tests so registry courses are visible |
 | ASR often transcribes the English target as a homophone or transliteration | Add a narrow `asrAliases` entry and record the MISS in `asr-confusables.ts` (see below) |
+| `soundUrl` on a sentence card, a wrong path, or a missing file | Fix the data or generate the sound; a word without a fitting sound gets no `soundUrl` |
 | ASR alias is just the Chinese meaning | Do not add it unless it is also the expected ASR form for the English sound |
 
 ## Tests Required

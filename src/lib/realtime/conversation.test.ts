@@ -10,7 +10,7 @@ import { summarizeRealtimeUsage } from './usage';
 import { changePhase, type TeachingReceipt } from './teaching';
 import { getCourseProgress } from '@/lib/db/queries';
 import { isResumableProgress } from '@/lib/agent/course-progress';
-import { GAME_RULES, MANUAL_TURN, NaturalConversation, SILENCE, SITTING, type ProviderMessage } from './conversation';
+import { GAME_RULES, MANUAL_TURN, NaturalConversation, SILENCE, SITTING, SOUND_CUE_MS, type ProviderMessage } from './conversation';
 
 const usage = { input_tokens: 5, output_tokens: 5, input_token_details: { text_tokens: 5, audio_tokens: 0, cached_tokens: 0 }, output_token_details: { text_tokens: 5, audio_tokens: 0 } };
 let session: Session; let sent: Array<Record<string, any>>; let published: TeachingReceipt[]; let conversation: NaturalConversation;
@@ -297,9 +297,9 @@ describe('natural conversation input binding and tool execution', () => {
       expect(attempts('apple')).toBe(0); expect(published).toEqual([]); expect(session.memory.clearedCardIds).toEqual([]);
     } finally { warning.mockRestore(); }
   });
-  it('gives the teacher only show_card, start_practice and end_sitting', () => {
+  it('gives the teacher only show_card, play_sound, start_practice and end_sitting', () => {
     const config = conversation.sessionConfig('m') as { tools: Array<{ name: string }> };
-    expect(config.tools.map((t) => t.name)).toEqual(['show_card', 'start_practice', 'end_sitting']);
+    expect(config.tools.map((t) => t.name)).toEqual(['show_card', 'play_sound', 'start_practice', 'end_sitting']);
   });
   it('sends the assessor as a forced text-only out-of-band response that ends with the bound target', () => {
     speech('i1');
@@ -1472,5 +1472,83 @@ describe('teacher transcript fallback in manual-turn mode', () => {
     done('not-spoken', [], kind === 'cancelled' ? 'cancelled' : 'completed', metadata);
     commit('early');
     expect(assessRequests()).toEqual([]); expect(attempts('apple')).toBe(0);
+  });
+});
+
+describe('word card sounds', () => {
+  const teach = () => session.memory.wordPerformance.set('bell', { attempts: 1, correct: 0, lastAttempt: new Date() });
+  const tool = (id: string, name: string, card_id: string) => { created(id); done(id, [call(name, { card_id })]); };
+  beforeEach(() => {
+    vi.useFakeTimers();
+    session.course = instrumentsCourse;
+    session.memory.currentCardId = 'piano';
+    conversation.setPresented({ kind: 'card', id: 'piano' });
+  });
+  afterEach(() => { conversation.close(); vi.useRealTimers(); });
+  it.each([true, false])('introduces the first sounding rendition only after the clip window (teacher playing=%s)', (playing) => {
+    if (playing) feed({ type: 'output_audio_buffer.started' });
+    tool('first', 'show_card', 'bell');
+    expect(published.at(-1)).toMatchObject({ cardId: 'bell', cue: 'sound' });
+    expect(outputs().at(-1).note).toContain("The app plays this card's own sound once as the card appears.");
+    if (playing) {
+      vi.advanceTimersByTime(SOUND_CUE_MS * 2); expect(creates()).toEqual([]);
+      feed({ type: 'output_audio_buffer.stopped' });
+    }
+    vi.advanceTimersByTime(SOUND_CUE_MS - 1); expect(creates()).toEqual([]);
+    vi.advanceTimersByTime(1); expect(kinds()).toEqual(['followup']);
+    const metadata = creates()[0].response.metadata;
+    created('intro', metadata); done('intro', [], 'completed', metadata);
+    tool('repeat', 'show_card', 'bell');
+    expect(published.at(-1)).not.toHaveProperty('cue');
+    expect(outputs().at(-1).note).not.toContain('own sound');
+    expect(kinds()).toEqual(['followup', 'followup']);
+  });
+
+  it('records a taught sound quiz, suppresses mixed-tool followup and binds its cue at speech start', () => {
+    teach();
+    created('ask'); done('ask', [call('show_card', { card_id: 'bell' }), call('play_sound', { card_id: 'bell' })]);
+    expect(outputs().at(-1)).toEqual({ ok: true, displayed_card: 'bell', note: 'The picture is on screen and its sound is playing for the child now; the English word is hidden. Say nothing more; wait for the child to answer.' });
+    expect(states().at(-1)).toContain('Eligible play_sound card IDs: ["bell"]');
+    expect(published.at(-1)).toMatchObject({ cue: 'sound-quiz', cardId: 'bell' });
+    expect(getDb().prepare('SELECT tools FROM realtime_responses WHERE lesson_id = ? AND kind = ?').get(session.id, 'speech')).toEqual({ tools: 'show_card(bell),play_sound(bell)' });
+    vi.advanceTimersByTime(SOUND_CUE_MS + 100); expect(creates()).toEqual([]);
+    conversation.setPresented({ kind: 'card', id: 'bell' });
+    feed({ type: 'input_audio_buffer.speech_started', item_id: 'answer' });
+    tool('reveal', 'show_card', 'bell'); expect(published.at(-1)).not.toHaveProperty('cue');
+    feed({ type: 'input_audio_buffer.committed', item_id: 'answer' });
+    expect(assessRequests().at(-1)?.response.instructions).toContain('with the English hidden');
+    assessed('answer', { mastered: false, next_action: 'retry' });
+    expect(appNotes().at(-1)).toContain('call play_sound for bell');
+    speech('after-reveal'); expect(assessRequests().at(-1)?.response.instructions).not.toContain('with the English hidden');
+  });
+
+  it.each([
+    ['unknown', 'NO_SOUND'], ['music', 'NO_SOUND'], ['sentence_piano', 'NO_SOUND'], ['bell', 'SOUND_NOT_TAUGHT'],
+    ['phase', 'INVALID_PHASE'], ['wrapped', 'INVALID_PHASE'], ['ended', 'SITTING_ENDED'],
+  ])('rejects %s without committing or changing screen', (scenario, code) => {
+    if (scenario === 'phase') conversation.changePhase('reinforcement');
+    if (scenario === 'wrapped' || scenario === 'ended') {
+      open(); vi.advanceTimersByTime(SITTING.wrapUpMs);
+      if (scenario === 'ended') vi.advanceTimersByTime(SITTING.goodbyeMs - SITTING.wrapUpMs);
+    }
+    const revisions = published.length;
+    tool('bad', 'play_sound', ['phase', 'wrapped', 'ended'].includes(scenario) ? 'bell' : scenario);
+    expect(outputs().at(-1)).toMatchObject({ ok: false, error: code });
+    expect(published).toHaveLength(revisions); expect(session.memory.currentCardId).toBe('piano');
+    if (scenario === 'wrapped') {
+      tool('ordinary', 'show_card', 'bell'); expect(published.at(-1)).not.toHaveProperty('cue');
+    }
+  });
+
+  it('starts the normal silence interval after the sound-quiz window and audio drain', () => {
+    conversation.close();
+    conversation = new NaturalConversation(session, { send: (e) => sent.push(e), publish: (r) => published.push(r), sittingEnded: () => {} });
+    open(); teach();
+    feed({ type: 'output_audio_buffer.started' });
+    tool('ask', 'play_sound', 'bell');
+    vi.advanceTimersByTime(SOUND_CUE_MS + SILENCE.nudgeAfterMs); expect(kinds()).toEqual([]);
+    feed({ type: 'output_audio_buffer.stopped' });
+    vi.advanceTimersByTime(SOUND_CUE_MS + SILENCE.nudgeAfterMs - 1); expect(kinds()).toEqual([]);
+    vi.advanceTimersByTime(1); expect(kinds()).toEqual(['nudge']);
   });
 });

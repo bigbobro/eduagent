@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foodCourse } from '@/data/courses/food';
-import { RealtimeClassroom } from './realtime-classroom';
+import { instrumentsCourse } from '@/data/courses/instruments';
+import { RealtimeClassroom, type CardSounds } from './realtime-classroom';
+import type { SoundCue } from './classroom';
 
 const receipt = (revision: number, phase = 'interactive', cardId = 'apple', extra: object = {}) => ({ ok: true, cardId, revision, progress: { clearedCardIds: [], totalAttempts: 0, currentPhase: phase }, ...extra });
 let push: (event: object) => void; let finish: () => void; let transport: 'mock' | 'webrtc';
@@ -297,4 +299,119 @@ it('treats back-to-back replies as one output buffer, as the provider reports th
   await prompt; expect(resolved).toBe(true);
   await vi.waitFor(() => expect(classroom.getState()).toBe('awaiting'));
   await classroom.endLesson();
+});
+
+describe('word-card sounds', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const assessment = (target_id: string, result: string) => ({ assessment: { target_id, result, heard: 'x', evidence: 'x', mastered: result === 'correct', next_action: 'retry', next_card_id: null, next_phase: null } });
+  let ends: Array<() => void>;
+  let sounds: { play: ReturnType<typeof vi.fn<CardSounds['play']>>; preload: ReturnType<typeof vi.fn<CardSounds['preload']>> };
+  beforeEach(() => {
+    ends = [];
+    sounds = { play: vi.fn<CardSounds['play']>(() => new Promise<void>((resolve) => { ends.push(resolve); })), preload: vi.fn<CardSounds['preload']>() };
+  });
+  async function soundStarted(speaker = false) {
+    const classroom = new RealtimeClassroom(instrumentsCourse, sounds);
+    const cues: SoundCue[] = []; classroom.on('sound-cue', (cue) => cues.push(cue));
+    const hidden: Array<{ cardId: string; hidden: boolean }> = []; classroom.on('word-hidden', (h) => hidden.push(h));
+    expect(await classroom.startLesson('child', { speaker })).toBe(true);
+    push({ type: 'receipt', receipt: receipt(1, 'interactive', 'piano') });
+    return { classroom, cues, hidden };
+  }
+  it('preloads the lesson sounds once the call starts', async () => {
+    const { classroom } = await soundStarted();
+    expect(sounds.preload).toHaveBeenCalledWith(instrumentsCourse.cards.flatMap((card) => card.soundUrl ? [card.soundUrl] : []));
+    expect(sounds.preload.mock.calls[0][0]).toHaveLength(8);
+    await classroom.endLesson();
+  });
+  it('waits for the teacher, closes the mic while waiting and playing even with speaker mode off, and reopens 500 ms after the sound', async () => {
+    const { classroom, cues } = await soundStarted(false);
+    provider({ type: 'response.created', response: { id: 'r1', metadata: null } });
+    provider({ type: 'output_audio_buffer.started', response_id: 'r1' });
+    await vi.waitFor(() => expect(classroom.getState()).toBe('speaking'));
+    expect(tracks[0].enabled).toBe(true); // speaker mode off: open while the teacher speaks
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'drum', { cue: 'sound' }) });
+    await vi.waitFor(() => expect(cues).toEqual([{ cardId: 'drum', status: 'waiting' }]));
+    expect(tracks[0].enabled).toBe(false);
+    provider({ type: 'response.done', response: { id: 'r1', status: 'completed' } });
+    await sleep(20); expect(sounds.play).not.toHaveBeenCalled(); // generated but still playing
+    provider({ type: 'output_audio_buffer.stopped', response_id: 'r1' });
+    await vi.waitFor(() => expect(sounds.play).toHaveBeenCalledWith('/sounds/words/instruments/drum.mp3'));
+    expect(cues.at(-1)).toEqual({ cardId: 'drum', status: 'playing' });
+    await sleep(600); expect(tracks[0].enabled).toBe(false);
+    ends[0]();
+    await vi.waitFor(() => expect(cues.at(-1)).toEqual({ cardId: 'drum', status: 'done' }));
+    await sleep(300); expect(tracks[0].enabled).toBe(false);
+    await vi.waitFor(() => expect(tracks[0].enabled).toBe(true));
+    expect(sounds.play).toHaveBeenCalledTimes(1);
+    await classroom.endLesson();
+  });
+  it('does not play while paused and plays after resume', async () => {
+    const { classroom, cues } = await soundStarted();
+    await classroom.setPaused!(true);
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'drum', { cue: 'sound' }) });
+    await vi.waitFor(() => expect(cues).toEqual([{ cardId: 'drum', status: 'waiting' }]));
+    await sleep(30); expect(sounds.play).not.toHaveBeenCalled();
+    await classroom.setPaused!(false);
+    expect(sounds.play).toHaveBeenCalledTimes(1);
+    expect(tracks[0].enabled).toBe(false); // closed while the sound plays
+    await classroom.endLesson();
+  });
+  it('skips a sound whose card was replaced before it started', async () => {
+    const { classroom, cues } = await soundStarted();
+    provider({ type: 'response.created', response: { id: 'r1', metadata: null } });
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'drum', { cue: 'sound' }) });
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'music') });
+    await vi.waitFor(() => expect(cues).toEqual([{ cardId: 'drum', status: 'waiting' }, { cardId: 'drum', status: 'done' }]));
+    provider({ type: 'response.done', response: { id: 'r1', status: 'completed' } });
+    await sleep(20); expect(sounds.play).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(tracks[0].enabled).toBe(true));
+    await classroom.endLesson();
+  });
+  it('ignores receipts without a cue and cues for cards without a sound', async () => {
+    const { classroom, cues } = await soundStarted();
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'drum') });
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'music', { cue: 'sound' }) });
+    await sleep(30);
+    expect(cues).toEqual([]); expect(sounds.play).not.toHaveBeenCalled(); expect(tracks[0].enabled).toBe(true);
+    await classroom.endLesson();
+  });
+  it('hides a sound quiz until a correct answer for that card; other receipts on the same card do not reveal or replay it', async () => {
+    const { classroom, hidden } = await soundStarted();
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'guitar', { cue: 'sound-quiz' }) });
+    await vi.waitFor(() => expect(hidden).toEqual([{ cardId: 'guitar', hidden: true }]));
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'guitar', assessment('guitar', 'close')) });
+    push({ type: 'receipt', receipt: receipt(4, 'interactive', 'guitar', assessment('piano', 'correct')) }); // bound to an earlier screen
+    await sleep(30); expect(hidden).toHaveLength(1);
+    push({ type: 'receipt', receipt: receipt(5, 'interactive', 'guitar', assessment('guitar', 'correct')) });
+    await vi.waitFor(() => expect(hidden).toEqual([{ cardId: 'guitar', hidden: true }, { cardId: 'guitar', hidden: false }]));
+    expect(sounds.play).toHaveBeenCalledTimes(1);
+    await classroom.endLesson();
+  });
+  it('reveals a sound quiz when the teacher shows the same card again, or leaves it', async () => {
+    const { classroom, hidden } = await soundStarted();
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'guitar', { cue: 'sound-quiz' }) });
+    push({ type: 'receipt', receipt: receipt(3, 'interactive', 'guitar', { cue: 'sound-quiz' }) }); // deliberate replay: stays hidden
+    push({ type: 'receipt', receipt: receipt(4, 'interactive', 'guitar') });
+    await vi.waitFor(() => expect(hidden).toEqual([{ cardId: 'guitar', hidden: true }, { cardId: 'guitar', hidden: false }]));
+    push({ type: 'receipt', receipt: receipt(5, 'interactive', 'bell', { cue: 'sound-quiz' }) });
+    push({ type: 'receipt', receipt: receipt(6, 'interactive', 'harp') });
+    await vi.waitFor(() => expect(hidden.slice(2)).toEqual([{ cardId: 'bell', hidden: true }, { cardId: 'bell', hidden: false }]));
+    await classroom.endLesson();
+  });
+  it('replays a card sound locally with the same gating and tells nobody', async () => {
+    const { classroom, cues } = await soundStarted(true);
+    push({ type: 'receipt', receipt: receipt(2, 'interactive', 'bell') });
+    await sleep(20);
+    const posts = bodies.length;
+    classroom.replaySound('harp'); // not the displayed card
+    classroom.replaySound('bell');
+    expect(cues).toEqual([{ cardId: 'bell', status: 'waiting' }, { cardId: 'bell', status: 'playing' }]);
+    expect(tracks[0].enabled).toBe(false);
+    ends[0]();
+    await vi.waitFor(() => expect(cues.at(-1)).toEqual({ cardId: 'bell', status: 'done' }));
+    await vi.waitFor(() => expect(tracks[0].enabled).toBe(true));
+    expect(bodies.length).toBe(posts);
+    await classroom.endLesson();
+  });
 });

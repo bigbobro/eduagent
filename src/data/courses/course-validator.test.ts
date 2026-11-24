@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { animalsCourse } from './animals';
-import { validateCourse } from './course-validator';
+import { instrumentsCourse } from './instruments';
+import { validateCourse, validateCourseAssets } from './course-validator';
 
 const clone = () => structuredClone(animalsCourse);
 
@@ -51,5 +52,20 @@ describe('validateCourse', () => {
       quiz.targetText = quiz.targetText.replace(/[.!?]+$/, '');
     }
     expect(validateCourse(c).some((p) => p.includes('targetText must end with'))).toBe(true);
+  });
+
+  it('flags a word sound outside its course path, a sound on a sentence card and a missing sound file', () => {
+    const c = structuredClone(instrumentsCourse);
+    const piano = c.cards.find((card) => card.id === 'piano')!;
+    piano.soundUrl = '/sounds/words/instruments/drum.mp3';
+    c.cards.find((card) => card.kind === 'sentence')!.soundUrl = '/sounds/words/instruments/sentence_piano.mp3';
+    expect(validateCourse(c).filter((p) => p.includes('soundUrl'))).toEqual([
+      'instruments/piano: soundUrl must be /sounds/words/instruments/piano.mp3',
+      'instruments/sentence_piano: soundUrl is only for word cards',
+    ]);
+    piano.soundUrl = '/sounds/words/instruments/piano.mp3';
+    c.cards.find((card) => card.id === 'music')!.soundUrl = '/sounds/words/instruments/music.mp3';
+    expect(validateCourseAssets(c)).toEqual(expect.arrayContaining(['instruments/music: sound not found at /sounds/words/instruments/music.mp3']));
+    expect(validateCourseAssets(instrumentsCourse)).toEqual([]);
   });
 });

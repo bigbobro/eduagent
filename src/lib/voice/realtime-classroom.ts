@@ -1,6 +1,7 @@
 'use client';
 
 import { findQuiz, type AnswerResult, type Classroom, type ClassroomEvents, type LessonStateName } from './classroom';
+import { playCardSound, preloadCardSounds } from './page-audio';
 import type { Course, PhaseName } from '@/types/course';
 import type { ResumeInfo } from '@/lib/lesson-protocol';
 import { parseResumeInfo, invalidProgressMessage } from '@/lib/lesson-protocol';
@@ -24,7 +25,14 @@ interface Run {
   speaker: boolean; micHold: boolean; micRelease: ReturnType<typeof setTimeout> | null;
   // Manual-turn mode only: the local VAD, the ordered speech-signal chain and the pause window after `end`.
   vad: ManualTurnVad | null; signals: Promise<unknown>; silence: ReturnType<typeof setTimeout> | null;
+  // Word-card sound: `sound` waits for the teacher to be idle, `soundPlaying` while it plays; `cue` = either (gates the mic, see syncMic).
+  sound: { cardId: string; url: string } | null; soundPlaying: boolean; cue: boolean;
+  // The card whose English a sound quiz hides, until a correct answer or an ordinary show_card of it.
+  hiddenCardId: string;
 }
+/** Word-card sound playback; injectable for tests. */
+export interface CardSounds { play(url: string): Promise<void>; preload(urls: readonly string[]): void }
+const PAGE_SOUNDS: CardSounds = { play: playCardSound, preload: preloadCardSounds };
 const FATAL_MESSAGE = '实时连接已断开，请重新进入课堂，从已保存的进度继续。';
 const QUOTA_MESSAGE = 'OpenAI 额度不足，请到 OpenAI 控制台检查余额和账单后再试。';
 
@@ -34,7 +42,7 @@ export class RealtimeClassroom implements Classroom {
   private listeners = new Map<keyof ClassroomEvents, Set<(data: never) => void>>();
   private run: Run | null = null;
   private resume: ResumeInfo | null = null;
-  constructor(private course: Course) {}
+  constructor(private course: Course, private sounds: CardSounds = PAGE_SOUNDS) {}
   on<K extends keyof ClassroomEvents>(event: K, fn: (data: ClassroomEvents[K]) => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(fn as (data: never) => void);
@@ -50,7 +58,8 @@ export class RealtimeClassroom implements Classroom {
     const previous = this.endLesson();
     const run: Run = { abort: new AbortController(), learnerId, sessionId: null, transport: 'webrtc', state: 'greeting', phase: 'intro', cardId: '', revision: -1, resumeShown: false,
       stream: null, pc: null, channel: null, audio: null, paused: false, childSpeaking: false, playing: false, waitingReply: null,
-      active: new Set(), done: new Set(), transcripts: new Map(), waiters: new Set(), presented: '', failed: null, pick: null, finishing: false, speaker: options?.speaker === true, micHold: false, micRelease: null, vad: null, signals: Promise.resolve(), silence: null };
+      active: new Set(), done: new Set(), transcripts: new Map(), waiters: new Set(), presented: '', failed: null, pick: null, finishing: false, speaker: options?.speaker === true, micHold: false, micRelease: null, vad: null, signals: Promise.resolve(), silence: null,
+      sound: null, soundPlaying: false, cue: false, hiddenCardId: '' };
     this.run = run; this.resume = null;
     this.emit('state', 'greeting'); this.emit('intro-busy-change', true);
     try {
@@ -62,6 +71,7 @@ export class RealtimeClassroom implements Classroom {
       run.sessionId = body.sessionId; run.transport = body.transport === 'mock' ? 'mock' : 'webrtc';
       this.resume = parseResumeInfo(body.resume ? JSON.stringify(body.resume) : null);
       this.apply(run, receiptSchema.parse(body.receipt));
+      this.sounds.preload(this.course.cards.flatMap((card) => card.soundUrl ? [card.soundUrl] : []));
       // The only microphone capture of the lesson. Echo cancellation alone is not enough on a loudspeaker; speaker mode gates the mic while the teacher speaks.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
       if (!this.current(run)) { stream.getTracks().forEach((track) => track.stop()); return false; }
@@ -131,6 +141,7 @@ export class RealtimeClassroom implements Classroom {
     if (run.micRelease) { clearTimeout(run.micRelease); run.micRelease = null; }
     if (run.waitingReply) clearTimeout(run.waitingReply);
     run.waiters.forEach((waiter) => waiter.resolve()); run.waiters.clear();
+    run.sound = null; run.cue = run.soundPlaying;
     try { run.channel?.close(); } catch { /* already closed */ }
     run.pc?.close();
     run.stream?.getTracks().forEach((track) => track.stop());
@@ -221,6 +232,7 @@ export class RealtimeClassroom implements Classroom {
     this.emit('progress', receipt.progress);
     const answer = this.answer(receipt);
     if (answer) this.emit('answer-result', answer);
+    this.cueReceipt(run, receipt, previousPhase, answer);
     if (previousPhase !== run.phase || (this.resume?.resumed && !run.resumeShown)) { run.resumeShown = true; this.emit('phase-change', run.phase); }
     if (run.cardId && run.phase !== 'reinforcement' && run.phase !== 'done') this.emit('actions', [{ tool: 'show_card', params: { card_id: run.cardId } }]);
     if (receipt.assessment?.heard) {
@@ -281,17 +293,58 @@ export class RealtimeClassroom implements Classroom {
         if (event.response?.status !== 'completed') this.settle(run, (responseId) => responseId === id);
         break;
     }
+    this.playSound(run);
     this.syncMic(run);
     this.state(run, this.derive(run));
   }
+  /** Card receipts: a `cue` queues the card's own sound; a sound quiz hides the English until a correct answer for that card
+   *  or an ordinary show_card of it. Assessment, practice and phase receipts carry the current card too: they are not a show. */
+  private cueReceipt(run: Run, receipt: Receipt, previousPhase: PhaseName, answer: AnswerResult | null): void {
+    if (run.sound && run.sound.cardId !== receipt.cardId) { this.dropSound(run); this.syncMic(run); } // replaced before it started: skip it
+    const hidden = run.hiddenCardId;
+    const show = !receipt.assessment && !receipt.quiz && previousPhase === run.phase;
+    if (hidden && (receipt.cardId !== hidden || run.phase !== 'interactive' || (show && receipt.cue !== 'sound-quiz')
+      || (answer?.cardId === hidden && answer.result === 'correct'))) {
+      run.hiddenCardId = ''; this.emit('word-hidden', { cardId: hidden, hidden: false });
+    }
+    const url = receipt.cue && run.phase === 'interactive' ? this.course.cards.find((card) => card.id === receipt.cardId)?.soundUrl : undefined;
+    if (!url) return;
+    if (receipt.cue === 'sound-quiz' && run.hiddenCardId !== receipt.cardId) { run.hiddenCardId = receipt.cardId; this.emit('word-hidden', { cardId: receipt.cardId, hidden: true }); }
+    this.queueSound(run, receipt.cardId, url);
+  }
+  private queueSound(run: Run, cardId: string, url: string): void {
+    if (run.sound?.cardId === cardId) return;
+    if (run.sound) this.dropSound(run);
+    run.sound = { cardId, url }; run.cue = true;
+    this.emit('sound-cue', { cardId, status: 'waiting' });
+    this.playSound(run); this.syncMic(run);
+  }
+  private dropSound(run: Run): void {
+    const sound = run.sound; if (!sound) return;
+    run.sound = null; run.cue = run.soundPlaying;
+    this.emit('sound-cue', { cardId: sound.cardId, status: 'done' });
+  }
+  /** Plays the waiting sound once the teacher is idle (nothing generating or playing) and the lesson is not paused or ending. */
+  private playSound(run: Run): void {
+    const sound = run.sound;
+    if (!sound || run.soundPlaying || !this.current(run)) return;
+    if (run.finishing) { this.dropSound(run); this.syncMic(run); return; }
+    if (run.paused || run.active.size > 0 || run.playing) return;
+    run.sound = null; run.soundPlaying = true;
+    this.emit('sound-cue', { cardId: sound.cardId, status: 'playing' });
+    void this.sounds.play(sound.url).catch(() => {}).then(() => {
+      run.soundPlaying = false; run.cue = run.sound !== null;
+      if (!this.current(run)) return;
+      this.emit('sound-cue', { cardId: sound.cardId, status: 'done' });
+      this.playSound(run); this.syncMic(run);
+    });
+  }
   /** The only place that sets the mic track's `enabled` during a run. In speaker mode the mic stays closed while the teacher
-   *  generates or plays, and reopens SPEAKER_RELEASE_MS after the teacher went idle. */
+   *  generates or plays; in every mode it stays closed while a word-card sound waits or plays. It reopens SPEAKER_RELEASE_MS
+   *  after the last of these ended. */
   private syncMic(run: Run): void {
-    const busy = run.active.size > 0 || run.playing;
-    if (!run.speaker) {
-      run.micHold = false;
-      if (run.micRelease) { clearTimeout(run.micRelease); run.micRelease = null; }
-    } else if (busy) {
+    const busy = run.cue || (run.speaker && (run.active.size > 0 || run.playing));
+    if (busy) {
       if (run.micRelease) { clearTimeout(run.micRelease); run.micRelease = null; }
       run.micHold = true;
     } else if (run.micHold && !run.micRelease) {
@@ -370,8 +423,14 @@ export class RealtimeClassroom implements Classroom {
     if (run.silence) { clearTimeout(run.silence); run.silence = null; }
     if (paused) { run.childSpeaking = false; run.vad?.pause(); } else run.vad?.resume();
     if (paused && run.channel?.readyState === 'open') run.channel.send(JSON.stringify({ type: 'output_audio_buffer.clear' }));
+    if (!paused) { this.playSound(run); this.syncMic(run); }
     this.state(run, this.derive(run));
     await this.post(run, this.owned(run, { action: 'pause', paused })).catch(() => {});
+  }
+  replaySound(cardId: string): void {
+    const run = this.run; const url = this.course.cards.find((card) => card.id === cardId)?.soundUrl;
+    if (!run || !this.current(run) || !url || run.finishing || run.phase !== 'interactive' || cardId !== run.cardId) return;
+    this.queueSound(run, cardId, url);
   }
   async repeatCard(cardId: string): Promise<void> { await this.act((run) => this.post(run, this.owned(run, { action: 'repeat', cardId })).then(() => {})).catch(() => {}); }
   async requestIntroCard(): Promise<boolean> { return false; }

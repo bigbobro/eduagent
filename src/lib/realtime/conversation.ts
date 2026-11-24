@@ -34,6 +34,7 @@ export const SITTING = { wrapUpMs: 10 * 60_000, goodbyeMs: 14 * 60_000 };
  * After the teacher goes idle and the child stays silent this long, the teacher re-invites once; at most `maxNudges` in a row.
  * The counter resets when the child speaks or acts (tap, teach again).
  */
+export const SOUND_CUE_MS = 4000;
 export const SILENCE = { nudgeAfterMs: 10_000, maxNudges: 2 };
 /** Give already-spoken answers a bounded chance to settle before the sitting goodbye. */
 export const END_ASSESSMENT_WAIT_MS = 4000;
@@ -63,8 +64,9 @@ const ASSESS_TOOL = { type: 'function', name: 'record_assessment', description: 
     mastered: { type: 'boolean', description: 'Passed for the course so far, not lasting mastery: true only for unaided recall or own use in a different situation than the one just modelled. False for an echo, a choice answer, a practice question and not_attempt.' },
     next_action: { type: 'string', enum: ['retry', 'review', 'advance', 'skip'], description: 'For a practice question the app follows it: advance when the whole sentence was said correctly, skip when the child is clearly stuck after several tries, otherwise retry. For a word card it is only a note (the tutor decides what comes next): retry = needs another try, review = revisit later, advance = ready to move on, skip = set aside; skip is never mastery.' },
   }, required: ['result', 'heard', 'evidence', 'mastered', 'next_action'], additionalProperties: false } };
+type BoundTarget = PresentedTarget & { soundQuizRevision?: number };
 type RequestKind = 'opening' | 'followup' | 'present-quiz' | 'repeat' | 'pick-feedback' | 'goodbye' | 'commit' | 'nudge';
-interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean; commitTarget?: PresentedTarget | null }
+interface AppRequest { id: string; kind: RequestKind; note?: string; parent?: string; quizId?: string; feedbackFor?: string; noTools?: boolean; commitTarget?: BoundTarget | null }
 interface ResponseState { input: string | null; kind: string; transcript: string; feedbackFor?: string; replyMs?: number }
 const SURVIVES_SPEECH: RequestKind[] = ['present-quiz', 'goodbye'];
 function safeCode(code: string | undefined): string { return code && /^[a-z0-9_]{1,80}$/i.test(code) ? code.toUpperCase() : 'UNKNOWN'; }
@@ -77,10 +79,35 @@ function errorCode(error: unknown, fallback: string): string { return error inst
  * completed responses only, and serializes application-initiated responses around the child's turns.
  */
 export class NaturalConversation {
-  private presented: PresentedTarget | null = null;
+  private presented: BoundTarget | null = null;
+  private soundedCards = new Set<string>();
+  // Track the rendition until the browser reports the next target. Same-card reveals need no new presented event.
+  private soundQuizRevisions = new Map<string, number>();
+  private cuePending = false;
+  private cueTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private boundTarget(): BoundTarget | null {
+    const target = this.presented;
+    return target?.kind === 'card' ? { ...target, soundQuizRevision: this.soundQuizRevisions.get(target.id) } : target;
+  }
+
+  // The browser starts its clip after teacher audio drains. A late audio start or pause restarts this window.
+  private updateCueTimer(): void {
+    if (!this.cuePending || this.playing || this.active.size || this.paused) {
+      if (this.cueTimer) clearTimeout(this.cueTimer);
+      this.cueTimer = null;
+    } else if (!this.cueTimer) {
+      this.cueTimer = setTimeout(() => {
+        this.cueTimer = null; this.cuePending = false;
+        this.pump(); this.armSilence();
+      }, SOUND_CUE_MS);
+      this.cueTimer.unref?.();
+    }
+  }
+
   // One entry per child utterance: the target shown at speech start, the saved assessment, the teacher's first spoken answer
   // (kept as that attempt's feedback) and how many assessor responses were tried.
-  private inputs = new Map<string, { target: PresentedTarget | null; receipt?: TeachingReceipt; reply?: string; tries?: number }>();
+  private inputs = new Map<string, { target: BoundTarget | null; receipt?: TeachingReceipt; reply?: string; tries?: number }>();
   // Assessor responses in flight, by request id. They are never in `active`: the teacher's turn-taking does not wait for them.
   private assessing = new Map<string, { input: string; at: number }>();
   private lastInput: string | null = null;
@@ -93,9 +120,9 @@ export class NaturalConversation {
   // turn waiting for the teacher to go idle; `clearProbe` measures whether a sideband output_audio_buffer.clear is confirmed.
   // `voicedMs` is the voiced time of finished segments; `segmentAt` is when the running segment started; `ended` means the browser
   // reported `end` and the turn waits `commitAfterSilenceMs` (`commitTimer`) for the child to continue.
-  private speech: { target: PresentedTarget | null; startedAt: number; segmentAt: number; voicedMs: number; busyAtStart: boolean; interrupted: boolean; ended: boolean;
+  private speech: { target: BoundTarget | null; startedAt: number; segmentAt: number; voicedMs: number; busyAtStart: boolean; interrupted: boolean; ended: boolean;
     timer: ReturnType<typeof setTimeout> | null; commitTimer: ReturnType<typeof setTimeout> | null } | null = null;
-  private pendingCommit: { target: PresentedTarget | null; forced: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
+  private pendingCommit: { target: BoundTarget | null; forced: boolean; timer: ReturnType<typeof setTimeout> | null } | null = null;
   private clearProbe: { sentAt: number; wasPlaying: boolean; fellBack: boolean; timer: ReturnType<typeof setTimeout> } | null = null;
   private hygiene: ReturnType<typeof setInterval> | null = null;
   private picks = new Map<string, TeachingReceipt>();
@@ -113,7 +140,6 @@ export class NaturalConversation {
   private noteRules = createAppNoteRules();
   // Sitting clock: unpaused milliseconds so far, the start of the running stretch, and the next milestone timer.
   private sitting = { elapsed: 0, since: null as number | null, timer: null as ReturnType<typeof setTimeout> | null, wrapped: false, ended: false, started: false };
-  // Diagnostic only (provider event log); nothing decides on it.
   private playing = false;
   private teacherHasSpoken = false;
   // Interruption diagnostics (auto mode): when the output buffer started, and the child speech now in progress.
@@ -162,6 +188,7 @@ export class NaturalConversation {
   close(): void {
     if (this.inflight) clearTimeout(this.inflight.timer);
     this.inflight = null; this.queue = [];
+    this.cuePending = false; this.updateCueTimer();
     this.dropManualTurn();
     if (this.hygiene) clearInterval(this.hygiene);
     this.hygiene = null;
@@ -188,7 +215,7 @@ export class NaturalConversation {
   }
   private silenceIdle(): boolean {
     return !this.manual && this.sitting.started && !this.sitting.ended && !this.farewell && !this.paused && !this.childSpeaking
-      && this.active.size === 0 && !this.inflight && this.queue.length === 0 && !this.playing && this.silence.nudges < this.silenceTiming.maxNudges;
+      && !this.cuePending && this.active.size === 0 && !this.inflight && this.queue.length === 0 && !this.playing && this.silence.nudges < this.silenceTiming.maxNudges;
   }
   private silenceElapsed(): void {
     this.silence.timer = null;
@@ -221,6 +248,7 @@ export class NaturalConversation {
       // A state message, not a response and not a session.update: the model picks it up on its next turn and the cached instructions stay intact.
       this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: this.game ? WRAP_UP_BATTLE : WRAP_UP }] } });
       // Keep teaching until the first battle card is committed, then switch the browser with that card already on screen.
+      this.syncState();
       this.battlePending = this.game && this.session.currentPhase === 'interactive';
       this.armSitting();
       return;
@@ -233,6 +261,7 @@ export class NaturalConversation {
     const sitting = this.sitting;
     sitting.ended = true; this.farewell = true; this.battlePending = false;
     this.queue = []; this.dropManualTurn();
+    this.cuePending = false; this.updateCueTimer();
     if (this.manual) this.childSpeaking = false;
     this.armSitting();
     log.info('sitting ended', { sessionId: this.session.id, by, elapsedMs: sitting.elapsed, phase: this.session.currentPhase });
@@ -293,6 +322,7 @@ export class NaturalConversation {
   }
   setPaused(paused: boolean): void {
     this.paused = paused;
+    this.updateCueTimer();
     this.armSitting();
     if (paused) {
       // Question prompts and the goodbye wait for resume; chatty follow-ups are dropped.
@@ -308,10 +338,11 @@ export class NaturalConversation {
     if (!event.type.endsWith('.delta')) log.debug('provider event', { sessionId: this.session.id, type: event.type, responseId: event.response?.id ?? event.response_id, itemId: event.item_id, status: event.response?.status, active: this.active.size, playing: this.playing, childSpeaking: this.childSpeaking });
     switch (event.type) {
       case 'input_audio_buffer.speech_started':
+        this.cuePending = false;
         this.childSpeaking = true; this.replySince = null; this.silence.nudges = 0;
         if (!this.manual) { const now = Date.now(); this.speechProbe = { at: now, startMs: event.audio_start_ms, playing: this.playing, active: this.active.size, playedMs: this.playingSince ? now - this.playingSince : null }; }
         // Bind the input to what the browser had rendered at speech start, not to later server state.
-        if (event.item_id && !this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.presented });
+        if (event.item_id && !this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.boundTarget() });
         this.queue = this.queue.filter((request) => SURVIVES_SPEECH.includes(request.kind));
         break;
       case 'input_audio_buffer.speech_stopped':
@@ -326,7 +357,7 @@ export class NaturalConversation {
       case 'input_audio_buffer.committed':
         if (this.manual) { this.committed(event); break; }
         this.childSpeaking = false;
-        if (event.item_id) { if (!this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.presented }); this.lastInput = event.item_id; this.assess(event.item_id); }
+        if (event.item_id) { if (!this.inputs.has(event.item_id)) this.inputs.set(event.item_id, { target: this.boundTarget() }); this.lastInput = event.item_id; this.assess(event.item_id); }
         break;
       case 'output_audio_buffer.started':
         this.teacherHasSpoken = true; this.playing = true; this.playingSince ??= Date.now();
@@ -414,10 +445,10 @@ export class NaturalConversation {
     if (response.status === 'completed' && state?.transcript.trim()) this.teacherHasSpoken = true;
     saveResponse(this.session, { kind: state?.kind ?? 'unknown', status: response.status ?? 'unknown', text: state?.transcript ?? '',
       tools: (response.output ?? []).filter((item) => item.type === 'function_call').map((item) => {
-        if (item.name !== 'show_card') return item.name ?? '';
+        if (item.name !== 'show_card' && item.name !== 'play_sound') return item.name ?? '';
         let cardId: unknown;
         try { cardId = JSON.parse(item.arguments ?? '').card_id; } catch { /* invalid arguments */ }
-        return `show_card(${typeof cardId === 'string' && this.card(cardId) ? cardId : '?'})`;
+        return `${item.name}(${typeof cardId === 'string' && this.card(cardId) ? cardId : '?'})`;
       }).join(','), replyMs: state?.replyMs });
     if (state?.feedbackFor && state.transcript && response.status === 'completed') saveFeedback(this.session, state.feedbackFor, state.transcript);
     // The teacher's first completed spoken answer to a child utterance is that attempt's feedback; it is stored once the assessor has saved the attempt.
@@ -434,18 +465,19 @@ export class NaturalConversation {
     // Tools in cancelled responses are never executed: an interruption discards operations that were not committed.
     const calls = (response.output ?? []).filter((item) => item.type === 'function_call');
     if (!calls.length) { this.toolStreak = 0; return; }
-    let sittingEnded = false;
+    let suppressFollowup = false;
     let onlyShownCards = true;
     for (const call of calls) {
       const result = this.execute(call.name ?? '', call.arguments ?? '');
-      if (result.sittingEnded) sittingEnded = true;
+      if (result.suppressFollowup) suppressFollowup = true;
       if (call.name !== 'show_card' || !('ok' in result.output && result.output.ok === true)) onlyShownCards = false;
       if (call.call_id) this.port.send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.call_id, output: JSON.stringify(result.output) } });
     }
+    if (suppressFollowup) this.queue = this.queue.filter((r) => r.kind !== 'followup');
     this.toolStreak++;
     this.syncState();
     // end_sitting queued the goodbye, which is its follow-up: no extra tool follow-up response.
-    if (!this.childSpeaking && !this.pendingCommit && !sittingEnded && !this.sitting.ended) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, noTools: onlyShownCards || this.toolStreak >= 3 });
+    if (!this.childSpeaking && !this.pendingCommit && !suppressFollowup && !this.sitting.ended) this.queue.unshift({ id: this.requestId(), kind: 'followup', parent: response.id, noTools: onlyShownCards || this.toolStreak >= 3 });
   }
 
   /**
@@ -467,7 +499,7 @@ export class NaturalConversation {
     const id = `assess_${(++this.requests).toString(36)}`;
     this.assessing.set(id, { input, at: Date.now() });
     this.port.send({ type: 'response.create', event_id: id, response: { conversation: 'none', output_modalities: ['text'], metadata: { kind: 'assess', request: id, input },
-      instructions: `${ASSESSOR}\nScreen target when the child spoke: ${target}.`, tools: [ASSESS_TOOL], tool_choice: 'required' } });
+      instructions: `${ASSESSOR}\nScreen target when the child spoke: ${target}.${record.target.soundQuizRevision !== undefined ? " The cue was the picture and the word’s own sound, with the English hidden. A correct unaided recall is mastered." : ""}`, tools: [ASSESS_TOOL], tool_choice: 'required' } });
   }
   /** Settles one assessor response: saves a real attempt once, publishes it, and retries a response that produced no usable report once. */
   private assessed(event: ProviderMessage): void {
@@ -503,6 +535,10 @@ export class NaturalConversation {
       const next_action = report.mastered && report.next_action === 'skip' ? 'advance' : report.next_action;
       const receipt = submitAssessment(this.session, { id: input, targetId: record.target.id, kind: 'audio' }, { ...report, next_action, target_id: record.target.id, next_card_id: null, next_phase: null });
       record.receipt = receipt;
+      if (report.result === 'correct' && record.target.soundQuizRevision !== undefined &&
+          this.soundQuizRevisions.get(record.target.id) === record.target.soundQuizRevision) {
+        this.soundQuizRevisions.delete(record.target.id);
+      }
       if (this.battle.started) {
         this.battle.attempts++;
         if (report.result === 'correct') this.battle.correct++;
@@ -520,28 +556,46 @@ export class NaturalConversation {
       log.warn('assessment rejected', { sessionId: this.session.id, code: errorCode(error, 'INVALID_ASSESSMENT'), targetId: record.target.id });
     }
   }
-  private execute(name: string, raw: string): { output: object; sittingEnded?: boolean } {
+  private execute(name: string, raw: string): { output: object; suppressFollowup?: boolean } {
     const reject = (code: string) => {
-      log.warn('tool rejected', { sessionId: this.session.id, tool: ['show_card', 'start_practice', 'end_sitting'].includes(name) ? name : 'unknown', code });
+      log.warn('tool rejected', { sessionId: this.session.id, tool: ['show_card', 'play_sound', 'start_practice', 'end_sitting'].includes(name) ? name : 'unknown', code });
       return { output: { ok: false, error: code, note: 'Nothing changed. Do not tell the child about tools, IDs or errors. Retry once with corrected arguments if that makes sense, otherwise carry on teaching with what is on screen.' } };
     };
     let args: unknown;
     try { args = JSON.parse(raw); } catch { return reject('INVALID_ARGUMENTS'); }
     try {
-      if (this.sitting.ended && (name === 'show_card' || name === 'start_practice')) throw new Error('SITTING_ENDED');
-      if (name === 'show_card') {
+      if (this.sitting.ended && (name === 'show_card' || name === 'play_sound' || name === 'start_practice')) throw new Error('SITTING_ENDED');
+      if (name === 'show_card' || name === 'play_sound') {
         const { card_id } = showCardSchema.parse(args);
-        if (this.session.currentPhase !== 'interactive') throw new Error('INVALID_PHASE');
-        const receipt = showCard(this.session, card_id); this.commit(receipt);
+        const quiz = name === 'play_sound';
+        if (this.session.currentPhase !== 'interactive' || (quiz && this.sitting.wrapped)) throw new Error('INVALID_PHASE');
+        const card = this.card(card_id);
+        const hasSound = card?.kind === 'word' && Boolean(card.soundUrl);
+        const attempts = card ? this.session.memory.wordPerformance.get(card.english)?.attempts ?? 0 : 0;
+        if (quiz && !hasSound) throw new Error('NO_SOUND');
+        if (quiz && !attempts) throw new Error('SOUND_NOT_TAUGHT');
+
+        const receipt = showCard(this.session, card_id);
+        this.cuePending = false; this.updateCueTimer();
+        if (hasSound && !this.sitting.wrapped && (quiz || !this.soundedCards.has(card_id))) {
+          receipt.cue = quiz ? 'sound-quiz' : 'sound';
+          this.soundedCards.add(card_id);
+          this.cuePending = true;
+          log.info('sound cue', { sessionId: this.session.id, cardId: card_id, quiz, attempts });
+        }
+        if (quiz) this.soundQuizRevisions.set(card_id, receipt.revision);
+        else this.soundQuizRevisions.delete(card_id);
+        this.commit(receipt);
+        if (quiz) return { suppressFollowup: true, output: { ok: true, displayed_card: card_id,
+          note: 'The picture is on screen and its sound is playing for the child now; the English word is hidden. Say nothing more; wait for the child to answer.' } };
         if (this.battlePending) {
           this.battlePending = false; this.battle.started = true;
           log.info('battle started', { sessionId: this.session.id, elapsedMs: this.sitting.elapsed + (this.sitting.since === null ? 0 : Date.now() - this.sitting.since) });
           this.port.sittingWrapUp?.();
         }
         // After the time check the cards are recall cards (word battle or recall game): no model-first note there.
-        const card = this.card(card_id);
         const unsaid = card?.kind === 'word' && !this.sitting.wrapped && !this.session.memory.wordPerformance.get(card.english)?.correct;
-        return { output: { ok: true, displayed_card: card_id, note: unsaid ? NEW_WORD : 'The screen now shows this card.' } };
+        return { output: { ok: true, displayed_card: card_id, note: (unsaid ? NEW_WORD : 'The screen now shows this card.') + (receipt.cue ? " The app plays this card's own sound once as the card appears." : '') } };
       }
       if (name === 'start_practice') {
         if (this.session.currentPhase !== 'interactive') throw new Error('INVALID_PHASE');
@@ -552,7 +606,7 @@ export class NaturalConversation {
         // Only after the wrap-up time check, and only while the sitting is still running (not ended, course not complete).
         if (!this.sitting.wrapped || this.sitting.ended || this.farewell) throw new Error('SITTING_NOT_ENDING');
         this.endSitting('tool');
-        return { output: { ok: true, note: 'The app now asks you to say goodbye. Say nothing else.' }, sittingEnded: true };
+        return { output: { ok: true, note: 'The app now asks you to say goodbye. Say nothing else.' }, suppressFollowup: true };
       }
       return reject('UNKNOWN_TOOL');
     } catch (error) {
@@ -561,6 +615,7 @@ export class NaturalConversation {
   }
   /** Publishes committed state; reaching done (by tool or by app action) always schedules one goodbye. */
   private commit(receipt: TeachingReceipt): void {
+    if (receipt.progress.currentPhase !== 'interactive') { this.cuePending = false; this.updateCueTimer(); }
     this.port.publish(receipt);
     if (receipt.progress.currentPhase === 'done' && !this.farewell) {
       this.farewell = true;
@@ -571,10 +626,11 @@ export class NaturalConversation {
   private enqueue(request: Omit<AppRequest, 'id'>): void { if (this.sitting.ended) return; this.queue.push({ ...request, id: this.requestId() }); this.pump(); this.armSilence(); }
   private requestId(): string { return `app_${(++this.requests).toString(36)}`; }
   private pump(): void {
+    this.updateCueTimer();
     if (this.paused || this.childSpeaking || this.active.size || this.inflight) return;
     // A finished child turn goes before queued app speech, once the teacher's audio has drained (or the fallback fired).
     if (this.manual && this.pendingCommit) { if (!this.playing || this.pendingCommit.forced) this.startCommit(); return; }
-    if (!this.queue.length) return;
+    if (!this.queue.length || this.cuePending) return;
     const request = this.queue.shift()!;
     if (request.note) this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: request.note }] } });
     this.inflight = { request, timer: this.inflightTimer(request) };
@@ -620,11 +676,12 @@ export class NaturalConversation {
       if (busy && !resumed.interrupted) this.armOverlap(resumed);
       return;
     }
+    this.cuePending = false; this.updateCueTimer();
     this.childSpeaking = true;
     this.queue = this.queue.filter((request) => SURVIVES_SPEECH.includes(request.kind));
     // Bind to what the browser showed when speech began (a still-pending earlier turn keeps its own, earlier target).
     const now = Date.now();
-    const speech = { target: this.pendingCommit ? this.pendingCommit.target : this.presented, startedAt: now, segmentAt: now, voicedMs: 0, busyAtStart: busy, interrupted: false, ended: false,
+    const speech = { target: this.pendingCommit ? this.pendingCommit.target : this.boundTarget(), startedAt: now, segmentAt: now, voicedMs: 0, busyAtStart: busy, interrupted: false, ended: false,
       timer: null as ReturnType<typeof setTimeout> | null, commitTimer: null as ReturnType<typeof setTimeout> | null };
     this.speech = speech;
     log.info('child speech start', { sessionId: this.session.id, teacherBusy: busy });
@@ -733,7 +790,9 @@ export class NaturalConversation {
     const card = screen?.kind === 'card' ? this.card(screen.id) : undefined;
     const performance = card ? s.memory.wordPerformance.get(card.english) : undefined;
     const practice = card ? { card_id: card.id, attempts: performance?.attempts ?? 0, correct: performance?.correct ?? 0 } : null;
-    const text = `[app] State: phase ${s.currentPhase}; screen ${screen ? `${screen.kind} ${screen.id}` : 'loading'}. Words not yet passed in the WHOLE course: ${JSON.stringify(this.remaining())}. This sitting covers only about 4-6 of them; do not rush to finish them today and do not silently drop any (unfinished words continue in the next sitting). Passed word cards so far in this course (not lasting mastery): ${JSON.stringify(s.memory.clearedCardIds)}. Current word practice: ${JSON.stringify(practice)}. Passed questions: ${JSON.stringify(s.memory.passedQuizIds)}.`;
+    const eligible = s.currentPhase === 'interactive' && !this.sitting.wrapped && !this.sitting.ended
+      ? s.course.cards.filter((c) => c.kind === 'word' && c.soundUrl && (s.memory.wordPerformance.get(c.english)?.attempts ?? 0) > 0).map((c) => c.id) : [];
+    const text = `[app] State: phase ${s.currentPhase}; screen ${screen ? `${screen.kind} ${screen.id}` : 'loading'}. Words not yet passed in the WHOLE course: ${JSON.stringify(this.remaining())}. This sitting covers only about 4-6 of them; do not rush to finish them today and do not silently drop any (unfinished words continue in the next sitting). Passed word cards so far in this course (not lasting mastery): ${JSON.stringify(s.memory.clearedCardIds)}. Current word practice: ${JSON.stringify(practice)}. Passed questions: ${JSON.stringify(s.memory.passedQuizIds)}. Eligible play_sound card IDs: ${JSON.stringify(eligible)}.`;
     if (text === this.lastState) return;
     this.lastState = text;
     this.port.send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } });
@@ -745,6 +804,8 @@ export class NaturalConversation {
     return [
       { type: 'function', name: 'show_card', description: 'Display a course card to teach, explain or review it, including when the child asks for one, and to move on to the next word.',
         parameters: { type: 'object', properties: { card_id: { type: 'string', enum: this.session.course.cards.map((c) => c.id) } }, required: ['card_id'], additionalProperties: false } },
+      { type: 'function', name: 'play_sound', description: 'Ask for unaided recall with the picture and its own sound. Use a taught card ID listed in State before the time check.',
+        parameters: { type: 'object', properties: { card_id: { type: 'string' } }, required: ['card_id'], additionalProperties: false } },
       { type: 'function', name: 'start_practice', description: 'Move from the word lesson to the practice questions once every word of the course was taught (passed, or deliberately deferred). Never to finish early because the sitting is long.',
         parameters: { type: 'object', properties: {}, additionalProperties: false } },
       { type: 'function', name: 'end_sitting', description: 'Only after the app\'s time check: call it once the current word is finished and the short recall game is done, instead of saying goodbye yourself. The app then asks you to say goodbye. Rejected before the time check.',
@@ -765,9 +826,10 @@ CHILD TALKS: If the child interrupts, asks something or shares their own story, 
 RETURNING: When the child comes back to a course, first help them recall 2-3 words passed before, in a new situation and gently (hints are fine, forgetting is not failure). Recall answers do not remove a passed word. Show the card of each word you ask them to recall first (see SCREEN FIRST).
 SUMMARY: At the end of a sitting, after end_sitting the app asks for the goodbye; say only what we practised today and what comes next time, never "you have learned everything" and never that the course is complete unless the app says so. For sentence practice, teach its meaning and invite the full sentence; use chunks only when needed. Partial sentences still need support. In practice the app moves to the next question by itself once the child has said the whole sentence, and tells you what is on screen: after a try, react in one short sentence, and if it was not the whole sentence yet, help and invite another try.
 Tools: show_card to teach, explain or review a card (when the child asks about another card, e.g. "猫那个再讲一下", show that card) and to move on to the next word. start_practice only once every word of the course has been taught. end_sitting only after the app's time check (see SITTING). Decide yourself, from the child's needs, when to stay on a word, come back to it later or move on; do not drill one word forever. Practice pick-word questions are answered by tapping; the app checks them.
-ANSWERING A TRY: when the child tried the English target, answer at once in one turn: a short specific reaction that is only about the child's words ("对，dog！", "差一点，是 gui-tar。"), then your next cue or question. Never describe your own process or plan, in any language (no "让我听一下", "我来看看", "let me check", "我记一下", "然后我们继续", "让我想一想"). To move on to another card, say the short reaction, call show_card in that same turn, and introduce the new card after its result. For any other tool use (a card the child asked for, start_practice, end_sitting) call the tool first with no words before it, then speak after its result. ok:false means nothing changed: after the result, correct course without mentioning it.
+ANSWERING A TRY: when the child tried the English target, answer at once in one turn: a short specific reaction that is only about the child's words ("对，dog！", "差一点，是 gui-tar。"), then your next cue or question. Never describe your own process or plan, in any language (no "让我听一下", "我来看看", "let me check", "我记一下", "然后我们继续", "让我想一想"). To move on to another card, say the short reaction, call show_card in that same turn, and introduce the new card after its result. For play_sound follow SOUND. For other tool use (a card the child asked for, start_practice, end_sitting) call the tool first with no words before it, then speak after its result. ok:false means nothing changed: after the result, correct course without mentioning it.
 NO BOOKKEEPING TALK: never tell the child about passing or not passing, counting, scores, attempts, saving, or that practice "doesn't count". Just teach and give the next cue. Never say 目标词 (target word) to the child, and never comment on whether a hint or help was involved; those are your notes, not things to say.
 SCREEN FIRST: the app judges every answer against the card on the screen, and the child is looking at that card. So the answer you ask for must always be the card on the screen. Before you ask for anything else (an earlier word to recall, another word from the same situation, a course sentence), put that card on the screen with show_card in that same turn and ask after its result. Never ask for one word while another card is showing. Mentioning other words while you explain or set a scene is fine; asking the child to say them is not.
+SOUND: Some word cards have their own sound. When the show_card result says the app plays it, build on it in your introduction. For a taught word listed as eligible in [app] State, you may ask for unaided recall: give one short lead-in without the answer in either Chinese or English, call play_sound in that turn, then say nothing until the child answers. On a correct answer respond briefly about that word. Otherwise give one hint, replay with play_sound, or reveal and model the English with show_card. Never replay the same card more than three times in a row. Model new words first.
 SENTENCES: The course's target sentences have their own cards (kind "sentence" in the learning targets). To practise one as a whole sentence, show its sentence card first (see SCREEN FIRST), then model it and invite it. A child who puts the screen word into a sentence of their own is welcome and needs no correction of the rest of that sentence. A sentence that is not one of the course's target sentences is only a model for meaning: say it once if it helps, and never ask the child to repeat it in full or to fix its small words.
 APP VERDICT: an [app] Heard message describes the child's previous answer, not the new answer you are responding to now; it usually arrives just after you have already replied. Judge the new answer by what you hear yourself. Never read the message aloud or mention it. Use it silently for your next move on that card: if it judged the answer correct, do not ask the child to fix that word again; if it judged it close, wrong or not a try, do not treat the word as done. Do not go back to comment on a card that has already been replaced: never say "刚才那个是 X" or "你刚才说对了". Carry on teaching the card on screen without apologising or explaining any earlier contradiction.
 TOOL RECOVERY: Internal tool errors are not the child's mistake. Never mention system errors, card IDs or tool details to the child. If a tool keeps failing, carry on teaching with what is on screen; if the lesson cannot continue, briefly ask a parent for help.

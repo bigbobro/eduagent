@@ -56,6 +56,8 @@ export const receiptSchema = z.object({
   progress: z.object({ clearedCardIds: z.array(z.string()), totalAttempts: z.number().int().nonnegative(), currentPhase: lessonPhaseSchema, collectedCardIds: z.array(z.string()).optional() }),
   quiz: z.object({ quizId: z.string(), ok: z.boolean(), correct: z.boolean(), source: z.enum(['legacy-asr', 'application', 'model']), next: z.enum(['retry', 'advance']) }).optional(),
   assessment: realtimeAssessmentSchema.optional(),
+  /** Card receipts only: `sound` = play this card's own sound once as it appears (English visible); `sound-quiz` = a sound quiz (English hidden until answered). */
+  cue: z.enum(['sound', 'sound-quiz']).optional(),
 });
 /** Provider events the browser uses for its conversation state. Mock transport forwards these over SSE. */
 export const providerEventSchema = z.object({

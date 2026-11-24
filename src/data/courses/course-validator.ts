@@ -43,6 +43,10 @@ export function validateCourse(course: Course): CourseProblem[] {
     if (!card.imageUrl.endsWith('.png')) {
       problems.push(at(`/${card.id}: imageUrl must be a .png`));
     }
+    if (card.soundUrl !== undefined) {
+      if (card.kind !== 'word') problems.push(at(`/${card.id}: soundUrl is only for word cards`));
+      else if (card.soundUrl !== `/sounds/words/${course.id}/${card.id}.mp3`) problems.push(at(`/${card.id}: soundUrl must be /sounds/words/${course.id}/${card.id}.mp3`));
+    }
   }
 
   // Objectives ↔ sentence cards.
@@ -104,7 +108,7 @@ export function validateCourse(course: Course): CourseProblem[] {
   return problems;
 }
 
-/** Filesystem-backed: every card image exists under publicDir (default <cwd>/public). */
+/** Filesystem-backed: every card image (and word sound, when set) exists under publicDir (default <cwd>/public). */
 export function validateCourseAssets(
   course: Course,
   publicDir: string = path.join(process.cwd(), 'public'),
@@ -113,6 +117,9 @@ export function validateCourseAssets(
   for (const card of course.cards) {
     if (!fs.existsSync(path.join(publicDir, card.imageUrl))) {
       problems.push(`${course.id}/${card.id}: image not found at ${card.imageUrl}`);
+    }
+    if (card.soundUrl && !fs.existsSync(path.join(publicDir, card.soundUrl))) {
+      problems.push(`${course.id}/${card.id}: sound not found at ${card.soundUrl}`);
     }
   }
   return problems;

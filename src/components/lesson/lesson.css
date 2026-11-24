@@ -26,6 +26,10 @@
 .p2-parts span { font:600 22px var(--font-en); padding:6px 16px; border-radius:999px; background:rgba(104,66,255,.12); color:#6842FF; white-space:nowrap; }
 .p2-parts em { color:#94A3B8; font-style:normal; }
 .p2-again { margin-top:32px; }
+.p2-again-sound { margin-left:12px; }
+/* Sound quiz: the English stays in the DOM but invisible until answered (same as the battle card). */
+.p2-secret { position:absolute; visibility:hidden; pointer-events:none; }
+.p2-mystery { font:700 min(96px,9cqw)/1 var(--font-en); letter-spacing:.08em; color:#A878FF; }
 .p2-sent { font:600 min(60px,5.6cqw)/1.12 var(--font-en); letter-spacing:-.01em; overflow-wrap:normal; word-break:normal; }
 .p2-sentence-zh { font-size:26px; }
 .p2-ok .p2-pic { box-shadow:0 0 0 6px rgba(45,212,191,.45),0 18px 40px -22px rgba(30,41,59,.45); }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Course } from '@/types/course';
 import type { ToolAction } from '@/types/tools';
-import type { AnswerResult, Classroom, LessonStateName } from '@/lib/voice/classroom';
+import type { AnswerResult, Classroom, LessonStateName, SoundCue } from '@/lib/voice/classroom';
 import { LessonCard } from './LessonCard';
 import { PushToTalkPill } from '@/components/ui/PushToTalkPill';
 import { talkState } from './talkState';
@@ -43,6 +43,9 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
   const collected = useRef(initialCollectedCardIds ?? []);
   // Snapshot taken when the battle starts: what the child owned, which of today's words the monster snatches, and where the battle's answers begin.
   const [fight, setFight] = useState<{ collected: string[]; stolen: string[]; from: number } | null>(null);
+  // Realtime word-card sounds: the latest cue per card and the card a sound quiz hides (the controller decides both).
+  const [cues, setCues] = useState<Record<string, SoundCue['status']>>({});
+  const [hiddenCardId, setHiddenCardId] = useState('');
 
   useEffect(() => {
     const onState = (next: LessonStateName) => setState(next);
@@ -65,7 +68,13 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
     controller.on('actions', onActions);
     const onAnswer = (answer: AnswerResult) => setAnswers((all) => [...all, answer]);
     controller.on('answer-result', onAnswer);
+    const onCue = (cue: SoundCue) => setCues((all) => ({ ...all, [cue.cardId]: cue.status }));
+    const onHidden = ({ cardId, hidden }: { cardId: string; hidden: boolean }) => setHiddenCardId((current) => hidden ? cardId : current === cardId ? '' : current);
+    controller.on('sound-cue', onCue);
+    controller.on('word-hidden', onHidden);
     return () => {
+      controller.off('sound-cue', onCue);
+      controller.off('word-hidden', onHidden);
       controller.off('answer-result', onAnswer);
       controller.off('state', onState);
       controller.off('progress', onProgress);
@@ -104,15 +113,20 @@ export function LessonMandalaV2({ course, controller, initialCardId, initialClea
     if (!canAskTeacher) return;
     void controller.repeatCard(currentCard.id);
   };
+  const soundCue = cues[currentCard.id];
+  const cueing = Object.values(cues).some((status) => status !== 'done');
+  const canReplay = conversation && Boolean(currentCard.soundUrl) && Boolean(controller.replaySound);
 
   if (fight) return <BattleStage course={course} card={currentCard} cardState={cardState} answers={battleAnswers} initialCollectedCardIds={fight.collected} stolenCardIds={fight.stolen}
     paused={state === 'paused'} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher} onBattleChange={onBattleChange}
-    dock={<ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} />} />;
+    dock={<ConversationDock state={state} cue={cueing} onPause={(paused) => { void controller.setPaused?.(paused); }} />} />;
 
   return <section className="p2-stage">
-    <LessonCard card={currentCard} state={cardState} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher} />
+    <LessonCard card={currentCard} state={cardState} onRepeat={handleTeacherRepeat} repeatDisabled={!canAskTeacher}
+      hideEnglish={hiddenCardId === currentCard.id} soundCue={soundCue}
+      onReplaySound={canReplay ? () => controller.replaySound?.(currentCard.id) : undefined} replaySoundDisabled={cueing || state === 'paused'} />
     <div className="p2-dock">{conversation
-      ? <ConversationDock state={state} onPause={(paused) => { void controller.setPaused?.(paused); }} />
+      ? <ConversationDock state={state} cue={cueing} onPause={(paused) => { void controller.setPaused?.(paused); }} />
       : <PushToTalkPill state={talkState(state)} onPress={() => controller.startListening()} onRelease={() => controller.stopListening()} />}</div>
   </section>;
 }

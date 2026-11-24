@@ -14,10 +14,12 @@ const labels: Partial<Record<LessonStateName, [string, string]>> = {
   'quiz-speaking': ['麻吉在说话', '想插话可以直接说'],
   paused: ['麦克风已暂停', '点继续说话接着上课'],
 };
+const CUE_LABEL: [string, string] = ['听一听', '听完再说'];
 
 /** Status for the always-open Realtime conversation. The microphone is never gated by a key; pause is the only control. */
-export function ConversationDock({ state, onPause }: { state: LessonStateName; onPause: (paused: boolean) => void }) {
-  const [label, hint] = labels[state] ?? ['正在连接…', ' '];
+/** `cue`: a word-card sound is waiting or playing; the mic is closed, so the idle state reads 「听一听」 instead of 「正在听」. */
+export function ConversationDock({ state, cue, onPause }: { state: LessonStateName; cue?: boolean; onPause: (paused: boolean) => void }) {
+  const [label, hint] = cue && state === 'awaiting' ? CUE_LABEL : labels[state] ?? ['正在连接…', ' '];
   const live = state in labels;
   const paused = state === 'paused';
   const visual = paused || !live ? 'preparing' : state === 'quiz-speaking' ? 'speaking' : state;

@@ -53,7 +53,9 @@ function echoRule(): Rule {
       const count = (counts.get(card.id) ?? 0) + 1;
       counts.set(card.id, count);
       if (count % 2 === 1 && !context.wrapped && !context.clearedCardIds.includes(card.id)) pending = { count, targetId: card.id,
-        text: `[app] The child has now said ${card.english} correctly ${count} times right after your model. Next, do not ask for another echo on this card: ask once with a cue that does not contain the English word (the Chinese meaning or a situation) and stop to listen. Do this only while this card is on screen. If you have already switched cards, finish teaching the card you have, then use show_card to return to this card before asking. If they cannot recall it, give one different kind of help and one more chance; if it still does not come, leave this word for now, move on to another word and come back to it later. Do not tell the child "先停一下" or "待会儿再练"; just show the next card.` };
+        text: card.soundUrl
+          ? `[app] The child has now said ${card.english} correctly ${count} times right after your model. To ask for recall, finish your current card, then give one short lead-in without the answer in either language and call play_sound for ${card.id}. Wait for the child.`
+          : `[app] The child has now said ${card.english} correctly ${count} times right after your model. Next, do not ask for another echo on this card: ask once with a cue that does not contain the English word (the Chinese meaning or a situation) and stop to listen. Do this only while this card is on screen. If you have already switched cards, finish teaching the card you have, then use show_card to return to this card before asking. If they cannot recall it, give one different kind of help and one more chance; if it still does not come, leave this word for now, move on to another word and come back to it later. Do not tell the child "先停一下" or "待会儿再练"; just show the next card.` };
     },
     take(context) {
       const note = pending; pending = null;

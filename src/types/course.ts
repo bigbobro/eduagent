@@ -6,6 +6,8 @@ export interface WordCard {
   kind: 'word' | 'sentence';
   drillParts: string[];
   asrAliases?: string[];
+  /** Realtime classroom only: this word's own sound (`/sounds/words/<course>/<card>.mp3`), played when the card first appears and in sound quizzes. Leave unset when no sound points to this one word. */
+  soundUrl?: string;
   difficulty?: number;
   tags?: string[];
 }

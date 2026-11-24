@@ -19,6 +19,8 @@ export interface TeachingReceipt {
   cardId: string;
   quiz?: QuizResult;
   assessment?: RealtimeAssessment;
+  /** Set by the conversation on a card receipt that comes with the card's own sound (see receiptSchema). */
+  cue?: 'sound' | 'sound-quiz';
 }
 export interface InputTurn {
   id: string; targetId: string; kind: 'audio' | 'pick';

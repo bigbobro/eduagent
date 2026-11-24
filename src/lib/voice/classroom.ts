@@ -49,7 +49,12 @@ export interface ClassroomEvents {
   'sitting-wrap-up': undefined;
   /** Realtime only: this sitting is over but the course is not complete; progress is saved. */
   'sitting-ended': undefined;
+  /** Realtime only: a word card's own sound. `waiting` until the teacher is idle (and not paused), `playing`, then `done` (also when skipped). */
+  'sound-cue': SoundCue;
+  /** Realtime only: a sound quiz hides this card's English (and drill parts) until the child answers it correctly or the teacher shows the card again. */
+  'word-hidden': { cardId: string; hidden: boolean };
 }
+export interface SoundCue { cardId: string; status: 'waiting' | 'playing' | 'done' }
 
 /** Teaching intentions shared by classroom views. Provider prompts and judging stay inside each mode. */
 export interface Classroom {
@@ -76,6 +81,8 @@ export interface Classroom {
   /** Conversation mode: what the view actually rendered, reported after commit so speech binds to the visible target. */
   presented?(target: PresentedTarget): void;
   setPaused?(paused: boolean): Promise<void>;
+  /** Conversation mode: replay a card's own sound locally (「再听一遍」); gated like any sound cue, the model is not told. */
+  replaySound?(cardId: string): void;
 }
 
 export function findQuiz(course: Course, quizId: string) {
