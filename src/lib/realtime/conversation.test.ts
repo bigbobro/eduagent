@@ -53,7 +53,7 @@ const outputs = () => sent.filter((e) => e.type === 'conversation.item.create' &
 /** Teacher and app responses; the assessor's out-of-band requests are listed by assessRequests(). */
 const creates = () => sent.filter((e) => e.type === 'response.create' && e.response.conversation !== 'none');
 const states = () => sent.filter((e) => e.type === 'conversation.item.create' && e.item.type === 'message' && e.item.content[0].text.startsWith('[app] State:')).map((e) => e.item.content[0].text as string);
-const appNotes = () => sent.filter((e) => e.type === 'conversation.item.create' && e.item.type === 'message' && /^\[app\] (Heard:|The child's last 3 messages|The child has now said|The child has tried)/.test(e.item.content[0].text)).map((e) => e.item.content[0].text as string);
+const appNotes = () => sent.filter((e) => e.type === 'conversation.item.create' && e.item.type === 'message' && /^\[app\] (Heard:|The child's last 3 messages|The child has now said|The child has tried|The child has answered)/.test(e.item.content[0].text)).map((e) => e.item.content[0].text as string);
 const attempts = (word: string) => session.memory.wordPerformance.get(word)?.attempts ?? 0;
 
 describe('natural conversation input binding and tool execution', () => {
@@ -1091,6 +1091,119 @@ describe('correct echo reminders', () => {
   });
 });
 
+const doneNotes = () => appNotes().filter(text => text.startsWith('[app] The child has answered'));
+
+describe('repeated correct card reminders', () => {
+  const attempt = (id: string, result = 'correct', mastered = false) => { speech(id); assessed(id, { result, mastered, next_action: 'retry' }); };
+  const show = (id: string) => conversation.setPresented({ kind: 'card', id });
+  const echoes = () => appNotes().filter(text => text.startsWith('[app] The child has now said'));
+  const onlyLeft = (...ids: string[]) => { session.memory.clearedCardIds = session.course.cards.filter(c => !ids.includes(c.id)).map(c => c.id); };
+  const head = (english: string, count = 3) => `[app] The child has answered ${english} correctly ${count} times in a row. Do not ask for this card again now. `;
+  const tail = ' Never promise to return to a word later unless you do it in this sitting. Do not tell the child "先停一下" or "待会儿再练".';
+  const untriedText = (ids: string[]) => `Next turn, use show_card for one of these unpassed words not tried this sitting and teach it: ${JSON.stringify(ids)}.`;
+  const retryText = (ids: string[]) => `Next turn, use show_card to go back once to one of these words set aside earlier: ${JSON.stringify(ids)}, with a different kind of help than before; use play_sound only if its ID is eligible in State.`;
+  const practiceText = 'Every word left in the course has been tried this sitting and revisited, or none is left: call start_practice now.';
+  const otherCardText = 'This sitting has already covered 6 words. Next turn, use show_card for a DIFFERENT card: another word taught this sitting, for recall without your model, or a course sentence card; not this card.';
+  const sentence = (n = 3) => { show('sentence_apple'); for (let i = 1; i <= n; i++) attempt('sentence' + i); };
+
+  it.each([['sentence_apple', 'This is an apple.'], ['apple', 'apple']])('writes a reminder every third correct answer on the sentence or passed card %s', (id, english) => {
+    session.memory.clearedCardIds = ['apple'];
+    show(id);
+    for (let n = 1; n <= 7; n++) {
+      attempt('try' + n);
+      expect(doneNotes()).toHaveLength(Math.floor(n / 3));
+    }
+    expect(doneNotes()[0]).toContain(head(english, 3)); expect(doneNotes()[1]).toContain(head(english, 6));
+  });
+  it('on a word not yet passed, waits for 6 in a row: the echo note is sent at 3 and the done note is not', () => {
+    for (let n = 1; n <= 3; n++) attempt('echo' + n);
+    expect(echoes().at(-1)).toContain('said apple correctly 3 times'); expect(doneNotes()).toEqual([]);
+    for (let n = 4; n <= 11; n++) {
+      attempt('echo' + n);
+      expect(doneNotes()).toHaveLength(n >= 6 ? 1 : 0);
+    }
+    expect(doneNotes()[0]).toContain(head('apple', 6));
+    attempt('echo12'); expect(doneNotes()).toHaveLength(2); expect(doneNotes()[1]).toContain(head('apple', 12));
+  });
+  it('fires at 3 on a word that passes within the streak', () => {
+    attempt('one'); attempt('two'); attempt('three', 'correct', true);
+    expect(session.memory.clearedCardIds).toContain('apple'); expect(doneNotes()).toHaveLength(1);
+    expect(doneNotes()[0]).toContain(head('apple'));
+  });
+  it.each(['wrong', 'close', 'not_attempt'])('resets a pending streak on %s and on a card change', result => {
+    session.memory.clearedCardIds = ['apple', 'milk'];
+    created('busy');
+    for (let n = 1; n <= 3; n++) attempt('apple' + n);
+    attempt('reset', result); done('busy');
+    attempt('again1'); attempt('again2');
+    show('milk');
+    attempt('milk1'); attempt('milk2'); expect(doneNotes()).toEqual([]);
+    attempt('milk3'); expect(doneNotes()[0]).toContain(head('milk'));
+  });
+  it('A: points to the unpassed words not tried this sitting while fewer than 6 words were tried', () => {
+    onlyLeft('apple', 'banana', 'milk', 'egg');
+    attempt('apple1', 'wrong'); show('milk'); attempt('milk', 'close'); show('apple'); attempt('apple2', 'close');
+    sentence();
+    expect(doneNotes()).toEqual([head('This is an apple.') + untriedText(['banana', 'egg']) + tail]);
+  });
+  it('B: points back to the tried, not yet revisited words', () => {
+    onlyLeft('apple', 'milk');
+    attempt('apple1', 'wrong'); show('milk'); attempt('milk', 'close');
+    sentence();
+    expect(doneNotes()).toEqual([head('This is an apple.') + retryText(['apple', 'milk']) + tail]);
+  });
+  it('B: once 6 words were tried, prefers a return over a new word and never lists the current card', () => {
+    for (const id of ['apple', 'banana', 'bread', 'milk', 'egg', 'rice']) { show(id); attempt(id, 'wrong'); }
+    session.memory.clearedCardIds = ['rice'];
+    show('rice'); for (let n = 1; n <= 3; n++) attempt('rice' + n);
+    expect(doneNotes()).toEqual([head('rice') + retryText(['apple', 'banana', 'bread', 'milk', 'egg']) + tail]);
+    session.memory.clearedCardIds = [];
+    show('egg'); for (let n = 1; n <= 6; n++) attempt('egg' + n);
+    expect(doneNotes()[1]).toBe(head('egg', 6) + retryText(['apple', 'banana', 'bread', 'milk', 'rice']) + tail);
+  });
+  it('C: calls for start_practice once every word left was tried and revisited', () => {
+    onlyLeft('apple', 'milk');
+    attempt('apple1', 'wrong'); show('milk'); attempt('milk1', 'close');
+    show('apple'); attempt('apple2', 'close'); show('milk'); attempt('milk2', 'close');
+    sentence();
+    expect(doneNotes()).toEqual([head('This is an apple.') + practiceText + tail]);
+  });
+  it('C: also when no word is left to pass', () => {
+    onlyLeft();
+    sentence();
+    expect(doneNotes()).toEqual([head('This is an apple.') + practiceText + tail]);
+  });
+  it('D: after 6 words with nothing to return to, asks for a different card instead of new words', () => {
+    const six = ['apple', 'banana', 'bread', 'milk', 'egg', 'rice'];
+    for (let round = 0; round < 2; round++) for (const id of six) { show(id); attempt(`${id}${round}`, 'wrong'); }
+    sentence();
+    expect(doneNotes()).toEqual([head('This is an apple.') + otherCardText + tail]);
+  });
+  it('replays 2026-11-24: bell repeated after harp was set aside points back to harp, then to practice once harp was revisited', () => {
+    session.course = instrumentsCourse; onlyLeft('bell', 'harp');
+    show('harp'); attempt('hop1', 'close'); attempt('hop2', 'close');
+    show('bell'); attempt('bell1', 'correct', true); attempt('bell2'); attempt('bell3');
+    expect(doneNotes()).toEqual([head('bell') + retryText(['harp']) + tail]);
+    show('harp'); attempt('hop3', 'close');
+    show('bell'); for (let n = 4; n <= 6; n++) attempt('bell' + n);
+    expect(doneNotes()[1]).toBe(head('bell') + practiceText + tail);
+  });
+  it('ignores three correct results for a card that has already left the screen', () => {
+    session.memory.clearedCardIds = ['apple'];
+    for (let n = 1; n <= 3; n++) speech('late' + n);
+    show('milk');
+    for (let n = 1; n <= 3; n++) assessed('late' + n);
+    expect(doneNotes()).toEqual([]);
+  });
+  it('drops a queued reminder if practice starts before writing', () => {
+    session.memory.clearedCardIds = ['apple'];
+    created('busy');
+    for (let n = 1; n <= 3; n++) attempt('card' + n);
+    changePhase(session, 'reinforcement'); done('busy');
+    expect(doneNotes()).toEqual([]);
+  });
+});
+
 describe('reminder boundaries after verification', () => {
   const echoes = () => appNotes().filter((text) => text.startsWith('[app] The child has now said'));
   const stuck = () => appNotes().filter((text) => text.startsWith('[app] The child has tried'));
@@ -1110,14 +1223,20 @@ describe('reminder boundaries after verification', () => {
     if (game) { created('battle-card'); done('battle-card', [call('show_card', { card_id: 'apple' })]); }
     attempt('first'); attempt('second'); attempt('third');
     expect(attempts('apple')).toBe(3); expect(session.memory.clearedCardIds).toEqual([]);
-    expect(echoes()).toEqual([]);
+    expect(echoes()).toEqual([]); expect(doneNotes()).toEqual([]);
   });
   it.each([false, true])('drops a queued echo reminder when the time check fires before writing (game=%s)', (game) => {
-    start(game); created('busy'); attempt('echo');
+    start(game); created('busy'); attempt('echo'); attempt('second'); attempt('third');
     expect(echoes()).toEqual([]);
     vi.advanceTimersByTime(10); done('busy');
     expect(appNotes().some((text) => text.startsWith('[app] Heard:'))).toBe(true);
-    expect(echoes()).toEqual([]); expect(attempts('apple')).toBe(1);
+    expect(echoes()).toEqual([]); expect(doneNotes()).toEqual([]); expect(attempts('apple')).toBe(3);
+  });
+  it('drops a queued repeated-correct reminder on a passed card when the time check fires before writing', () => {
+    start(); session.memory.clearedCardIds = ['apple']; created('busy');
+    attempt('first'); attempt('second'); attempt('third');
+    vi.advanceTimersByTime(10); done('busy');
+    expect(appNotes().some((text) => text.startsWith('[app] Heard:'))).toBe(true); expect(doneNotes()).toEqual([]);
   });
   it('drops a queued stuck reminder when a correct echo resets the streak before writing', () => {
     start(); created('busy');
@@ -1356,8 +1475,11 @@ describe('stuck word reminders', () => {
       created('busy'); attempt('echo1', 'correct'); attempt('echo2', 'correct');
       for (let n = 1; n <= 4; n++) attempt(`private${n}`);
       for (let n = 1; n <= 3; n++) attempt(`chat${n}`, 'not_attempt');
+      conversation.setPresented({ kind: 'card', id: 'sentence_milk' });
+      for (let n = 1; n <= 3; n++) attempt('milk' + n, 'correct');
       expect(stuck()).toEqual([]); done('busy');
-      expect(appNotes().map((text) => text.split(':')[0])).toHaveLength(4);
+      expect(appNotes()).toHaveLength(5); expect(appNotes()[4]).toContain('answered I like milk. correctly 3 times');
+      expect(info.mock.calls.at(-1)).toEqual(['app note', { module: 'realtime-conversation', sessionId: session.id, kind: 'done', count: 3 }]);
       expect(appNotes()[2]).toContain('The child has now said'); expect(appNotes()[3]).toContain('The child has tried');
       expect(info.mock.calls.filter(([message, fields]) => message === 'app note' && fields?.kind === 'stuck')).toEqual([
         ['app note', { module: 'realtime-conversation', sessionId: session.id, kind: 'stuck', count: 4 }],

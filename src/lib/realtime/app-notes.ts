@@ -2,11 +2,12 @@ import type { WordCard } from '@/types/course';
 import type { assessorReportSchema } from '@/lib/realtime-protocol';
 
 type Report = ReturnType<typeof assessorReportSchema.parse>;
-type Context = { wrapped: boolean; clearedCardIds: string[] };
-type Note = { kind: 'verdict' | 'mismatch' | 'echo' | 'stuck'; text: string; log: { result: Report['result'] } | { count: number } };
+type Context = { wrapped: boolean; clearedCardIds: string[]; interactive: boolean; cards: readonly WordCard[] };
+type Note = { kind: 'verdict' | 'mismatch' | 'echo' | 'stuck' | 'done'; text: string; log: { result: Report['result'] } | { count: number } };
 
 type Pending = { text: string; count: number; targetId: string };
 interface Rule {
+  presented?(id: string): void;
   report?(card: WordCard, report: Report): void;
   saved?(card: WordCard, report: Report, context: Context): void;
   take(context: Context): Note | null;
@@ -84,7 +85,61 @@ function stuckRule(): Rule {
   };
 }
 
+/** Upper end of SITTING's "about 4-6 new words": past it the done note stops pushing new words. */
+const MAX_SITTING_WORDS = 6;
+
+function doneRule(): Rule {
+  const tried = new Set<string>();
+  const revisited = new Set<string>();
+  let targetId = '';
+  let shownId = '';
+  let lastTriedId = '';
+  let count = 0;
+  let pending: { card: WordCard; count: number } | null = null;
+  const reset = (id: string) => {
+    targetId = id;
+    count = 0;
+    pending = null;
+  };
+  return {
+    presented(id) {
+      shownId = id;
+      if (id !== targetId) reset(id);
+    },
+    report(card, report) { if (card.id !== targetId || report.result !== 'correct') reset(card.id); },
+    saved(card, report, context) {
+      if (!context.interactive || context.wrapped) return;
+      if (card.kind === 'word') {
+        if (lastTriedId !== card.id && tried.has(card.id)) revisited.add(card.id);
+        tried.add(card.id);
+      }
+      lastTriedId = card.id;
+      if (report.result !== 'correct' || (shownId && shownId !== card.id)) return;
+      count++;
+      if (count % 3 === 0) pending = { card, count };
+    },
+    take(context) {
+      const note = pending; pending = null;
+      if (!note || !context.interactive || context.wrapped) return null;
+      // On an unpassed word, 3 in a row are usually echoes: the echo note asks for recall on this card, so done waits for 6.
+      if (note.card.kind === 'word' && !context.clearedCardIds.includes(note.card.id) && note.count % 6 !== 0) return null;
+      const remaining = context.cards.filter(card => card.kind === 'word' && !context.clearedCardIds.includes(card.id)).map(card => card.id);
+      const untried = remaining.filter(id => !tried.has(id));
+      const retry = remaining.filter(id => tried.has(id) && id !== note.card.id && !revisited.has(id));
+      const next = untried.length > 0 && tried.size < MAX_SITTING_WORDS
+        ? `Next turn, use show_card for one of these unpassed words not tried this sitting and teach it: ${JSON.stringify(untried)}.`
+        : retry.length > 0
+          ? `Next turn, use show_card to go back once to one of these words set aside earlier: ${JSON.stringify(retry)}, with a different kind of help than before; use play_sound only if its ID is eligible in State.`
+          : untried.length === 0
+            ? 'Every word left in the course has been tried this sitting and revisited, or none is left: call start_practice now.'
+            : `This sitting has already covered ${MAX_SITTING_WORDS} words. Next turn, use show_card for a DIFFERENT card: another word taught this sitting, for recall without your model, or a course sentence card; not this card.`;
+      return { kind: 'done', log: { count: note.count },
+        text: `[app] The child has answered ${note.card.english} correctly ${note.count} times in a row. Do not ask for this card again now. ${next} Never promise to return to a word later unless you do it in this sitting. Do not tell the child "先停一下" or "待会儿再练".` };
+    },
+  };
+}
+
 /** Send order is part of the provider-visible contract. */
 export function createAppNoteRules(): Rule[] {
-  return [verdictRule(), mismatchRule(), echoRule(), stuckRule()];
+  return [verdictRule(), mismatchRule(), echoRule(), stuckRule(), doneRule()];
 }

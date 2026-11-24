@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { getCourseById } from '../src/data/courses';
+import { Database } from '../src/lib/db/sqlite';
 import type { Course } from '../src/types/course';
 const electronExecutable = createRequire(import.meta.url)('electron') as string;
 const args = process.argv.slice(2);
@@ -59,7 +60,14 @@ async function main() {
   const speechSignals: Array<{ phase: string; t: number; voicedMs?: number }> = [];
   const injections: Array<{ label: string; t0: number; t1: number }> = [];
   let sessionId = ''; let quizId = ''; let endStatus = 0;
+  let guardDb: Database | undefined;
+  let currentTarget = course.cards[0].id;
+  let lessonStarted = 0;
   try {
+    if (live && args.includes('--full')) {
+      guardDb = new Database(option('--db', process.env.DATABASE_PATH || './db/eduagent.db'), { readonly: true });
+      if (!guardDb.prepare('SELECT 1 FROM learners WHERE id = ?').get(learner.id)) throw new Error('Live full smoke needs --db pointing to the test server database');
+    }
     const context = desktop ? desktop.context() : await browser!.newContext({ permissions: ['microphone'], viewport: { width: 1100, height: 720 } });
     const page = desktop ? await desktop.firstWindow() : await context.newPage();
     page.on('pageerror', (error) => errors.push(error.message));
@@ -69,6 +77,8 @@ async function main() {
       if (!req.url().endsWith('/api/realtime')) return;
       const body = req.postDataJSON();
       if (body.action === 'speech') { speechSignals.push({ phase: body.phase, t: Date.now(), voicedMs: body.voicedMs }); return; }
+      if (body.action === 'start') lessonStarted = Date.now();
+      if (body.action === 'presented') currentTarget = body.target.id;
       if (body.action === 'present-quiz') quizId = body.quizId;
       if (body.action !== 'presented') requests.push({ action: body.action, quizId: body.quizId, target: body.target });
     });
@@ -212,7 +222,9 @@ async function main() {
     } else await quiet('opening');
     const first = cardOf(await hero()); if (!first) throw new Error('No displayed card');
     const other = course.cards.find((c) => c.kind === 'word' && c.id !== first.id)!;
-    if (live) await page.waitForTimeout(1200);
+    // A card sound closes the mic in every mode: a request spoken over the opening card's sound would be lost.
+    if (first.kind === 'word' && first.soundUrl) await quiet('opening sound');
+    else if (live) await page.waitForTimeout(1200);
     const switchStart = Date.now();
     await speak({ kind: 'request', cardId: other.id }, clip(`request_${other.id}`, `${other.chinese}那个再讲一下`, 'Tingting'));
     await until(`card switched to ${other.english}`, async () => await hero() === other.english, 30000);
@@ -325,7 +337,22 @@ async function main() {
     }
     if (loops) results.subtitles = await page.locator('.p2-message').allTextContents();
     const finishCourse = async () => {
+      let cursor = 0;
+      let lastTarget = '';
+      let correct = 0;
+      const assessments = guardDb?.prepare(`SELECT id, tools, json_extract(text, '$.result') AS result
+        FROM realtime_responses WHERE lesson_id = ? AND id > ? AND kind = 'assess' AND status = 'completed'
+        AND json_valid(text) ORDER BY id`);
       for (let i = 0; i < 80; i++) {
+        if (assessments) {
+          for (const row of assessments.all(sessionId, cursor) as Array<{ id: number; tools: string; result: string }>) {
+            cursor = row.id;
+            const target = row.tools.match(/^record_assessment\(([^)]+)\)$/)?.[1];
+            correct = target && row.result === 'correct' ? (target === lastTarget ? correct + 1 : 1) : 0;
+            lastTarget = target ?? '';
+            if (correct > 6) throw new Error(`Live full lesson stalled on ${target}: ${correct} consecutive correct assessments`);
+          }
+        }
         if (await page.getByText('课堂完成', { exact: true }).count()) break;
         const choices = page.locator('.p2-options button');
         if (await choices.count()) {
@@ -426,7 +453,14 @@ async function main() {
       await page.screenshot({ path: path.join(out, 'resumed.png') });
     }
     if (args.includes('--full') || (args.includes('--sitting') && !live)) {
-      await finishCourse();
+      if (guardDb) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([finishCourse(), new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`Live full lesson exceeded 12 minutes on ${currentTarget}`)), lessonStarted + 12 * 60_000 - Date.now());
+          })]);
+        } finally { clearTimeout(timer); }
+      } else await finishCourse();
     } else if (!args.includes('--sitting')) {
       const end = page.waitForResponse((response) => response.url().endsWith('/api/realtime') && response.request().postDataJSON()?.action === 'end');
       await page.getByRole('button', { name: '下课', exact: true }).click();
@@ -470,7 +504,7 @@ async function main() {
     log(`passed; evidence ${out}`);
   } finally {
     writeFileSync(path.join(out, 'results.json'), JSON.stringify({ ...results, errors, sessionId }, null, 2));
-    await desktop?.close(); await browser?.close();
+    await desktop?.close(); await browser?.close(); guardDb?.close();
   }
 }
 
